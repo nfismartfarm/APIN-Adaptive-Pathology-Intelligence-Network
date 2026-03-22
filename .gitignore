@@ -1,0 +1,26 @@
+# Data (gigabytes — never commit)
+data/raw/
+data/processed/
+data/kerala/
+data/plantdoc/
+data/metadata/*.csv
+cache/
+
+# Model weights
+models/*.pt
+models/checkpoints/
+
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Feedback database
+feedback.db
+
+# Pipeline state
+.pipeline_progress.json
+pipeline_failures.log

@@ -1,0 +1,180 @@
+{
+  "okra_yvmv": {
+    "full_name": "Yellow Vein Mosaic Virus",
+    "cause": "Begomovirus transmitted by whitefly Bemisia tabaci. Spreads via infected transplants and volunteer plants. No seed transmission.",
+    "symptoms": "Bright yellow vein network on green leaf background. Mosaic yellow-green patterning. Leaf curling upward. Stunted growth and distorted pods in severe cases.",
+    "treatment": [
+      "Remove and destroy all infected plants immediately — no chemical cure for viral disease.",
+      "Control whitefly vector: spray imidacloprid 17.8 SL at 0.3 ml per litre or thiamethoxam 25 WG at 0.3 g per litre.",
+      "Use yellow sticky traps (30 per hectare) to monitor and reduce whitefly populations.",
+      "Apply neem oil at 3 ml per litre as supplementary whitefly deterrent."
+    ],
+    "prevention": [
+      "Use resistant varieties: Arka Anamika, Parbhani Kranti, Punjab Padmini.",
+      "Use virus-free certified planting material. Do not use seeds from infected plants.",
+      "Apply reflective silver mulch to deter whitefly landing.",
+      "Maintain 2-row border of maize or sorghum as windbreak to reduce whitefly entry."
+    ],
+    "urgency": "High",
+    "urgency_reason": "No cure. Spreads rapidly via whitefly. Remove infected plants and spray within 24 hours to protect adjacent plants."
+  },
+  "okra_powdery_mildew": {
+    "full_name": "Powdery Mildew (Okra)",
+    "cause": "Fungus Erysiphe cichoracearum. Favoured by warm dry days (25-30°C) with cool humid nights. Unlike most fungi, does not need free water on leaves.",
+    "symptoms": "White-to-grey powdery coating on upper leaf surface. Affected leaves turn yellow then brown. Severe infections cause premature leaf drop and stunted fruit development.",
+    "treatment": [
+      "Apply wettable sulphur 80 WP at 2.5 g per litre at first white patches. Do NOT spray when temperature exceeds 35°C — phytotoxicity risk.",
+      "Use hexaconazole 5 EC at 1 ml per litre for systemic control.",
+      "Triadimefon 25 WP at 0.5 g per litre as alternative systemic fungicide.",
+      "Spray coverage must reach all leaf surfaces including undersides."
+    ],
+    "prevention": [
+      "Maintain adequate plant spacing to promote air circulation.",
+      "Avoid excess nitrogen fertilisation — succulent growth is more susceptible.",
+      "Remove heavily infected leaves before spraying to reduce spore load."
+    ],
+    "urgency": "Medium",
+    "urgency_reason": "Spreads rapidly in warm dry conditions. Treat within 3-5 days of first symptoms."
+  },
+  "okra_cercospora": {
+    "full_name": "Cercospora Leaf Spot",
+    "cause": "Fungus Cercospora abelmoschi. Spreads via airborne conidia. Favoured by warm humid weather (25-30°C, >80% humidity). Overwinters in infected crop debris.",
+    "symptoms": "Circular brown spots 3-10 mm diameter with grey-white centre. Distinct yellow halo around each spot. Severe infections cause large necrotic areas and defoliation.",
+    "treatment": [
+      "Spray mancozeb 75 WP at 2.5 g per litre every 7-10 days from first symptoms.",
+      "Copper oxychloride 50 WP at 3 g per litre as alternative contact fungicide.",
+      "Carbendazim 50 WP at 0.5 g per litre for systemic control of severe infections.",
+      "Remove and destroy infected leaves before spraying."
+    ],
+    "prevention": [
+      "Collect and destroy all crop debris after harvest — do NOT incorporate into soil.",
+      "Treat seeds with thiram 75 WS at 3 g per kg before sowing.",
+      "Maintain 3-year crop rotation avoiding okra and other malvaceous crops.",
+      "Avoid overhead irrigation — use drip to keep foliage dry."
+    ],
+    "urgency": "Medium",
+    "urgency_reason": "Spreads rapidly in humid conditions. Treat within 3-5 days."
+  },
+  "okra_enation": {
+    "full_name": "Enation Leaf Curl",
+    "cause": "Begomovirus complex, different strains from YVMV but also transmitted by whitefly Bemisia tabaci. Can co-infect with YVMV.",
+    "symptoms": "Severe upward curling and rolling of leaves. Enations (outgrowths) on underside of leaf veins — feel like small bumps when running finger along vein. Vein swelling. Leaf becomes leathery. Severely stunted plant.",
+    "treatment": [
+      "Remove and destroy infected plants. No viral cure.",
+      "Spray imidacloprid 17.8 SL at 0.3 ml per litre to control whitefly vector.",
+      "Apply thiamethoxam 25 WG at 0.3 g per litre as whitefly alternative.",
+      "Use spirotetramat 150 OD at 0.75 ml per litre for systemic whitefly control."
+    ],
+    "prevention": [
+      "Use tolerant varieties where available.",
+      "Border rows of tall non-host crops (maize, jowar) reduce whitefly entry.",
+      "Install 50-mesh insect-proof net on nursery beds.",
+      "Remove volunteer okra plants from field margins — they act as virus reservoirs."
+    ],
+    "urgency": "High",
+    "urgency_reason": "No cure. Severe stunting if not managed early. Remove infected plants and control whitefly immediately."
+  },
+  "okra_healthy": {
+    "full_name": "Healthy Okra Leaf",
+    "cause": "No disease detected.",
+    "symptoms": "No visible disease symptoms. Normal uniform green colour. No spots, curl, or lesions.",
+    "treatment": ["No treatment required. The leaf appears healthy."],
+    "prevention": [
+      "Continue monitoring every 5-7 days.",
+      "Maintain balanced fertilisation — avoid excess nitrogen.",
+      "Keep field weed-free to reduce whitefly and aphid habitat."
+    ],
+    "urgency": "Low",
+    "urgency_reason": "No disease detected. Routine monitoring recommended."
+  },
+  "brassica_black_rot": {
+    "full_name": "Black Rot",
+    "cause": "Bacterium Xanthomonas campestris pv. campestris. Enters through leaf margin water pores and wounds. Spread by infected seeds, rain splash, contaminated tools.",
+    "symptoms": "V-shaped yellow-to-brown lesions pointing inward from leaf margins, following vein pattern. Veins inside lesion turn brown-to-black. Severe cases cause whole-leaf collapse.",
+    "treatment": [
+      "Remove and destroy all infected plant material. Do NOT compost.",
+      "Spray copper oxychloride 50 WP at 3 g per litre every 7 days.",
+      "Use streptomycin sulphate 90 SP at 200 ppm for severe infections.",
+      "Do not work in the field when plants are wet."
+    ],
+    "prevention": [
+      "Use certified black-rot-free seeds. Treat seeds with hot water at 50°C for exactly 30 minutes.",
+      "Rotate brassicas away from same plot for at least 2 years.",
+      "Ensure field drainage — the bacterium thrives in waterlogged conditions.",
+      "Control cabbage aphids and other insects that create entry wounds."
+    ],
+    "urgency": "High",
+    "urgency_reason": "Spreads rapidly through rain splash and contaminated tools. Remove infected plants and spray within 24 hours."
+  },
+  "brassica_downy_mildew": {
+    "full_name": "Downy Mildew (Brassica)",
+    "cause": "Oomycete Hyaloperonospora parasitica. Favoured by cool (15-20°C) humid conditions with free moisture on leaves.",
+    "symptoms": "Irregular yellow patches on upper leaf surface. White-to-grey downy sporulation on underside directly below yellow areas. Young plants may show severe distortion.",
+    "treatment": [
+      "Apply metalaxyl + mancozeb (Ridomil Gold MZ) at 2.5 g per litre at first symptoms.",
+      "Use cymoxanil + mancozeb (Curzate M8) at 2 g per litre as alternative.",
+      "Copper hydroxide at 3 g per litre for early-stage control.",
+      "Remove heavily infected outer leaves before spraying."
+    ],
+    "prevention": [
+      "Use resistant brassica varieties where available.",
+      "Switch to drip irrigation — overhead watering maintains leaf wetness needed for sporulation.",
+      "Maintain adequate plant spacing.",
+      "Apply preventive copper spray at transplanting during cool wet seasons."
+    ],
+    "urgency": "Medium",
+    "urgency_reason": "Spreads rapidly in cool wet weather. Treat within 3-5 days."
+  },
+  "brassica_alternaria": {
+    "full_name": "Alternaria Leaf Spot (Dark Leaf Spot)",
+    "cause": "Fungi Alternaria brassicicola and Alternaria brassicae. Spread by airborne conidia during warm humid conditions.",
+    "symptoms": "Dark brown-to-black circular spots with concentric rings (target-board pattern), yellow halo around spots. Heavy infections cause holes and premature defoliation.",
+    "treatment": [
+      "Apply mancozeb 75 WP at 2.5 g per litre every 7-10 days from first appearance.",
+      "Use iprodione 50 WP at 1 g per litre for systemic control of severe infections.",
+      "Chlorothalonil 75 WP at 2 g per litre as alternative contact fungicide.",
+      "Ensure spray reaches leaf undersides where spores germinate."
+    ],
+    "prevention": [
+      "Treat seeds with thiram 75 WS at 3 g per kg before sowing.",
+      "Rotate brassicas for 2 years after an Alternaria outbreak.",
+      "Avoid excessive plant density.",
+      "Apply preventive spray at bud formation stage during high-risk seasons."
+    ],
+    "urgency": "Medium",
+    "urgency_reason": "Spreads in warm humid weather. Treat within 3-5 days to prevent defoliation."
+  },
+  "brassica_clubroot": {
+    "full_name": "Clubroot",
+    "cause": "Obligate soil-borne parasite Plasmodiophora brassicae. Resting spores survive in soil for up to 20 years.",
+    "symptoms": "Above-ground only: wilting during warm afternoons despite adequate soil moisture, progressive yellowing from lower leaves, stunted growth. Uprooting shows swollen club-shaped root galls.",
+    "treatment": [
+      "No cure once infected. Remove and destroy ALL infected plants including root material.",
+      "Do NOT compost infected roots — spores survive composting.",
+      "Apply agricultural lime to raise soil pH to 7.2 or above.",
+      "Apply calcium cyanamide at 200 kg per hectare as combined fertiliser and soil treatment."
+    ],
+    "prevention": [
+      "Quarantine — do not move soil, tools, footwear, or plants from infected to uninfected fields.",
+      "Use resistant varieties: Kilaton F1, Clapton F1, Crispus F1.",
+      "Minimum 4-5 year crop rotation without brassicas.",
+      "Test and maintain soil pH above 7.0 before every brassica crop.",
+      "Dip transplant roots in thiram suspension (3 g per litre) for 15 minutes before planting."
+    ],
+    "urgency": "High",
+    "urgency_reason": "Persistent soil pathogen with 20-year spore survival. Implement strict quarantine immediately."
+  },
+  "brassica_healthy": {
+    "full_name": "Healthy Brassica Leaf",
+    "cause": "No disease detected.",
+    "symptoms": "No visible disease symptoms. Normal leaf colour and structure.",
+    "treatment": ["No treatment required. The leaf appears healthy."],
+    "prevention": [
+      "Continue monitoring every 7-10 days.",
+      "Apply preventive copper spray at start of monsoon/rainy season.",
+      "Ensure adequate field drainage."
+    ],
+    "urgency": "Low",
+    "urgency_reason": "No disease detected. Routine monitoring recommended."
+  }
+}
