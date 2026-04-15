@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plant Disease Detector — Kerala</title>
+<link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+<header>
+  <h1>Plant Disease Detector</h1>
+  <p class="subtitle">Okra &amp; Broccoli — Kerala</p>
+</header>
+
+<main>
+  <section id="upload-section">
+    <div id="upload-area" tabindex="0" role="button"
+         aria-label="Click or drag to upload a leaf image">
+      <span id="upload-icon">🌿</span>
+      <p id="upload-text">Click or drag a leaf photo here</p>
+      <p class="hint">JPEG / PNG / WebP · max 10 MB</p>
+    </div>
+    <input type="file" id="file-input"
+           accept="image/jpeg,image/png,image/webp"
+           style="display:none" aria-label="File upload">
+  </section>
+
+  <section id="preview-section" hidden>
+    <img id="preview-img" alt="Uploaded leaf preview">
+    <button id="change-btn" class="btn-secondary">Change photo</button>
+  </section>
+
+  <section id="result-section" hidden>
+    <div id="result-card">
+      <div id="heatmap-container">
+        <img id="heatmap-img" alt="Grad-CAM disease heatmap">
+      </div>
+
+      <div id="badges">
+        <span id="crop-badge"     class="badge badge-crop"></span>
+        <span id="severity-badge" class="badge"></span>
+        <span id="urgency-badge"  class="badge"></span>
+        <span id="ood-badge"      class="badge badge-ood" hidden>Low confidence</span>
+      </div>
+
+      <h2 id="disease-heading"></h2>
+      <p  id="confidence-text"></p>
+      <div id="confidence-bar-wrap">
+        <div id="confidence-bar"></div>
+      </div>
+
+      <div id="probs-section" style="margin:16px 0;padding:14px;background:#f0f4f0;border-radius:10px;border:1px solid #d1e7dd">
+        <h3 style="font-size:0.85rem;color:#2d6a4f;margin-bottom:10px;font-weight:600">All Disease Probabilities</h3>
+        <div id="probs-container"></div>
+      </div>
+
+      <details id="treatment-details">
+        <summary>Treatment</summary>
+        <ul id="treatment-list"></ul>
+      </details>
+
+      <details id="prevention-details">
+        <summary>Prevention</summary>
+        <ul id="prevention-list"></ul>
+      </details>
+
+      <section id="feedback-section">
+        <p>Was this diagnosis correct?</p>
+        <!-- [FIX GAP 49,50] Both buttons have IDs -->
+        <button id="thumbs-up-btn"   class="btn-feedback" aria-label="Yes, correct">👍</button>
+        <button id="thumbs-down-btn" class="btn-feedback" aria-label="No, incorrect">👎</button>
+        <div id="correction-form" hidden>
+          <select id="correction-select" aria-label="Correct diagnosis">
+            <option value="">— Select correct class —</option>
+          </select>
+          <button id="submit-correction-btn" class="btn-primary">Submit correction</button>
+        </div>
+        <p id="feedback-thanks" hidden>Thank you for your feedback!</p>
+      </section>
+    </div>
+  </section>
+
+  <div id="spinner" hidden aria-live="polite">
+    <div class="spinner-ring"></div>
+    <p>Analysing leaf…</p>
+  </div>
+
+  <div id="error-box" hidden role="alert"></div>
+</main>
+
+<script src="/static/app.js?v=2"></script>
+</body>
+</html>

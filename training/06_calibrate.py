@@ -12,22 +12,28 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 except ImportError:
     pass
 
-if not os.environ.get('WANDB_API_KEY'):
-    os.environ.setdefault('WANDB_MODE', 'offline')
+# wandb disabled on Windows (service port timeout)
+os.environ['WANDB_MODE'] = 'disabled'
 
 import torch
 import torch.nn as nn
 import numpy as np
 import pandas as pd
-import wandb
+
+# wandb stub to avoid import hanging
+class _WandbStub:
+    def init(self, *a, **kw): pass
+    def log(self, *a, **kw): pass
+    def finish(self, *a, **kw): pass
+wandb = _WandbStub()
 
 from app.config import (
     DEVICE, BEST_MODEL, TEMP_PATH, TEMP_INIT, SOURCE_MAP, SEV_LABELS,
-    CLASS_TO_IDX, CROP_FROM_IDX, MODELS,
+    CLASS_TO_IDX, CROP_FROM_IDX, MODELS, NUM_CLASSES,
     WANDB_PROJECT, WANDB_CONFIG
 )
 from app.model import load_model_for_inference
@@ -84,51 +90,65 @@ def calibrate():
     ece_before = compute_ece(d_probs_before, d_labels.numpy())
     print(f"ECE before calibration: {ece_before:.4f}")
 
-    # Fit T_disease using LBFGS
-    T_disease = nn.Parameter(torch.tensor(TEMP_INIT))
-    optimizer_d = torch.optim.LBFGS([T_disease], lr=0.01, max_iter=50)
+    # Fit temperatures using LBFGS in log-space to guarantee T > 0.
+    # Parameterize as log_T, then T = exp(log_T). Since exp() > 0 always,
+    # the optimizer cannot produce negative temperatures.
+    # Clamp final T to [0.1, 10.0] to prevent extreme values.
     bce = nn.BCEWithLogitsLoss()
+    ce  = nn.CrossEntropyLoss()
+    log_init = float(np.log(TEMP_INIT))
+
+    # Fit T_disease
+    log_T_disease = nn.Parameter(torch.tensor(log_init))
+    optimizer_d = torch.optim.LBFGS([log_T_disease], lr=0.01, max_iter=50)
 
     def closure_d():
         optimizer_d.zero_grad()
-        loss = bce(d_logits / T_disease, d_labels.float())
+        T = torch.exp(log_T_disease)
+        loss = bce(d_logits / T, d_labels.float())
         loss.backward()
         return loss
 
     optimizer_d.step(closure_d)
 
     # Fit T_crop
-    T_crop = nn.Parameter(torch.tensor(TEMP_INIT))
-    optimizer_c = torch.optim.LBFGS([T_crop], lr=0.01, max_iter=50)
-    ce = nn.CrossEntropyLoss()
+    log_T_crop = nn.Parameter(torch.tensor(log_init))
+    optimizer_c = torch.optim.LBFGS([log_T_crop], lr=0.01, max_iter=50)
 
     def closure_c():
         optimizer_c.zero_grad()
-        loss = ce(c_logits / T_crop, c_labels)
+        T = torch.exp(log_T_crop)
+        loss = ce(c_logits / T, c_labels)
         loss.backward()
         return loss
 
     optimizer_c.step(closure_c)
 
     # Fit T_severity
-    T_severity = nn.Parameter(torch.tensor(TEMP_INIT))
-    optimizer_s = torch.optim.LBFGS([T_severity], lr=0.01, max_iter=50)
+    log_T_severity = nn.Parameter(torch.tensor(log_init))
+    optimizer_s = torch.optim.LBFGS([log_T_severity], lr=0.01, max_iter=50)
 
     def closure_s():
         optimizer_s.zero_grad()
-        loss = ce(s_logits / T_severity, s_labels)
+        T = torch.exp(log_T_severity)
+        loss = ce(s_logits / T, s_labels)
         loss.backward()
         return loss
 
     optimizer_s.step(closure_s)
 
+    # Convert from log-space and clamp to safe range [0.1, 10.0]
+    T_disease_val  = torch.exp(log_T_disease.detach()).clamp(0.1, 10.0)
+    T_crop_val     = torch.exp(log_T_crop.detach()).clamp(0.1, 10.0)
+    T_severity_val = torch.exp(log_T_severity.detach()).clamp(0.1, 10.0)
+
     # ECE after calibration
-    d_probs_after = torch.sigmoid(d_logits / T_disease.detach()).numpy()
+    d_probs_after = torch.sigmoid(d_logits / T_disease_val).numpy()
     ece_after = compute_ece(d_probs_after, d_labels.numpy())
 
-    T_d = float(T_disease.detach())
-    T_c = float(T_crop.detach())
-    T_s = float(T_severity.detach())
+    T_d = float(T_disease_val)
+    T_c = float(T_crop_val)
+    T_s = float(T_severity_val)
 
     print(f"T_disease:  {T_d:.4f}")
     print(f"T_crop:     {T_c:.4f}")
@@ -138,11 +158,12 @@ def calibrate():
     # Save
     os.makedirs(MODELS, exist_ok=True)
     torch.save({
-        'T_disease' : T_d,
-        'T_crop'    : T_c,
-        'T_severity': T_s,
-        'ece_before': ece_before,
-        'ece_after' : ece_after,
+        'T_disease'  : T_d,
+        'T_crop'     : T_c,
+        'T_severity' : T_s,
+        'ece_before' : ece_before,
+        'ece_after'  : ece_after,
+        'num_classes': NUM_CLASSES,  # for stale calibration detection
     }, TEMP_PATH)
     print(f"Saved temperature values to {TEMP_PATH}")
 

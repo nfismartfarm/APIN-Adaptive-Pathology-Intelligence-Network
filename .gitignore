@@ -1,14 +1,23 @@
 # Data (gigabytes — never commit)
-data/raw/
-data/processed/
-data/kerala/
-data/plantdoc/
-data/metadata/*.csv
+data/
 cache/
 
-# Model weights
-models/*.pt
-models/checkpoints/
+# Raw datasets in repo root (gigabytes)
+Chilli*/
+LeavesBank*/
+Multicrop*/
+ORIGINAL_ALL_COMBINE*/
+Tomato*/
+tomato*/
+brassica*/
+chilli/
+taiwan_inaturalist_manifest.csv
+data_merged/
+data_prep/plots/
+
+# ALL model weights (too large for GitHub free tier)
+models/
+*.pt
 
 # Environment
 .env
@@ -20,7 +29,39 @@ __pycache__/
 
 # Feedback database
 feedback.db
+*.db
 
 # Pipeline state
 .pipeline_progress.json
 pipeline_failures.log
+*.zip
+
+# One-time setup and download scripts (local only)
+setup/
+agents/
+
+# Generated artifacts
+DEPLOYMENT_MANIFEST.txt
+reports/
+
+# Internal spec/working docs
+CLAUDE.md
+context.md
+decisions.md
+evaluation.md
+troubleshooting.md
+
+# Wandb logs
+wandb/
+hf_deploy/
+
+# Misc large/temporary files
+source_map.csv
+specialist_source_map.csv
+consolidation_log.txt
+annotation_review_needed.txt
+brassica_audit_log.txt
+architecture_convo.md
+architecture_update.md
+architecture_task_list.md
+static/gallery/

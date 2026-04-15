@@ -95,7 +95,7 @@ def run_evaluation():
         '|-------|-----|',
     ]
     for cls, f1 in zip(CLASS_NAMES, per_class_f1):
-        flag = ' ← LOW' if f1 < 0.40 else ''
+        flag = ' <-- LOW' if f1 < 0.40 else ''
         lines.append(f'| {cls} | {f1:.4f}{flag} |')
 
     lines += [
@@ -112,7 +112,7 @@ def run_evaluation():
     else:
         lines.append(f'✗ FAIL — macro F1 {macro_f1:.4f} < 0.50. Training needs improvement.')
 
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
 
     print(f"Validation report: {path}")

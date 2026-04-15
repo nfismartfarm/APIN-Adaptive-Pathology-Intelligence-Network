@@ -1,0 +1,75 @@
+{
+  "_comment": "Go/no-go thresholds for each model. Training scripts MUST check these before saving a model as deployment-ready.",
+  "_source": "MASTER_PLAN.md Sections 4.4, 5.4, 6.5 + architecture_update.md acceptance criteria",
+
+  "router": {
+    "min_macro_f1": 0.85,
+    "per_crop_minimums": {
+      "okra": 0.84,
+      "brassica": 0.88,
+      "tomato": 0.80,
+      "chilli": 0.91
+    },
+    "action_below_minimum": "Investigate sampling weights, increase field photo multiplier, retrain",
+    "deploy_threshold": 0.85,
+    "max_abstention_rate": 0.10,
+    "notes": "Tomato will be weakest due to 89% lab data. Abstention rate calibrated to 95% correct routing on non-abstained."
+  },
+
+  "model2": {
+    "min_macro_f1": 0.82,
+    "per_class_minimums": {
+      "okra_yvmv": 0.78,
+      "okra_powdery_mildew": 0.75,
+      "okra_cercospora": 0.72,
+      "okra_enation": 0.55,
+      "okra_healthy": 0.85,
+      "brassica_black_rot": 0.80,
+      "brassica_downy_mildew": 0.75,
+      "brassica_alternaria": 0.78,
+      "brassica_healthy": 0.85
+    },
+    "action_below_minimum": "Run model2_simple fallback. If fallback also fails, check data pipeline.",
+    "action_below_fallback": "Deploy Mode 1 (existing Swin-Tiny 23-class) while collecting more data.",
+    "deploy_threshold": 0.82,
+    "okra_enation_notes": "Permanent thin class (288 images, 90% single-source). F1 ceiling 0.55-0.68. needs_verification=true always.",
+    "conformal_approximation": "Model 2 conformal uses val set (not separate 5% split) — 95% coverage weakened to ~92-94% for thin classes."
+  },
+
+  "model3": {
+    "min_macro_f1": 0.72,
+    "per_class_minimums": {
+      "tomato_foliar_spot": 0.65,
+      "tomato_late_blight": 0.60,
+      "tomato_septoria_leaf_spot": 0.58,
+      "tomato_yellow_leaf_curl_virus": 0.55,
+      "tomato_mosaic_virus": 0.58,
+      "tomato_healthy": 0.70,
+      "chilli_leaf_curl": 0.80,
+      "chilli_healthy": 0.78,
+      "chilli_cercospora_leaf_spot": 0.76,
+      "chilli_anthracnose": 0.72
+    },
+    "action_below_minimum": "Run model3_simple fallback",
+    "action_below_fallback": "Deploy Mode 1 (existing Swin-Tiny 23-class) while collecting more Kerala data",
+    "deploy_threshold": 0.72,
+    "capsicum_gap_maximum": 0.15,
+    "self_distillation_trigger": {
+      "min_first_pass_macro_f1": 0.70,
+      "min_overall_agreement_rate": 0.70,
+      "min_per_class_agreement_rate": 0.50,
+      "action_if_not_met": "Skip self-distillation, ship first-pass model"
+    },
+    "tomato_notes": "Tomato disease classes are 97-99% lab. Background recomposition mitigates but cannot close the gap fully. Kerala tier-3 F1 is the only honest measure.",
+    "needs_verification_classes": ["tomato_yellow_leaf_curl_virus"]
+  },
+
+  "kerala_tier3": {
+    "minimum_images": 30,
+    "minimum_classes_represented": 6,
+    "minimum_per_class_images": 5,
+    "expected_gap_from_val_f1": "20-40% accuracy drop (PlantDoc generalisation gap)",
+    "is_only_honest_deployment_metric": true,
+    "notes": "Val F1 on Bangladesh+scidb+PlantVillage data overstates true Kerala deployment performance. Tier-3 is non-negotiable."
+  }
+}

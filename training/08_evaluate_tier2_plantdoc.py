@@ -51,7 +51,14 @@ def run_tier2():
         T_disease = float(t.get('T_disease', 1.0))
 
     df = pd.read_csv(SOURCE_MAP)
-    plantdoc_records = df[df['split'] == 'plantdoc'].to_dict('records')
+    # Phase 0 placed PlantDoc eval images with source_dataset='plantdoc_eval'
+    # (not split='plantdoc'). Filter by source_dataset to find them.
+    plantdoc_records = df[
+        df['source_dataset'].str.contains('plantdoc_eval', case=False, na=False)
+    ].to_dict('records')
+    # Fallback: try split='plantdoc' for backward compatibility
+    if not plantdoc_records:
+        plantdoc_records = df[df['split'] == 'plantdoc'].to_dict('records')
     for r in plantdoc_records:
         r['class_idx'] = CLASS_TO_IDX.get(r.get('class_name', ''), -1)
         r['crop_idx']  = CROP_FROM_IDX.get(r['class_idx'], 0)
@@ -60,6 +67,7 @@ def run_tier2():
     if not plantdoc_records:
         print("No PlantDoc records in source_map.csv. Run 01_prepare_data.py after downloading PlantDoc.")
         return
+    print(f"Found {len(plantdoc_records)} PlantDoc evaluation images")
 
     sev_labels = load_severity_labels()
     ds = PlantDiseaseDataset(plantdoc_records, get_eval_transform(), sev_labels)
@@ -118,7 +126,7 @@ def run_tier2():
             if f1 < 0.40:
                 lines.append(f'  - {cls}: F1={f1:.3f} — needs more diverse training data')
 
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
 
     print(f"Tier-2 report: {path}")

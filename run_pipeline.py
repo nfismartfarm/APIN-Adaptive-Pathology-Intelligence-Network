@@ -161,12 +161,12 @@ def run_smoke_test(step_idx):
     try:
         result = test_fn()
         if result:
-            print(f"  ✓ Smoke test for Step {step_idx} passed")
+            print(f"  [OK] Smoke test for Step {step_idx} passed")
         else:
-            print(f"  ✗ Smoke test for Step {step_idx} FAILED")
+            print(f"  [FAIL] Smoke test for Step {step_idx} FAILED")
         return result
     except Exception as e:
-        print(f"  ✗ Smoke test for Step {step_idx} raised exception: {e}")
+        print(f"  [FAIL] Smoke test for Step {step_idx} raised exception: {e}")
         return False
 
 
@@ -195,8 +195,8 @@ def _smoke_downloads():
         return False
     with open(results_f) as f:
         results = json.load(f)
-    # Minimum: sabbir_okra and kareem_cabbage must have images
-    mandatories = ['sabbir_okra', 'kareem_cabbage']
+    # Minimum: gadde_okra and cabbage_balanced must have images
+    mandatories = ['gadde_okra', 'cabbage_balanced']
     for name in mandatories:
         r = results.get(name, {})
         if not r.get('success', False):
@@ -301,7 +301,7 @@ def show_status(progress, steps):
     print(f"\nPipeline status ({len(steps)} steps):")
     for i, step in enumerate(steps):
         done   = is_done(i, progress)
-        status = '✓' if done else '○'
+        status = '[OK]' if done else '[ ]'
         ts     = progress.get(str(i), {}).get('timestamp', '')
         label  = step.__name__ if callable(step) else (step[0] if isinstance(step, list) else step)
         print(f"  [{status}] Step {i:2d}: {label}  {ts}")

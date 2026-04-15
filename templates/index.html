@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Plant Disease Detector — Kerala</title>
+<title>Plant Disease Detector</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header>
   <h1>Plant Disease Detector</h1>
-  <p class="subtitle">Okra &amp; Broccoli — Kerala</p>
+  <p class="subtitle">Okra · Broccoli · Tomato · Chilli</p>
 </header>
 
 <main>
@@ -19,6 +19,11 @@
       <span id="upload-icon">🌿</span>
       <p id="upload-text">Click or drag a leaf photo here</p>
       <p class="hint">JPEG / PNG / WebP · max 10 MB</p>
+      <p class="hint" style="margin-top:8px;font-style:italic">
+        Best results: photograph the leaf in natural daylight with the leaf
+        filling most of the frame. Multiple leaves in one photo are fine.
+        Keep the camera steady to avoid blur.
+      </p>
     </div>
     <input type="file" id="file-input"
            accept="image/jpeg,image/png,image/webp"
@@ -37,14 +42,18 @@
       </div>
 
       <div id="badges">
-        <span id="crop-badge"     class="badge badge-crop"></span>
+        <span id="crop-badge" class="badge badge-crop"></span>
         <span id="severity-badge" class="badge"></span>
-        <span id="urgency-badge"  class="badge"></span>
-        <span id="ood-badge"      class="badge badge-ood" hidden>Low confidence</span>
+        <span id="urgency-badge" class="badge"></span>
+        <div id="ood-badge" class="badge badge-ood" hidden></div>
       </div>
 
       <h2 id="disease-heading"></h2>
-      <p  id="confidence-text"></p>
+      <div id="top2-predictions" hidden></div>
+      <p>
+        <span id="confidence-text"></span>
+        <span id="uncertainty-tooltip" style="cursor:help" title="Uncertainty reflects how consistent the model is across multiple predictions. Low = confident. High = consider consulting an expert.">ℹ️</span>
+      </p>
       <div id="confidence-bar-wrap">
         <div id="confidence-bar"></div>
       </div>
@@ -59,25 +68,29 @@
         <ul id="prevention-list"></ul>
       </details>
 
+      <button id="download-report-btn" class="btn-secondary" onclick="downloadReport()"
+              style="margin-top:10px;width:100%">
+        Download Diagnosis Report
+      </button>
+
       <section id="feedback-section">
-        <p>Was this diagnosis correct?</p>
-        <!-- [FIX GAP 49,50] Both buttons have IDs -->
-        <button id="thumbs-up-btn"   class="btn-feedback" aria-label="Yes, correct">👍</button>
+        <p>Was this diagnosis correct? Your feedback helps improve the model.</p>
+        <button id="thumbs-up-btn" class="btn-feedback" aria-label="Yes, correct">👍</button>
         <button id="thumbs-down-btn" class="btn-feedback" aria-label="No, incorrect">👎</button>
         <div id="correction-form" hidden>
           <select id="correction-select" aria-label="Correct diagnosis">
-            <option value="">— Select correct class —</option>
+            <option value="">-- Select correct class --</option>
           </select>
           <button id="submit-correction-btn" class="btn-primary">Submit correction</button>
         </div>
-        <p id="feedback-thanks" hidden>Thank you for your feedback!</p>
+        <p id="feedback-thanks" hidden></p>
       </section>
     </div>
   </section>
 
   <div id="spinner" hidden aria-live="polite">
     <div class="spinner-ring"></div>
-    <p>Analysing leaf…</p>
+    <p>Analysing leaf (this may take 15-30 seconds)...</p>
   </div>
 
   <div id="error-box" hidden role="alert"></div>

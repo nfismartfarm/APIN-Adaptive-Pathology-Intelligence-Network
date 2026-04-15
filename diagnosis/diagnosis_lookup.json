@@ -3,178 +3,483 @@
     "full_name": "Yellow Vein Mosaic Virus",
     "cause": "Begomovirus transmitted by whitefly Bemisia tabaci. Spreads via infected transplants and volunteer plants. No seed transmission.",
     "symptoms": "Bright yellow vein network on green leaf background. Mosaic yellow-green patterning. Leaf curling upward. Stunted growth and distorted pods in severe cases.",
-    "treatment": [
-      "Remove and destroy all infected plants immediately — no chemical cure for viral disease.",
-      "Control whitefly vector: spray imidacloprid 17.8 SL at 0.3 ml per litre or thiamethoxam 25 WG at 0.3 g per litre.",
-      "Use yellow sticky traps (30 per hectare) to monitor and reduce whitefly populations.",
-      "Apply neem oil at 3 ml per litre as supplementary whitefly deterrent."
-    ],
-    "prevention": [
-      "Use resistant varieties: Arka Anamika, Parbhani Kranti, Punjab Padmini.",
-      "Use virus-free certified planting material. Do not use seeds from infected plants.",
-      "Apply reflective silver mulch to deter whitefly landing.",
-      "Maintain 2-row border of maize or sorghum as windbreak to reduce whitefly entry."
-    ],
-    "urgency": "High",
-    "urgency_reason": "No cure. Spreads rapidly via whitefly. Remove infected plants and spray within 24 hours to protect adjacent plants."
+    "treatment": {
+      "mild": "Remove affected leaves. Apply neem oil (3ml/L) as whitefly deterrent. Monitor daily for spread.",
+      "moderate": "Remove and destroy all infected plants. Spray imidacloprid 17.8 SL (0.3ml/L) for whitefly control. Use yellow sticky traps.",
+      "severe": "Remove and destroy ALL infected plants immediately. Spray thiamethoxam 25 WG (0.3g/L) systemically. Apply reflective mulch. Replace with resistant varieties (Arka Anamika)."
+    },
+    "prevention": "Use resistant varieties: Arka Anamika, Parbhani Kranti, Punjab Padmini. Use virus-free certified planting material. Do not use seeds from infected plants. Apply reflective silver mulch to deter whitefly landing. Maintain 2-row border of maize or sorghum as windbreak to reduce whitefly entry.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Act within 24 hours",
+      "severe": "Act immediately"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Active whitefly vector spreading virus",
+      "severe": "Rapid field-wide spread risk"
+    }
   },
   "okra_powdery_mildew": {
     "full_name": "Powdery Mildew (Okra)",
     "cause": "Fungus Erysiphe cichoracearum. Favoured by warm dry days (25-30°C) with cool humid nights. Unlike most fungi, does not need free water on leaves.",
     "symptoms": "White-to-grey powdery coating on upper leaf surface. Affected leaves turn yellow then brown. Severe infections cause premature leaf drop and stunted fruit development.",
-    "treatment": [
-      "Apply wettable sulphur 80 WP at 2.5 g per litre at first white patches. Do NOT spray when temperature exceeds 35°C — phytotoxicity risk.",
-      "Use hexaconazole 5 EC at 1 ml per litre for systemic control.",
-      "Triadimefon 25 WP at 0.5 g per litre as alternative systemic fungicide.",
-      "Spray coverage must reach all leaf surfaces including undersides."
-    ],
-    "prevention": [
-      "Maintain adequate plant spacing to promote air circulation.",
-      "Avoid excess nitrogen fertilisation — succulent growth is more susceptible.",
-      "Remove heavily infected leaves before spraying to reduce spore load."
-    ],
-    "urgency": "Medium",
-    "urgency_reason": "Spreads rapidly in warm dry conditions. Treat within 3-5 days of first symptoms."
+    "treatment": {
+      "mild": "Apply wettable sulphur 80 WP (2.5g/L) on affected leaves. Improve air circulation. Avoid excess nitrogen.",
+      "moderate": "Spray hexaconazole 5 EC (1ml/L) systemically. Remove heavily infected leaves before spraying. Ensure full coverage including undersides.",
+      "severe": "Apply triadimefon 25 WP (0.5g/L). Remove all heavily infected leaves. Reduce plant density. Consider early harvest of unaffected pods."
+    },
+    "prevention": "Maintain adequate plant spacing to promote air circulation. Avoid excess nitrogen fertilisation — succulent growth is more susceptible. Remove heavily infected leaves before spraying to reduce spore load.",
+    "urgency": {
+      "mild": "Treat within 5-7 days",
+      "moderate": "Treat within 3 days",
+      "severe": "Treat immediately"
+    },
+    "urgency_reason": {
+      "mild": "Slow spread in early stage",
+      "moderate": "Rapid spread in warm dry conditions",
+      "severe": "Risk of premature defoliation and yield loss"
+    }
   },
   "okra_cercospora": {
     "full_name": "Cercospora Leaf Spot",
     "cause": "Fungus Cercospora abelmoschi. Spreads via airborne conidia. Favoured by warm humid weather (25-30°C, >80% humidity). Overwinters in infected crop debris.",
     "symptoms": "Circular brown spots 3-10 mm diameter with grey-white centre. Distinct yellow halo around each spot. Severe infections cause large necrotic areas and defoliation.",
-    "treatment": [
-      "Spray mancozeb 75 WP at 2.5 g per litre every 7-10 days from first symptoms.",
-      "Copper oxychloride 50 WP at 3 g per litre as alternative contact fungicide.",
-      "Carbendazim 50 WP at 0.5 g per litre for systemic control of severe infections.",
-      "Remove and destroy infected leaves before spraying."
-    ],
-    "prevention": [
-      "Collect and destroy all crop debris after harvest — do NOT incorporate into soil.",
-      "Treat seeds with thiram 75 WS at 3 g per kg before sowing.",
-      "Maintain 3-year crop rotation avoiding okra and other malvaceous crops.",
-      "Avoid overhead irrigation — use drip to keep foliage dry."
-    ],
-    "urgency": "Medium",
-    "urgency_reason": "Spreads rapidly in humid conditions. Treat within 3-5 days."
+    "treatment": {
+      "mild": "Remove affected leaves. Apply mancozeb 75 WP (2.5g/L) preventively. Avoid overhead irrigation.",
+      "moderate": "Spray mancozeb every 7-10 days. Remove infected leaves before spraying. Apply copper oxychloride (3g/L) as alternative.",
+      "severe": "Apply carbendazim 50 WP (0.5g/L) systemically. Destroy all crop debris. Plan 3-year crop rotation away from okra."
+    },
+    "prevention": "Collect and destroy all crop debris after harvest — do NOT incorporate into soil. Treat seeds with thiram 75 WS at 3 g per kg before sowing. Maintain 3-year crop rotation avoiding okra and other malvaceous crops. Avoid overhead irrigation — use drip to keep foliage dry.",
+    "urgency": {
+      "mild": "Treat within 5 days",
+      "moderate": "Treat within 3 days",
+      "severe": "Act within 24 hours"
+    },
+    "urgency_reason": {
+      "mild": "Limited spots, early stage",
+      "moderate": "Spots spreading, humid conditions",
+      "severe": "Severe defoliation risk"
+    }
   },
   "okra_enation": {
     "full_name": "Enation Leaf Curl",
     "cause": "Begomovirus complex, different strains from YVMV but also transmitted by whitefly Bemisia tabaci. Can co-infect with YVMV.",
     "symptoms": "Severe upward curling and rolling of leaves. Enations (outgrowths) on underside of leaf veins — feel like small bumps when running finger along vein. Vein swelling. Leaf becomes leathery. Severely stunted plant.",
-    "treatment": [
-      "Remove and destroy infected plants. No viral cure.",
-      "Spray imidacloprid 17.8 SL at 0.3 ml per litre to control whitefly vector.",
-      "Apply thiamethoxam 25 WG at 0.3 g per litre as whitefly alternative.",
-      "Use spirotetramat 150 OD at 0.75 ml per litre for systemic whitefly control."
-    ],
-    "prevention": [
-      "Use tolerant varieties where available.",
-      "Border rows of tall non-host crops (maize, jowar) reduce whitefly entry.",
-      "Install 50-mesh insect-proof net on nursery beds.",
-      "Remove volunteer okra plants from field margins — they act as virus reservoirs."
-    ],
-    "urgency": "High",
-    "urgency_reason": "No cure. Severe stunting if not managed early. Remove infected plants and control whitefly immediately."
+    "treatment": {
+      "mild": "Remove affected leaves. Control whitefly with neem oil (3ml/L). Install 50-mesh insect net.",
+      "moderate": "Remove infected plants. Spray imidacloprid (0.3ml/L) for whitefly. Use border rows of maize as windbreak.",
+      "severe": "Destroy all infected plants. Apply spirotetramat 150 OD (0.75ml/L). Remove volunteer okra from field margins."
+    },
+    "prevention": "Use tolerant varieties where available. Border rows of tall non-host crops (maize, jowar) reduce whitefly entry. Install 50-mesh insect-proof net on nursery beds. Remove volunteer okra plants from field margins — they act as virus reservoirs.",
+    "urgency": {
+      "mild": "Monitor and treat within 5 days",
+      "moderate": "Act within 24 hours",
+      "severe": "Act immediately"
+    },
+    "urgency_reason": {
+      "mild": "Limited curl, early stage",
+      "moderate": "Active whitefly spread",
+      "severe": "Severe stunting risk"
+    }
   },
   "okra_healthy": {
     "full_name": "Healthy Okra Leaf",
     "cause": "No disease detected.",
     "symptoms": "No visible disease symptoms. Normal uniform green colour. No spots, curl, or lesions.",
-    "treatment": ["No treatment required. The leaf appears healthy."],
-    "prevention": [
-      "Continue monitoring every 5-7 days.",
-      "Maintain balanced fertilisation — avoid excess nitrogen.",
-      "Keep field weed-free to reduce whitefly and aphid habitat."
-    ],
-    "urgency": "Low",
-    "urgency_reason": "No disease detected. Routine monitoring recommended."
+    "treatment": {
+      "mild": "No treatment needed. Continue regular care.",
+      "moderate": "No treatment needed. Continue monitoring.",
+      "severe": "No treatment needed. Healthy plant."
+    },
+    "prevention": "Continue monitoring every 5-7 days. Maintain balanced fertilisation — avoid excess nitrogen. Keep field weed-free to reduce whitefly and aphid habitat.",
+    "urgency": {
+      "mild": "Routine",
+      "moderate": "Routine",
+      "severe": "Routine"
+    },
+    "urgency_reason": {
+      "mild": "Healthy",
+      "moderate": "Healthy",
+      "severe": "Healthy"
+    }
   },
   "brassica_black_rot": {
     "full_name": "Black Rot",
     "cause": "Bacterium Xanthomonas campestris pv. campestris. Enters through leaf margin water pores and wounds. Spread by infected seeds, rain splash, contaminated tools.",
     "symptoms": "V-shaped yellow-to-brown lesions pointing inward from leaf margins, following vein pattern. Veins inside lesion turn brown-to-black. Severe cases cause whole-leaf collapse.",
-    "treatment": [
-      "Remove and destroy all infected plant material. Do NOT compost.",
-      "Spray copper oxychloride 50 WP at 3 g per litre every 7 days.",
-      "Use streptomycin sulphate 90 SP at 200 ppm for severe infections.",
-      "Do not work in the field when plants are wet."
-    ],
-    "prevention": [
-      "Use certified black-rot-free seeds. Treat seeds with hot water at 50°C for exactly 30 minutes.",
-      "Rotate brassicas away from same plot for at least 2 years.",
-      "Ensure field drainage — the bacterium thrives in waterlogged conditions.",
-      "Control cabbage aphids and other insects that create entry wounds."
-    ],
-    "urgency": "High",
-    "urgency_reason": "Spreads rapidly through rain splash and contaminated tools. Remove infected plants and spray within 24 hours."
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: Remove and destroy all infected plant material. Do NOT compost.",
+      "moderate": "Remove and destroy all infected plant material. Do NOT compost. Spray copper oxychloride 50 WP at 3 g per litre every 7 days. Use streptomycin sulphate 90 SP at 200 ppm for severe infections. Do not work in the field when plants are wet.",
+      "severe": "Act immediately. Remove and destroy all infected plant material. Do NOT compost. Spray copper oxychloride 50 WP at 3 g per litre every 7 days. Use streptomycin sulphate 90 SP at 200 ppm for severe infections. Do not work in the field when plants are wet."
+    },
+    "prevention": "Use certified black-rot-free seeds. Treat seeds with hot water at 50°C for exactly 30 minutes. Rotate brassicas away from same plot for at least 2 years. Ensure field drainage — the bacterium thrives in waterlogged conditions. Control cabbage aphids and other insects that create entry wounds.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "High",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Spreads rapidly through rain splash and contaminated tools. Remove infected plants and spray within 24 hours.",
+      "severe": "High risk of spread. Spreads rapidly through rain splash and contaminated tools. Remove infected plants and spray within 24 hours."
+    }
   },
   "brassica_downy_mildew": {
     "full_name": "Downy Mildew (Brassica)",
     "cause": "Oomycete Hyaloperonospora parasitica. Favoured by cool (15-20°C) humid conditions with free moisture on leaves.",
     "symptoms": "Irregular yellow patches on upper leaf surface. White-to-grey downy sporulation on underside directly below yellow areas. Young plants may show severe distortion.",
-    "treatment": [
-      "Apply metalaxyl + mancozeb (Ridomil Gold MZ) at 2.5 g per litre at first symptoms.",
-      "Use cymoxanil + mancozeb (Curzate M8) at 2 g per litre as alternative.",
-      "Copper hydroxide at 3 g per litre for early-stage control.",
-      "Remove heavily infected outer leaves before spraying."
-    ],
-    "prevention": [
-      "Use resistant brassica varieties where available.",
-      "Switch to drip irrigation — overhead watering maintains leaf wetness needed for sporulation.",
-      "Maintain adequate plant spacing.",
-      "Apply preventive copper spray at transplanting during cool wet seasons."
-    ],
-    "urgency": "Medium",
-    "urgency_reason": "Spreads rapidly in cool wet weather. Treat within 3-5 days."
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: Apply metalaxyl + mancozeb (Ridomil Gold MZ) at 2.5 g per litre at first symptoms.",
+      "moderate": "Apply metalaxyl + mancozeb (Ridomil Gold MZ) at 2.5 g per litre at first symptoms. Use cymoxanil + mancozeb (Curzate M8) at 2 g per litre as alternative. Copper hydroxide at 3 g per litre for early-stage control. Remove heavily infected outer leaves before spraying.",
+      "severe": "Act immediately. Apply metalaxyl + mancozeb (Ridomil Gold MZ) at 2.5 g per litre at first symptoms. Use cymoxanil + mancozeb (Curzate M8) at 2 g per litre as alternative. Copper hydroxide at 3 g per litre for early-stage control. Remove heavily infected outer leaves before spraying."
+    },
+    "prevention": "Use resistant brassica varieties where available. Switch to drip irrigation — overhead watering maintains leaf wetness needed for sporulation. Maintain adequate plant spacing. Apply preventive copper spray at transplanting during cool wet seasons.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Medium",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Spreads rapidly in cool wet weather. Treat within 3-5 days.",
+      "severe": "High risk of spread. Spreads rapidly in cool wet weather. Treat within 3-5 days."
+    }
   },
   "brassica_alternaria": {
     "full_name": "Alternaria Leaf Spot (Dark Leaf Spot)",
     "cause": "Fungi Alternaria brassicicola and Alternaria brassicae. Spread by airborne conidia during warm humid conditions.",
     "symptoms": "Dark brown-to-black circular spots with concentric rings (target-board pattern), yellow halo around spots. Heavy infections cause holes and premature defoliation.",
-    "treatment": [
-      "Apply mancozeb 75 WP at 2.5 g per litre every 7-10 days from first appearance.",
-      "Use iprodione 50 WP at 1 g per litre for systemic control of severe infections.",
-      "Chlorothalonil 75 WP at 2 g per litre as alternative contact fungicide.",
-      "Ensure spray reaches leaf undersides where spores germinate."
-    ],
-    "prevention": [
-      "Treat seeds with thiram 75 WS at 3 g per kg before sowing.",
-      "Rotate brassicas for 2 years after an Alternaria outbreak.",
-      "Avoid excessive plant density.",
-      "Apply preventive spray at bud formation stage during high-risk seasons."
-    ],
-    "urgency": "Medium",
-    "urgency_reason": "Spreads in warm humid weather. Treat within 3-5 days to prevent defoliation."
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: Apply mancozeb 75 WP at 2.5 g per litre every 7-10 days from first appearance.",
+      "moderate": "Apply mancozeb 75 WP at 2.5 g per litre every 7-10 days from first appearance. Use iprodione 50 WP at 1 g per litre for systemic control of severe infections. Chlorothalonil 75 WP at 2 g per litre as alternative contact fungicide. Ensure spray reaches leaf undersides where spores germinate.",
+      "severe": "Act immediately. Apply mancozeb 75 WP at 2.5 g per litre every 7-10 days from first appearance. Use iprodione 50 WP at 1 g per litre for systemic control of severe infections. Chlorothalonil 75 WP at 2 g per litre as alternative contact fungicide. Ensure spray reaches leaf undersides where spores germinate."
+    },
+    "prevention": "Treat seeds with thiram 75 WS at 3 g per kg before sowing. Rotate brassicas for 2 years after an Alternaria outbreak. Avoid excessive plant density. Apply preventive spray at bud formation stage during high-risk seasons.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Medium",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Spreads in warm humid weather. Treat within 3-5 days to prevent defoliation.",
+      "severe": "High risk of spread. Spreads in warm humid weather. Treat within 3-5 days to prevent defoliation."
+    }
   },
   "brassica_clubroot": {
     "full_name": "Clubroot",
     "cause": "Obligate soil-borne parasite Plasmodiophora brassicae. Resting spores survive in soil for up to 20 years.",
     "symptoms": "Above-ground only: wilting during warm afternoons despite adequate soil moisture, progressive yellowing from lower leaves, stunted growth. Uprooting shows swollen club-shaped root galls.",
-    "treatment": [
-      "No cure once infected. Remove and destroy ALL infected plants including root material.",
-      "Do NOT compost infected roots — spores survive composting.",
-      "Apply agricultural lime to raise soil pH to 7.2 or above.",
-      "Apply calcium cyanamide at 200 kg per hectare as combined fertiliser and soil treatment."
-    ],
-    "prevention": [
-      "Quarantine — do not move soil, tools, footwear, or plants from infected to uninfected fields.",
-      "Use resistant varieties: Kilaton F1, Clapton F1, Crispus F1.",
-      "Minimum 4-5 year crop rotation without brassicas.",
-      "Test and maintain soil pH above 7.0 before every brassica crop.",
-      "Dip transplant roots in thiram suspension (3 g per litre) for 15 minutes before planting."
-    ],
-    "urgency": "High",
-    "urgency_reason": "Persistent soil pathogen with 20-year spore survival. Implement strict quarantine immediately."
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: No cure once infected. Remove and destroy ALL infected plants including root material.",
+      "moderate": "No cure once infected. Remove and destroy ALL infected plants including root material. Do NOT compost infected roots — spores survive composting. Apply agricultural lime to raise soil pH to 7.2 or above. Apply calcium cyanamide at 200 kg per hectare as combined fertiliser and soil treatment.",
+      "severe": "Act immediately. No cure once infected. Remove and destroy ALL infected plants including root material. Do NOT compost infected roots — spores survive composting. Apply agricultural lime to raise soil pH to 7.2 or above. Apply calcium cyanamide at 200 kg per hectare as combined fertiliser and soil treatment."
+    },
+    "prevention": "Quarantine — do not move soil, tools, footwear, or plants from infected to uninfected fields. Use resistant varieties: Kilaton F1, Clapton F1, Crispus F1. Minimum 4-5 year crop rotation without brassicas. Test and maintain soil pH above 7.0 before every brassica crop. Dip transplant roots in thiram suspension (3 g per litre) for 15 minutes before planting.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "High",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Persistent soil pathogen with 20-year spore survival. Implement strict quarantine immediately.",
+      "severe": "High risk of spread. Persistent soil pathogen with 20-year spore survival. Implement strict quarantine immediately."
+    }
   },
   "brassica_healthy": {
     "full_name": "Healthy Brassica Leaf",
     "cause": "No disease detected.",
     "symptoms": "No visible disease symptoms. Normal leaf colour and structure.",
-    "treatment": ["No treatment required. The leaf appears healthy."],
-    "prevention": [
-      "Continue monitoring every 7-10 days.",
-      "Apply preventive copper spray at start of monsoon/rainy season.",
-      "Ensure adequate field drainage."
-    ],
-    "urgency": "Low",
-    "urgency_reason": "No disease detected. Routine monitoring recommended."
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: No treatment required. The leaf appears healthy.",
+      "moderate": "No treatment required. The leaf appears healthy.",
+      "severe": "Act immediately. No treatment required. The leaf appears healthy."
+    },
+    "prevention": "Continue monitoring every 7-10 days. Apply preventive copper spray at start of monsoon/rainy season. Ensure adequate field drainage.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Low",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "No disease detected. Routine monitoring recommended.",
+      "severe": "High risk of spread. No disease detected. Routine monitoring recommended."
+    }
+  },
+  "tomato_bacterial_spot": {
+    "full_name": "Tomato Bacterial Spot",
+    "cause": "Bacterium Xanthomonas campestris pv. vesicatoria. Spread by rain splash, contaminated seeds, and infected transplants. Favoured by warm humid conditions (24-30°C).",
+    "symptoms": "Small water-soaked spots on leaves that enlarge to 3-5 mm with yellow halos. Spots turn dark brown and may coalesce. Severely affected leaves yellow and drop prematurely. Fruit lesions appear as raised scabby spots.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: Spray copper-based bactericide (copper hydroxide 77 WP at 2 g per litre) every 7-10 days from first symptoms.",
+      "moderate": "Spray copper-based bactericide (copper hydroxide 77 WP at 2 g per litre) every 7-10 days from first symptoms. Remove and destroy all heavily infected plant material. Do NOT compost. Improve air circulation by pruning lower branches and maintaining adequate spacing. Avoid overhead irrigation — use drip to keep foliage dry.",
+      "severe": "Act immediately. Spray copper-based bactericide (copper hydroxide 77 WP at 2 g per litre) every 7-10 days from first symptoms. Remove and destroy all heavily infected plant material. Do NOT compost. Improve air circulation by pruning lower branches and maintaining adequate spacing. Avoid overhead irrigation — use drip to keep foliage dry."
+    },
+    "prevention": "Use certified disease-free seeds and transplants. Practise 2-3 year crop rotation away from solanaceous crops. Apply preventive copper spray before onset of rainy season. Disinfect tools, stakes, and equipment between plants with 10% bleach solution.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Medium",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Spreads through rain splash. Apply copper bactericide within 3-5 days.",
+      "severe": "High risk of spread. Spreads through rain splash. Apply copper bactericide within 3-5 days."
+    }
+  },
+  "tomato_early_blight": {
+    "full_name": "Tomato Early Blight",
+    "cause": "Fungus Alternaria solani. Overwinters in infected crop debris and soil. Favoured by warm temperatures (24-29°C) and alternating wet-dry conditions.",
+    "symptoms": "Dark brown spots with characteristic target-board concentric ring pattern, beginning on older lower leaves. Spots enlarge and coalesce, causing yellowing and defoliation from bottom upward. Stem lesions appear as dark sunken cankers.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: Spray mancozeb 75 WP at 2.5 g per litre or chlorothalonil 75 WP at 2 g per litre every 7-10 days from first symptoms.",
+      "moderate": "Spray mancozeb 75 WP at 2.5 g per litre or chlorothalonil 75 WP at 2 g per litre every 7-10 days from first symptoms. Remove infected lower leaves to reduce spore load and improve air circulation. Apply organic mulch around base of plants to prevent soil-borne spore splash onto lower leaves. Azoxystrobin 23 SC at 1 ml per litre as systemic alternative for severe infections.",
+      "severe": "Act immediately. Spray mancozeb 75 WP at 2.5 g per litre or chlorothalonil 75 WP at 2 g per litre every 7-10 days from first symptoms. Remove infected lower leaves to reduce spore load and improve air circulation. Apply organic mulch around base of plants to prevent soil-borne spore splash onto lower leaves. Azoxystrobin 23 SC at 1 ml per litre as systemic alternative for severe infections."
+    },
+    "prevention": "Practise 3-year crop rotation away from tomato, potato, and other solanaceous crops. Use early-blight-resistant varieties where available. Avoid overhead irrigation — use drip to minimise leaf wetness. Destroy all crop debris after harvest — do NOT incorporate into soil.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Medium",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Progresses from lower to upper leaves. Treat within 3-5 days.",
+      "severe": "High risk of spread. Progresses from lower to upper leaves. Treat within 3-5 days."
+    }
+  },
+  "tomato_late_blight": {
+    "full_name": "Tomato Late Blight",
+    "cause": "Oomycete Phytophthora infestans. Devastating pathogen capable of destroying entire crops within days. Favoured by cool (15-22°C) wet conditions with prolonged leaf wetness.",
+    "symptoms": "Irregular water-soaked grey-green lesions on leaves that rapidly enlarge and turn dark brown. White fuzzy mould visible on underside of lesions in humid conditions. Stems develop dark brown streaks. Entire plant can collapse within days under favourable conditions.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: Apply metalaxyl + mancozeb (Ridomil Gold MZ) at 2.5 g per litre immediately upon first symptoms.",
+      "moderate": "Apply metalaxyl + mancozeb (Ridomil Gold MZ) at 2.5 g per litre immediately upon first symptoms. Remove and destroy ALL infected plant tissue including fallen debris. Do NOT compost. Spray neighbouring healthy plants preventively with mancozeb 75 WP at 2.5 g per litre. Cymoxanil + mancozeb (Curzate M8) at 2 g per litre as alternative systemic treatment.",
+      "severe": "Act immediately. Apply metalaxyl + mancozeb (Ridomil Gold MZ) at 2.5 g per litre immediately upon first symptoms. Remove and destroy ALL infected plant tissue including fallen debris. Do NOT compost. Spray neighbouring healthy plants preventively with mancozeb 75 WP at 2.5 g per litre. Cymoxanil + mancozeb (Curzate M8) at 2 g per litre as alternative systemic treatment."
+    },
+    "prevention": "Use late-blight-resistant varieties: Arka Rakshak, Arka Samrat. Avoid overhead irrigation — keep foliage dry at all times. Apply preventive copper spray during cool wet periods before disease onset. Ensure adequate plant spacing for maximum air circulation.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "High",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Entire plant can collapse within days. Act immediately.",
+      "severe": "High risk of spread. Entire plant can collapse within days. Act immediately."
+    }
+  },
+  "tomato_leaf_mold": {
+    "full_name": "Tomato Leaf Mold",
+    "cause": "Fungus Passalora fulva (syn. Cladosporium fulvum). Thrives in high humidity (>85%) and moderate temperatures (22-25°C). Especially common in greenhouses and polyhouses.",
+    "symptoms": "Pale yellow-green spots on upper leaf surface. Olive-brown to greyish-purple velvety mould growth on corresponding underside of leaves. Severely infected leaves curl, wither, and drop. Fruit infection is rare but possible.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: Improve ventilation immediately by opening greenhouse vents and increasing plant spacing.",
+      "moderate": "Improve ventilation immediately by opening greenhouse vents and increasing plant spacing. Spray copper oxychloride 50 WP at 3 g per litre or chlorothalonil 75 WP at 2 g per litre every 7-10 days. Switch to drip irrigation — eliminate all overhead watering. Remove and destroy heavily infected leaves to reduce spore load.",
+      "severe": "Act immediately. Improve ventilation immediately by opening greenhouse vents and increasing plant spacing. Spray copper oxychloride 50 WP at 3 g per litre or chlorothalonil 75 WP at 2 g per litre every 7-10 days. Switch to drip irrigation — eliminate all overhead watering. Remove and destroy heavily infected leaves to reduce spore load."
+    },
+    "prevention": "Use leaf-mold-resistant tomato varieties with Cf gene resistance. Maintain adequate plant spacing to promote air circulation. Keep relative humidity below 85% in greenhouses through ventilation. Sanitise greenhouse structures between seasons with copper-based disinfectant.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Medium",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Common in greenhouses. Improve ventilation within 3-5 days.",
+      "severe": "High risk of spread. Common in greenhouses. Improve ventilation within 3-5 days."
+    }
+  },
+  "tomato_septoria_leaf_spot": {
+    "full_name": "Tomato Septoria Leaf Spot",
+    "cause": "Fungus Septoria lycopersici. Spread by rain splash from infected crop debris. Favoured by warm (20-25°C) wet conditions with prolonged leaf wetness.",
+    "symptoms": "Numerous small circular spots (2-3 mm) with dark brown margins and grey-white centres. Tiny black dots (pycnidia) visible in centre of spots under magnification. Starts on lower leaves and progresses upward. Severe defoliation reduces fruit size and yield.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: Spray mancozeb 75 WP at 2.5 g per litre or chlorothalonil 75 WP at 2 g per litre every 7-10 days from first symptoms.",
+      "moderate": "Spray mancozeb 75 WP at 2.5 g per litre or chlorothalonil 75 WP at 2 g per litre every 7-10 days from first symptoms. Apply copper hydroxide 77 WP at 2 g per litre as alternative contact fungicide. Remove infected lower leaves to slow disease progression upward. Apply organic mulch to prevent soil-borne spore splash.",
+      "severe": "Act immediately. Spray mancozeb 75 WP at 2.5 g per litre or chlorothalonil 75 WP at 2 g per litre every 7-10 days from first symptoms. Apply copper hydroxide 77 WP at 2 g per litre as alternative contact fungicide. Remove infected lower leaves to slow disease progression upward. Apply organic mulch to prevent soil-borne spore splash."
+    },
+    "prevention": "Practise 3-year crop rotation away from solanaceous crops. Destroy all crop debris thoroughly after harvest. Use certified disease-free transplants from reputable nurseries. Avoid overhead irrigation and working among wet plants.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Medium",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Defoliation progresses from bottom upward. Treat within 3-5 days.",
+      "severe": "High risk of spread. Defoliation progresses from bottom upward. Treat within 3-5 days."
+    }
+  },
+  "tomato_target_spot": {
+    "full_name": "Tomato Target Spot",
+    "cause": "Fungus Corynespora cassiicola. Wide host range including tomato, cucumber, and cotton. Favoured by warm (25-30°C) humid conditions with prolonged leaf wetness.",
+    "symptoms": "Dark brown lesions with concentric rings and yellow halo, similar in appearance to early blight. Spots may appear on leaves, stems, and fruit. Severe infections cause premature defoliation and reduced yield.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: Spray mancozeb 75 WP at 2.5 g per litre every 7-10 days from first symptoms.",
+      "moderate": "Spray mancozeb 75 WP at 2.5 g per litre every 7-10 days from first symptoms. Apply azoxystrobin 23 SC at 1 ml per litre as systemic alternative for severe infections. Remove and destroy all infected plant material to reduce inoculum. Improve air circulation through adequate spacing and pruning of lower branches.",
+      "severe": "Act immediately. Spray mancozeb 75 WP at 2.5 g per litre every 7-10 days from first symptoms. Apply azoxystrobin 23 SC at 1 ml per litre as systemic alternative for severe infections. Remove and destroy all infected plant material to reduce inoculum. Improve air circulation through adequate spacing and pruning of lower branches."
+    },
+    "prevention": "Practise crop rotation with non-host crops for at least 2 years. Avoid overhead irrigation — use drip to minimise leaf wetness. Ensure good air movement through proper plant spacing. Destroy all crop debris after harvest.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Medium",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Spreads in warm humid weather. Treat within 3-5 days.",
+      "severe": "High risk of spread. Spreads in warm humid weather. Treat within 3-5 days."
+    }
+  },
+  "tomato_mosaic_virus": {
+    "full_name": "Tomato Mosaic Virus",
+    "cause": "Tomato mosaic virus (ToMV), a tobamovirus. Extremely stable and contagious. Transmitted mechanically through contaminated hands, tools, clothing, and infected seed. Survives on dry surfaces for years.",
+    "symptoms": "Mosaic pattern of alternating light and dark green areas on leaves. Leaves become distorted, puckered, and reduced in size. Stunted plant growth. Fruit may show internal browning and uneven ripening. Young plants are most severely affected.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: No chemical cure exists for viral infections. Remove and destroy all infected plants immediately.",
+      "moderate": "No chemical cure exists for viral infections. Remove and destroy all infected plants immediately. Wash hands thoroughly with soap and water before and after handling plants. Disinfect all tools, stakes, and equipment with 10% bleach solution or 70% alcohol. Do not smoke or use tobacco products near tomato plants — tobacco mosaic virus can cross-infect.",
+      "severe": "Act immediately. No chemical cure exists for viral infections. Remove and destroy all infected plants immediately. Wash hands thoroughly with soap and water before and after handling plants. Disinfect all tools, stakes, and equipment with 10% bleach solution or 70% alcohol. Do not smoke or use tobacco products near tomato plants — tobacco mosaic virus can cross-infect."
+    },
+    "prevention": "Use virus-resistant tomato varieties carrying the Tm-2 or Tm-2a resistance gene. Disinfect tools between plants with 10% trisodium phosphate or 10% bleach. Control aphid vectors with yellow sticky traps and reflective mulch. Use certified virus-free seed and transplants.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "High",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "No cure. Remove infected plants immediately to prevent spread.",
+      "severe": "High risk of spread. No cure. Remove infected plants immediately to prevent spread."
+    }
+  },
+  "tomato_yellow_leaf_curl_virus": {
+    "full_name": "Tomato Yellow Leaf Curl Virus",
+    "cause": "TYLCV, a begomovirus transmitted exclusively by whitefly Bemisia tabaci. One of the most destructive tomato viruses worldwide. Whiteflies acquire the virus after feeding on infected plants for 15-30 minutes.",
+    "symptoms": "Severe upward curling of leaf margins producing small cupped leaves. Yellow chlorosis along leaf margins and between veins. Severely stunted plant growth with shortened internodes. Infected plants produce few or no fruit. Flowers may drop prematurely.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: No chemical cure exists. Remove and destroy all infected plants immediately.",
+      "moderate": "No chemical cure exists. Remove and destroy all infected plants immediately. Spray imidacloprid 17.8 SL at 0.3 ml per litre or thiamethoxam 25 WG at 0.3 g per litre to control whitefly vector. Use yellow sticky traps (25-30 per hectare) to monitor and reduce whitefly populations. Apply neem oil at 3 ml per litre as supplementary whitefly deterrent.",
+      "severe": "Act immediately. No chemical cure exists. Remove and destroy all infected plants immediately. Spray imidacloprid 17.8 SL at 0.3 ml per litre or thiamethoxam 25 WG at 0.3 g per litre to control whitefly vector. Use yellow sticky traps (25-30 per hectare) to monitor and reduce whitefly populations. Apply neem oil at 3 ml per litre as supplementary whitefly deterrent."
+    },
+    "prevention": "Use TYLCV-resistant tomato varieties: TY series hybrids, Arka Rakshak. Install yellow sticky traps before transplanting to detect early whitefly presence. Apply reflective silver mulch to deter whitefly landing on plants. Use 50-mesh insect-proof netting on nurseries and greenhouses.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "High",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "No cure. Severely infected plants produce no fruit. Remove immediately.",
+      "severe": "High risk of spread. No cure. Severely infected plants produce no fruit. Remove immediately."
+    }
+  },
+  "tomato_healthy": {
+    "full_name": "Healthy Tomato Leaf",
+    "cause": "No disease detected.",
+    "symptoms": "No visible disease symptoms. Uniform green colour, no spots or lesions.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: No treatment required. Continue regular monitoring every 7-10 days.",
+      "moderate": "No treatment required. Continue regular monitoring every 7-10 days.",
+      "severe": "Act immediately. No treatment required. Continue regular monitoring every 7-10 days."
+    },
+    "prevention": "Maintain regular watering and fertilisation. Monitor for whitefly and aphid populations. Ensure adequate plant spacing for air circulation.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Low",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "No disease detected. Routine monitoring recommended.",
+      "severe": "High risk of spread. No disease detected. Routine monitoring recommended."
+    }
+  },
+  "chilli_anthracnose": {
+    "full_name": "Chilli Anthracnose",
+    "cause": "Fungi Colletotrichum capsici and Colletotrichum gloeosporioides. Seed-borne and spread by rain splash. Favoured by warm (25-30°C) humid conditions. Can cause up to 50% yield loss.",
+    "symptoms": "Dark sunken lesions with concentric rings on fruit and leaves. Orange-pink spore masses (acervuli) visible on lesion surface in humid conditions. Fruit lesions expand rapidly causing rot and mummification. Leaf spots are circular with pale centres.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: Spray mancozeb 75 WP at 2.5 g per litre or copper oxychloride 50 WP at 3 g per litre every 7 days from first symptoms.",
+      "moderate": "Spray mancozeb 75 WP at 2.5 g per litre or copper oxychloride 50 WP at 3 g per litre every 7 days from first symptoms. Remove and destroy all infected fruit and plant material. Do NOT leave on ground. Improve air circulation through adequate spacing and weed control. Carbendazim 50 WP at 1 g per litre as systemic alternative for severe infections.",
+      "severe": "Act immediately. Spray mancozeb 75 WP at 2.5 g per litre or copper oxychloride 50 WP at 3 g per litre every 7 days from first symptoms. Remove and destroy all infected fruit and plant material. Do NOT leave on ground. Improve air circulation through adequate spacing and weed control. Carbendazim 50 WP at 1 g per litre as systemic alternative for severe infections."
+    },
+    "prevention": "Use disease-free certified seeds from reliable sources. Treat seeds with hot water at 52°C for 30 minutes before sowing. Practise 2-3 year crop rotation away from solanaceous crops. Harvest fruit promptly at maturity — overripe fruit is more susceptible.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "High",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Spreads rapidly in humid conditions. Remove infected material and spray within 24 hours.",
+      "severe": "High risk of spread. Spreads rapidly in humid conditions. Remove infected material and spray within 24 hours."
+    }
+  },
+  "chilli_cercospora_leaf_spot": {
+    "full_name": "Chilli Cercospora Leaf Spot",
+    "cause": "Fungus Cercospora capsici. Spread by airborne conidia and rain splash. Favoured by warm (25-30°C) humid conditions with prolonged leaf wetness.",
+    "symptoms": "Circular spots with pale grey centre and dark brown border, surrounded by a yellow halo. Spots are 3-8 mm in diameter. Starts on lower older leaves and progresses upward. Severe infections cause extensive defoliation and reduced fruit set.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: Spray mancozeb 75 WP at 2.5 g per litre every 10 days from first symptoms.",
+      "moderate": "Spray mancozeb 75 WP at 2.5 g per litre every 10 days from first symptoms. Apply copper hydroxide 77 WP at 2 g per litre as alternative contact fungicide. Use propineb 70 WP at 3 g per litre for systemic control in severe cases. Remove infected leaves to reduce inoculum and improve air circulation.",
+      "severe": "Act immediately. Spray mancozeb 75 WP at 2.5 g per litre every 10 days from first symptoms. Apply copper hydroxide 77 WP at 2 g per litre as alternative contact fungicide. Use propineb 70 WP at 3 g per litre for systemic control in severe cases. Remove infected leaves to reduce inoculum and improve air circulation."
+    },
+    "prevention": "Use healthy certified seeds from disease-free plants. Avoid overhead irrigation — use drip to keep foliage dry. Practise crop rotation with non-solanaceous crops for 2-3 years. Destroy all crop debris after harvest — do NOT incorporate into soil.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Medium",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "Progresses from lower to upper leaves. Treat within 3-5 days.",
+      "severe": "High risk of spread. Progresses from lower to upper leaves. Treat within 3-5 days."
+    }
+  },
+  "chilli_leaf_curl": {
+    "full_name": "Chilli Leaf Curl Virus",
+    "cause": "Chilli leaf curl virus (ChiLCV), a begomovirus transmitted by whitefly Bemisia tabaci. Closely related to tomato leaf curl viruses. Whiteflies remain viruliferous for their entire lifespan.",
+    "symptoms": "Severe upward curling and distortion of leaves with reduced leaf size. Interveinal yellowing and chlorosis. Stunted plant growth with shortened internodes. Severely infected plants become bushy with no fruit production. Flower drop is common.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: No chemical cure exists for viral infections. Remove and destroy all infected plants immediately.",
+      "moderate": "No chemical cure exists for viral infections. Remove and destroy all infected plants immediately. Spray thiamethoxam 25 WG at 0.3 g per litre or imidacloprid 17.8 SL at 0.3 ml per litre every 7 days to control whitefly vector. Use yellow sticky traps (25-30 per hectare) to monitor and reduce whitefly populations. Apply neem oil at 3 ml per litre as supplementary whitefly deterrent.",
+      "severe": "Act immediately. No chemical cure exists for viral infections. Remove and destroy all infected plants immediately. Spray thiamethoxam 25 WG at 0.3 g per litre or imidacloprid 17.8 SL at 0.3 ml per litre every 7 days to control whitefly vector. Use yellow sticky traps (25-30 per hectare) to monitor and reduce whitefly populations. Apply neem oil at 3 ml per litre as supplementary whitefly deterrent."
+    },
+    "prevention": "Use resistant or tolerant chilli varieties where available. Install yellow sticky traps before transplanting for early whitefly detection. Apply reflective silver mulch to deter whitefly landing. Use 50-mesh insect-proof netting on nursery beds and remove weed hosts from field margins.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "High",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "No cure. Severely infected plants may produce no yield. Remove immediately.",
+      "severe": "High risk of spread. No cure. Severely infected plants may produce no yield. Remove immediately."
+    }
+  },
+  "chilli_healthy": {
+    "full_name": "Healthy Chilli Leaf",
+    "cause": "No disease detected.",
+    "symptoms": "No disease symptoms. Uniformly green, firm, well-formed leaves.",
+    "treatment": {
+      "mild": "Monitor closely. Apply preventive measures: No treatment required. Continue regular monitoring every 7-10 days.",
+      "moderate": "No treatment required. Continue regular monitoring every 7-10 days.",
+      "severe": "Act immediately. No treatment required. Continue regular monitoring every 7-10 days."
+    },
+    "prevention": "Maintain regular watering and fertilisation. Monitor for whitefly and aphid populations using sticky traps. Keep field free of weeds that may harbour pest insects.",
+    "urgency": {
+      "mild": "Monitor for 3-5 days",
+      "moderate": "Low",
+      "severe": "Act immediately today"
+    },
+    "urgency_reason": {
+      "mild": "Early stage, limited spread",
+      "moderate": "No disease detected. Routine monitoring recommended.",
+      "severe": "High risk of spread. No disease detected. Routine monitoring recommended."
+    }
   }
 }

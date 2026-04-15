@@ -7,8 +7,9 @@ from albumentations.pytorch import ToTensorV2
 from app.config import IMG_SIZE, IMAGENET_MEAN, IMAGENET_STD
 
 
-def apply_clahe(image, clip_limit=2.0, tile_size=(8, 8)):
-    """CLAHE per RGB channel. Defined here for training. Also defined inline in app/inference.py."""
+def apply_clahe(image, clip_limit=2.0, tile_size=(8, 8), **kwargs):
+    """CLAHE per RGB channel. Defined here for training. Also defined inline in app/inference.py.
+    **kwargs absorbs extra params from albumentations A.Lambda (e.g. 'shape' in v2.x)."""
     clahe  = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_size)
     result = np.zeros_like(image)
     for c in range(3):

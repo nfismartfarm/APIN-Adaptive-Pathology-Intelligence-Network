@@ -1,47 +1,58 @@
 # training/04_train_phase1.py
 """
-Phase 1: Train classification heads on cached backbone features.
-Backbone is frozen. Training runs from pre-computed feature tensors.
-This takes 25-35 minutes instead of 3.5 hours.
+Phase 2A: Train FPN + attention pooling + all heads with backbone frozen.
 
-Run AFTER 03_cache_features.py completes.
-Saves: models/checkpoints/phase1_best.pt
+Unlike the original Phase 1 which used cached features, Phase 2A trains on
+raw images because the FPN and attention pooling need to learn meaningful
+feature aggregation from the Swin-Tiny backbone output. Cached features from
+random FPN+attention are not useful.
+
+Uses Focal Loss with gamma warmup, teacher-forced crop routing for MoE,
+and EMA for stable validation.
+
+Saves: models/checkpoints/phase2a_best.pt
+Run AFTER 03_cache_features.py completes (for severity labels).
 """
 
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# [FIX GAP 1] Import helpers at MODULE LEVEL, not inside __main__
-from training.helpers import (
-    EarlyStopping,
-    save_checkpoint,
-    load_checkpoint,
-    cleanup_old_checkpoints,
-)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
+except ImportError:
+    pass
+
+os.environ['WANDB_MODE'] = 'disabled'
 
 import torch
 import torch.nn as nn
-from torch.utils.data import TensorDataset, DataLoader
-import wandb
+import torch.nn.functional as F
+import numpy as np
+import pandas as pd
+from torch.amp import autocast, GradScaler
+from sklearn.metrics import f1_score
 
 from app.config import (
-    DEVICE, TRAIN_CACHE, VAL_CACHE, CKPT_DIR, MODELS,
-    PHASE1_EPOCHS, PHASE1_LR, BATCH_SIZE, WEIGHT_DECAY,
-    LOSS_W_CROP, LOSS_W_DISEASE, LOSS_W_SEVERITY,
-    MAX_POS_WEIGHT, EARLY_STOP_PAT, EARLY_STOP_DELTA, KEEP_CKPTS,
-    NUM_CLASSES, NUM_CROPS, CROP_EMB_DIM, HEAD_HIDDEN_DIM, POOLED_DIM,
-    DROPOUT_P, RANDOM_SEED, WANDB_PROJECT, WANDB_CONFIG,
+    DEVICE, ROOT, SOURCE_MAP, CKPT_DIR, MODELS, TEACHER_MODEL,
+    NUM_CLASSES, NUM_CROPS, CLASS_NAMES, RANDOM_SEED,
+    PHASE2A_EPOCHS, BATCH_SIZE,
+    EARLY_STOPPING_PATIENCE, THIN_CLASS_INDICES,
+    FOCAL_GAMMA, LABEL_SMOOTHING,
+    LOSS_WEIGHT_CROP, LOSS_WEIGHT_SEVERITY,
+    CLASS_TO_IDX, CROP_FROM_IDX,
 )
 from app.model import PlantDiseaseModel
-from training.metrics import compute_multilabel_pos_weights
-from training.loss import compute_loss
+from training.losses import FocalBCELoss, EMAModel
+from training.dataset import PlantDiseaseDataset, load_severity_labels, make_weighted_sampler
+from training.transforms import get_train_transform, get_eval_transform
 
 
 def set_seeds(seed):
     import random
-    import numpy as np
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -49,194 +60,185 @@ def set_seeds(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def train_phase1():
+def validate_phase2a(model, val_loader):
+    """Compute val macro F1 using full forward pass on raw images."""
+    model.eval()
+    all_probs, all_labels = [], []
+    with torch.no_grad():
+        for images, d_lab, c_lab, s_lab in val_loader:
+            images = images.to(DEVICE)
+            c_log, d_log, s_log = model(images)
+            all_probs.append(torch.sigmoid(d_log).cpu().numpy())
+            all_labels.append(d_lab.numpy())
+
+    all_probs = np.concatenate(all_probs, axis=0)
+    all_labels = np.concatenate(all_labels, axis=0)
+    preds = (all_probs > 0.5).astype(int)
+    macro_f1 = f1_score(all_labels, preds, average='macro', zero_division=0)
+    per_class = f1_score(all_labels, preds, average=None, zero_division=0)
+    return macro_f1, per_class
+
+
+def train_phase2a():
     set_seeds(RANDOM_SEED)
 
-    # ── Load cached features ───────────────────────────────────────────────
-    if not os.path.exists(TRAIN_CACHE):
-        raise FileNotFoundError(
-            f"Training cache not found at {TRAIN_CACHE}. "
-            f"Run training/03_cache_features.py first."
-        )
-    if not os.path.exists(VAL_CACHE):
-        raise FileNotFoundError(
-            f"Validation cache not found at {VAL_CACHE}. "
-            f"Run training/03_cache_features.py first."
-        )
+    # Verify teacher intact
+    teacher_path = TEACHER_MODEL if os.path.isabs(TEACHER_MODEL) else os.path.join(ROOT, TEACHER_MODEL)
+    assert os.path.exists(teacher_path), f'Teacher missing: {teacher_path}'
+    teacher_mb = os.path.getsize(teacher_path) / 1e6
+    assert teacher_mb > 80, f'Teacher corrupted: {teacher_mb:.1f}MB'
+    print(f'Teacher intact: {teacher_mb:.1f}MB')
 
-    print("Loading cached features...")
-    train_cache = torch.load(TRAIN_CACHE, weights_only=False)
-    val_cache   = torch.load(VAL_CACHE, weights_only=False)
-
-    # Feature tensors
-    train_pooled   = train_cache['pooled_features']    # [N, 256]
-    train_crop_emb = train_cache['crop_embeddings']    # [N, 64]
-    train_d_lab    = train_cache['disease_labels']     # [N, 10]
-    train_c_lab    = train_cache['crop_labels']        # [N]
-    train_s_lab    = train_cache['severity_labels']    # [N]
-
-    val_pooled   = val_cache['pooled_features']
-    val_crop_emb = val_cache['crop_embeddings']
-    val_d_lab    = val_cache['disease_labels']
-    val_c_lab    = val_cache['crop_labels']
-    val_s_lab    = val_cache['severity_labels']
-
-    print(f"Train features: {train_pooled.shape}, Val features: {val_pooled.shape}")
-
-    # ── [FIX GAP 34] pos_weight: compute from train_d_lab directly ─────────
-    # train_d_lab is [N, NUM_CLASSES] multi-hot binary matrix.
-    # n_pos[j] = number of training images positive for class j
-    # n_neg[j] = N - n_pos[j] = number of training images negative for class j
-    # pos_weight[j] = n_neg[j] / n_pos[j]
-    # This is correct multi-label formula. NOT sklearn compute_class_weight.
-    n_total  = float(train_d_lab.shape[0])
-    n_pos    = train_d_lab.float().sum(dim=0).clamp(min=1.0)   # [NUM_CLASSES]
-    n_neg    = n_total - n_pos
-    pos_weight = (n_neg / n_pos).clamp(max=MAX_POS_WEIGHT)
-    print(f"pos_weight range: {pos_weight.min():.2f} to {pos_weight.max():.2f}")
-
-    # ── DataLoaders from cached features ───────────────────────────────────
-    train_ds = TensorDataset(train_pooled, train_crop_emb,
-                             train_d_lab, train_c_lab, train_s_lab)
-    val_ds   = TensorDataset(val_pooled, val_crop_emb,
-                             val_d_lab, val_c_lab, val_s_lab)
-
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE,
-                              shuffle=True, num_workers=0)
-    val_loader   = DataLoader(val_ds, batch_size=BATCH_SIZE,
-                              shuffle=False, num_workers=0)
-
-    # ── Build model — heads only ────────────────────────────────────────────
-    # In Phase 1 we only train heads. The model is instantiated but only
-    # head parameters are passed to the optimizer.
+    # Build model — freeze backbone, train FPN + attention + heads
     model = PlantDiseaseModel().to(DEVICE)
     model.freeze_backbone()
 
-    head_params = (
-        list(model.crop_classifier.parameters()) +
-        list(model.disease_head.parameters()) +
-        list(model.severity_head.parameters()) +
-        list(model.fpn.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    frozen = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+    print(f'Model: {trainable:,} trainable, {frozen:,} frozen (backbone)')
+
+    # Optimizer: all trainable params (FPN + attention + all heads)
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(trainable_params, lr=3e-4, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='max', factor=0.5, patience=2,
     )
-    optimizer = torch.optim.Adam(head_params, lr=PHASE1_LR,
-                                 weight_decay=WEIGHT_DECAY)
+
+    # Mixed precision
+    use_amp = (DEVICE.type == 'cuda')
+    scaler = GradScaler(device='cuda' if use_amp else 'cpu', enabled=use_amp)
+
+    focal_loss = FocalBCELoss(gamma=FOCAL_GAMMA, smoothing=LABEL_SMOOTHING)
+    ema = EMAModel(model, decay=0.999)
+
+    # Data loading
+    df = pd.read_csv(SOURCE_MAP)
+    train_df = df[df['split'] == 'train'].reset_index(drop=True)
+    val_df = df[df['split'] == 'val'].reset_index(drop=True)
+
+    train_records = train_df.to_dict('records')
+    val_records = val_df.to_dict('records')
+    for r in train_records + val_records:
+        r['class_idx'] = CLASS_TO_IDX.get(r.get('class_name', ''), -1)
+        r['crop_idx'] = CROP_FROM_IDX.get(r['class_idx'], 0)
+
+    sev_labels = load_severity_labels()
+    train_ds = PlantDiseaseDataset(train_records, get_train_transform(), sev_labels)
+    val_ds = PlantDiseaseDataset(val_records, get_eval_transform(), sev_labels)
+    sampler = make_weighted_sampler(train_records)
+
+    train_loader = torch.utils.data.DataLoader(
+        train_ds, batch_size=BATCH_SIZE, sampler=sampler,
+        num_workers=2, pin_memory=True, persistent_workers=False,
+        drop_last=False,
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_ds, batch_size=BATCH_SIZE, shuffle=False,
+        num_workers=2, pin_memory=True, persistent_workers=False,
+    )
+
+    print(f'Train: {len(train_records)} images, Val: {len(val_records)} images')
+    print(f'Batches/epoch: {len(train_loader)}, Batch size: {BATCH_SIZE}')
 
     os.makedirs(CKPT_DIR, exist_ok=True)
-    os.makedirs(MODELS, exist_ok=True)
-
-    wandb.init(
-        project=WANDB_PROJECT,
-        name='phase1',
-        config={**WANDB_CONFIG, 'phase': 1, 'epochs': PHASE1_EPOCHS},
-    )
-
-    early_stop  = EarlyStopping(EARLY_STOP_PAT, EARLY_STOP_DELTA)
     best_val_f1 = 0.0
+    patience_counter = 0
+    total_start = time.time()
 
-    for epoch in range(PHASE1_EPOCHS):
+    for epoch in range(PHASE2A_EPOCHS):
         model.train()
         epoch_loss = 0.0
+        total_steps = len(train_loader)
+        t0 = time.time()
 
-        for pooled, crop_emb, d_lab, c_lab, s_lab in train_loader:
-            pooled   = pooled.to(DEVICE)
-            crop_emb = crop_emb.to(DEVICE)
-            d_lab    = d_lab.to(DEVICE)
-            c_lab    = c_lab.to(DEVICE)
-            s_lab    = s_lab.to(DEVICE)
+        for step, (images, d_lab, c_lab, s_lab) in enumerate(train_loader):
+            images = images.to(DEVICE)
+            d_lab = d_lab.to(DEVICE)
+            c_lab = c_lab.to(DEVICE)
+            s_lab = s_lab.to(DEVICE)
 
-            # Forward using cached features directly
-            # We run only the heads, not the full forward pass
-            crop_logits, crop_emb_out = model.crop_classifier(pooled)
-            disease_logits = model.disease_head(pooled, crop_emb_out)
-            severity_logits = model.severity_head(pooled)
+            # Gamma warmup over first epoch
+            if epoch == 0:
+                focal_loss.set_gamma(FOCAL_GAMMA * (step / max(total_steps - 1, 1)))
+            else:
+                focal_loss.set_gamma(FOCAL_GAMMA)
 
-            total_loss, loss_dict = compute_loss(
-                crop_logits, disease_logits, severity_logits,
-                c_lab, d_lab, s_lab, pos_weight.to(DEVICE)
-            )
+            with autocast(device_type='cuda' if use_amp else 'cpu', enabled=use_amp):
+                # Full forward pass (backbone frozen, FPN+heads trainable)
+                # Teacher-force crop routing: use GT crop labels for MoE
+                features = model.backbone(images)
+                fpn_out = model.fpn(features)
+                pooled = model.att_pool(fpn_out)
+
+                # Crop classifier
+                crop_logits, crop_emb = model.crop_classifier(pooled)
+
+                # Teacher-forcing: use GT crop labels for MoE routing
+                crop_probs_tf = F.one_hot(c_lab, num_classes=NUM_CROPS).float()
+
+                # CLN + MoE with teacher-forced routing
+                x_cln = model.cln(pooled, crop_probs_tf)
+                disease_logits = model.disease_head(x_cln, crop_probs_tf)
+                severity_logits = model.severity_head(pooled)
+
+                # Losses
+                loss_disease = focal_loss(disease_logits, d_lab)
+                loss_crop = F.cross_entropy(crop_logits, c_lab.long())
+                loss_severity = F.cross_entropy(severity_logits, s_lab.long())
+                total_loss = loss_disease + LOSS_WEIGHT_CROP * loss_crop + LOSS_WEIGHT_SEVERITY * loss_severity
 
             optimizer.zero_grad()
-            total_loss.backward()
-            optimizer.step()
+            scaler.scale(total_loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
+            ema.update(model)
+
             epoch_loss += total_loss.item()
 
-        # ── Validation ─────────────────────────────────────────────────────
-        model.eval()
-        val_preds_disease = []
-        val_true_disease  = []
-        val_preds_crop    = []
-        val_true_crop     = []
-        total_val_loss    = 0.0
+        # Validation (without teacher-forcing — use predicted crop_probs)
+        ema.apply(model)
+        val_f1, per_class_f1 = validate_phase2a(model, val_loader)
+        ema.restore(model)
 
-        with torch.no_grad():
-            for pooled, crop_emb, d_lab, c_lab, s_lab in val_loader:
-                pooled   = pooled.to(DEVICE)
-                crop_emb = crop_emb.to(DEVICE)
-                d_lab_d  = d_lab.to(DEVICE)
-                c_lab_d  = c_lab.to(DEVICE)
-                s_lab_d  = s_lab.to(DEVICE)
+        elapsed = time.time() - t0
+        avg_loss = epoch_loss / total_steps
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f'\nEpoch {epoch:2d} | {elapsed/60:.1f}min | loss={avg_loss:.4f} '
+              f'val_macro_F1={val_f1:.4f} lr={current_lr:.2e}')
+        print('Per-class F1:')
+        for i, (cls, f1v) in enumerate(zip(CLASS_NAMES, per_class_f1)):
+            thin = ' *THIN*' if i in THIN_CLASS_INDICES else ''
+            print(f'  {cls:<40} {f1v:.3f}{thin}')
 
-                c_log, _ = model.crop_classifier(pooled)
-                d_log    = model.disease_head(pooled, model.crop_classifier(pooled)[1])
-                s_log    = model.severity_head(pooled)
-
-                loss, _ = compute_loss(c_log, d_log, s_log,
-                                       c_lab_d, d_lab_d, s_lab_d,
-                                       pos_weight.to(DEVICE))
-                total_val_loss += loss.item()
-
-                val_preds_disease.append(torch.sigmoid(d_log).cpu())
-                val_true_disease.append(d_lab)
-                val_preds_crop.append(c_log.argmax(dim=1).cpu())
-                val_true_crop.append(c_lab)
-
-        # Compute macro F1
-        from sklearn.metrics import f1_score
-        import numpy as np
-        d_preds = (torch.cat(val_preds_disease).numpy() > 0.5).astype(int)
-        d_true  = torch.cat(val_true_disease).numpy()
-        val_f1  = f1_score(d_true, d_preds, average='macro', zero_division=0)
-        crop_acc = (torch.cat(val_preds_crop) == torch.cat(val_true_crop)).float().mean().item()
-
-        train_loss_avg = epoch_loss / max(len(train_loader), 1)
-        val_loss_avg   = total_val_loss / max(len(val_loader), 1)
-
-        wandb.log({
-            'epoch'       : epoch,
-            'train/loss'  : train_loss_avg,
-            'val/loss'    : val_loss_avg,
-            'val/macro_f1': val_f1,
-            'val/crop_acc': crop_acc,
-        })
-        print(f"Phase1 Epoch {epoch:2d}: "
-              f"train_loss={train_loss_avg:.4f}  "
-              f"val_loss={val_loss_avg:.4f}  "
-              f"val_macro_f1={val_f1:.4f}  "
-              f"crop_acc={crop_acc:.3f}")
-
-        # Checkpoint
-        ckpt_path = os.path.join(
-            CKPT_DIR, f"phase1_epoch{epoch:02d}_f1{val_f1:.3f}.pt"
-        )
-        save_checkpoint(model, optimizer, None, None, epoch, {'val/macro_f1': val_f1}, ckpt_path)
-        cleanup_old_checkpoints(CKPT_DIR, KEEP_CKPTS, phase='phase1')
+        scheduler.step(val_f1)
 
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1
-            best_path   = os.path.join(CKPT_DIR, 'phase1_best.pt')
-            save_checkpoint(model, optimizer, None, None, epoch,
-                           {'val/macro_f1': val_f1}, best_path)
-            print(f"  → New best phase1 model: macro_f1={val_f1:.4f}")
+            patience_counter = 0
+            ckpt_path = os.path.join(CKPT_DIR, 'phase2a_best.pt')
+            torch.save(model.state_dict(), ckpt_path)
+            print(f'  -> New best: {best_val_f1:.4f} — saved')
+        else:
+            patience_counter += 1
+            print(f'  No improvement. Patience: {patience_counter}/{EARLY_STOPPING_PATIENCE}')
+            if patience_counter >= EARLY_STOPPING_PATIENCE:
+                print(f'Early stopping at epoch {epoch}')
+                break
 
-        if early_stop(val_f1):
-            print(f"Early stopping at epoch {epoch}")
-            break
+    total_time = time.time() - total_start
+    print(f'\n{"="*60}')
+    print(f'Phase 2A complete.')
+    print(f'Best val macro F1: {best_val_f1:.4f}')
+    print(f'Total time: {total_time/60:.1f} minutes')
+    print(f'phase2a_best.pt: {os.path.exists(os.path.join(CKPT_DIR, "phase2a_best.pt"))}')
 
-    wandb.finish()
-    print(f"\nPhase 1 complete. Best macro F1: {best_val_f1:.4f}")
-    if best_val_f1 < 0.30:
-        print("WARNING: macro F1 < 0.30. Check data pipeline and labels.")
+    assert os.path.exists(teacher_path)
+    assert os.path.getsize(teacher_path) / 1e6 > 80
+    print(f'Teacher preserved: {os.path.getsize(teacher_path)/1e6:.1f}MB INTACT')
+    print(f'{"="*60}')
 
 
 if __name__ == '__main__':
-    train_phase1()
+    train_phase2a()

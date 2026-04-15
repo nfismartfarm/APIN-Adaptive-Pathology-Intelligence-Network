@@ -52,11 +52,29 @@ def validate_image(data: bytes) -> dict:
 
     img_np = np.array(pil_img, dtype=np.uint8)
 
-    # 4. Minimum dimensions
+    # 4. Minimum dimensions (100x100 absolute minimum)
     h, w = img_np.shape[:2]
+    if h < 100 or w < 100:
+        return {'valid': False,
+                'reason': 'Image resolution is too low. Please upload a photo of at least 100x100 pixels.',
+                'image': None}
     if h < MIN_IMG_DIM or w < MIN_IMG_DIM:
         return {'valid': False,
                 'reason': f'Image too small. Minimum {MIN_IMG_DIM}px in each dimension.',
+                'image': None}
+
+    # 4b. Extreme aspect ratio check
+    aspect_ratio = w / h
+    if aspect_ratio > 8.0 or aspect_ratio < 0.125:
+        return {'valid': False,
+                'reason': 'Image has an unusual shape. Please upload a standard portrait or landscape photograph of a leaf.',
+                'image': None}
+
+    # 4c. Blank or solid colour image check
+    pixel_std = float(np.std(img_np))
+    if pixel_std < 5.0:
+        return {'valid': False,
+                'reason': 'Image appears to be blank or a solid colour. Please upload a clear photograph of a leaf.',
                 'image': None}
 
     # 5. Blur check

@@ -57,8 +57,8 @@ def generate_severity_labels():
     # Load model — need the trained disease head to compute saliency
     phase1_best = os.path.join(CKPT_DIR, 'phase1_best.pt')
     if not os.path.exists(phase1_best):
-        print("Phase 1 model not found. Using random severity labels as fallback.")
-        _write_random_labels()
+        print("Phase 1 model not found. Using uniform moderate placeholder labels.")
+        _write_placeholder_labels()
         return
 
     model = load_model_for_inference(phase1_best, DEVICE)
@@ -120,9 +120,11 @@ def generate_severity_labels():
     print(f"Distribution: mild={mild}, moderate={mod}, severe={sev}")
 
 
-def _write_random_labels():
-    """Fallback: write random severity labels when no model is available."""
-    import random
+def _write_placeholder_labels():
+    """Fallback: write uniform moderate severity labels when no model is available.
+    All images get severity_idx=1 (moderate) as a placeholder.
+    The severity head is lowest priority — these placeholders will be
+    replaced with GradCAM-based proxy labels after Phase 1 training."""
     df      = pd.read_csv(SOURCE_MAP)
     train_df = df[df['split'] == 'train']
     os.makedirs(META, exist_ok=True)
@@ -132,9 +134,9 @@ def _write_random_labels():
         for _, row in train_df.iterrows():
             writer.writerow({
                 'image_path'  : row['image_path'],
-                'severity_idx': random.randint(0, 2),
+                'severity_idx': 1,  # moderate placeholder
             })
-    print(f"Written random severity labels (no model available).")
+    print(f"Written {len(train_df)} placeholder severity labels (all moderate, no model available).")
 
 
 if __name__ == '__main__':
