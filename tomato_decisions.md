@@ -443,6 +443,27 @@ Format per entry:
 
 ---
 
+## DEC-029 [2026-05-01] Input validation gate: canonical path, Check B ordering, spec 5.5 edge-case resolution
+
+- **Spec section:** 5 (Image Input and Validation Gate), lines 923–1051; task card T-IMPL-2a.
+- **Decision 1 — Canonical module path divergence (spec vs task card):**
+  - Spec 5.7 line 1049: *"`tomato_sandbox/input_validation.py` defines the `ValidatedImage` dataclass and the `validate_request(request) -> List[ValidatedImage]` entry point."*
+  - Task card says: `tomato_sandbox/api/validate_input.py`.
+  - Resolution: implemented at the canonical spec path (`tomato_sandbox/input_validation.py`). Provided `tomato_sandbox/api/validate_input.py` as a re-export shim so both import paths work. This satisfies both the spec's canonical contract and the task card's file target. Import contract confirmed: no Section 15 tests import from `validate_input`; the re-export shim is defensive.
+- **Decision 2 — Check B sub-check ordering (size before MIME):**
+  - Spec 5.2 line 940 bullet list: `mime_type`, then `file_size_bytes`, then `extension_matches_mime`.
+  - Spec 5.5 line 1023 edge case: *"Empty file: zero-byte upload. Caught by `file_too_small` (5 KB minimum)."*
+  - These two spec statements conflict: the bullet list implies MIME fires first; but the edge-case table says empty bytes yield `file_too_small`, not `unsupported_format`. An empty byte string has no magic bytes and would fail the MIME check first if MIME were checked first.
+  - Resolution: the edge-case table (line 1023) is a concrete behavioral contract for a specific input. It takes precedence over the conceptual bullet-list ordering (which groups the sub-checks thematically, not as a strict execution sequence). Implementation checks `len(data) < FILE_SIZE_MIN_BYTES` first (O(1), no bytes read), then sniffs MIME type. This makes the edge-case table contract hold while having no observable difference for real-world inputs (real-world HEIC/BMP/GIF files are always > 5 KB; tests padded to confirm).
+  - Tests for unsupported formats (`test_heic_rejected`, `test_unsupported_format`) updated to use payloads padded to > 5 KB, which is consistent with real-world behavior (real HEIC and BMP files are never < 5 KB).
+- **Decision 3 — `getdata()` deprecation warning (Pillow 14):**
+  - `Image.Image.getdata()` is deprecated in Pillow 14 (2027-10-15). The grayscale detection helper `_is_effectively_grayscale` uses it.
+  - The warning is non-breaking for all supported Pillow versions today (< 14). Replaced with `get_flattened_data()` would require Pillow ≥ 14, which is not available. Left as-is with a TODO comment for when Pillow 14 lands.
+- **Impact:** minor (new files only; no sacred files modified).
+- **User approval:** implicit per Phase 4 Batch 2 dispatch (T-IMPL-2a).
+
+---
+
 ## DEC-030 [2026-05-01] IQA module: package layout vs flat file; ValidatedImage forward reference; nan_guards not used; degraded_mode not used
 
 - **Spec section:** 6 (Image Quality Assessment)

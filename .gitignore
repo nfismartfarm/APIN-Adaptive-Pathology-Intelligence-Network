@@ -8,8 +8,18 @@ LeavesBank*/
 Multicrop*/
 ORIGINAL_ALL_COMBINE*/
 Tomato*/
-tomato*/
 brassica*/
+
+# Tomato sandbox: source tracked normally per DEC-032; only large/scratch ignored
+# Negation needed because Windows case-insensitive matching makes Tomato*/ catch tomato_sandbox/
+!tomato_sandbox/
+!tomato_sandbox/**
+!tomato_progress_reports/
+!tomato_progress_reports/**
+tomato_sandbox/scratch/
+tomato_sandbox/models/
+tomato_sandbox/**/__pycache__/
+tomato_sandbox/**/*.pyc
 chilli/
 taiwan_inaturalist_manifest.csv
 data_merged/

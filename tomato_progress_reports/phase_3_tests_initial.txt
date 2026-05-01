@@ -1,0 +1,349 @@
+==================================================================
+Phase 3 task 4 — initial test output (per master prompt Section 4)
+Date: 2026-05-01T11:54:29Z
+Spec: tomato_3_signal_system.md Section 15 (135 scenarios)
+Expected: 13 collection errors, all ModuleNotFoundError on tomato_sandbox.tier
+          (Phase 4 will create the module; tests will then start passing.)
+==================================================================
+
+==================================================================
+STEP 1: pytest --collect-only output
+==================================================================
+============================= test session starts =============================
+platform win32 -- Python 3.13.11, pytest-9.0.2, pluggy-1.5.0
+rootdir: C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger
+configfile: pyproject.toml
+plugins: anyio-4.12.1, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+collected 0 items / 13 errors
+
+=================================== ERRORS ====================================
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_boundary.py _
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_boundary.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_boundary.py:17: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_disagreement.py _
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_disagreement.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_disagreement.py:17: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+__ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier1.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier1.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier1.py:17: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+__ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier2.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier2.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier2.py:17: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier3a.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier3a.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier3a.py:16: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier3b.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier3b.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier3b.py:19: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier3c.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier3c.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier3c.py:25: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier3d.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier3d.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier3d.py:22: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier4a.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier4a.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier4a.py:21: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier4b.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier4b.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier4b.py:17: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+__ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier5.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier5.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier5.py:21: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+___ ERROR collecting tomato_sandbox/tests/integration/test_section15_tta.py ___
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tta.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tta.py:20: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_underpowered.py _
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_underpowered.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_underpowered.py:18: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+=========================== short test summary info ===========================
+ERROR tomato_sandbox/tests/integration/test_section15_boundary.py
+ERROR tomato_sandbox/tests/integration/test_section15_disagreement.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier1.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier2.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier3a.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier3b.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier3c.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier3d.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier4a.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier4b.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier5.py
+ERROR tomato_sandbox/tests/integration/test_section15_tta.py
+ERROR tomato_sandbox/tests/integration/test_section15_underpowered.py
+!!!!!!!!!!!!!!!!!! Interrupted: 13 errors during collection !!!!!!!!!!!!!!!!!!!
+=================== no tests collected, 13 errors in 0.30s ====================
+
+==================================================================
+STEP 2: pytest run output (no test will execute; collection errors block)
+==================================================================
+============================= test session starts =============================
+platform win32 -- Python 3.13.11, pytest-9.0.2, pluggy-1.5.0
+rootdir: C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger
+configfile: pyproject.toml
+plugins: anyio-4.12.1, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+collected 0 items / 13 errors
+
+=================================== ERRORS ====================================
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_boundary.py _
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_boundary.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_boundary.py:17: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_disagreement.py _
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_disagreement.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_disagreement.py:17: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+__ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier1.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier1.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier1.py:17: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+__ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier2.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier2.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier2.py:17: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier3a.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier3a.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier3a.py:16: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier3b.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier3b.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier3b.py:19: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier3c.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier3c.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier3c.py:25: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier3d.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier3d.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier3d.py:22: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier4a.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier4a.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier4a.py:21: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier4b.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier4b.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier4b.py:17: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+__ ERROR collecting tomato_sandbox/tests/integration/test_section15_tier5.py __
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tier5.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tier5.py:21: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+___ ERROR collecting tomato_sandbox/tests/integration/test_section15_tta.py ___
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_tta.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_tta.py:20: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+_ ERROR collecting tomato_sandbox/tests/integration/test_section15_underpowered.py _
+ImportError while importing test module 'C:\Users\xplod\Videos\FSWD\synod\Plant-disease-detection-for-brocolli-and-ladies-finger\tomato_sandbox\tests\integration\test_section15_underpowered.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\miniconda3\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tomato_sandbox\tests\integration\test_section15_underpowered.py:18: in <module>
+    from tomato_sandbox.tier.tier_assignment import assign_tier  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tomato_sandbox.tier'
+=========================== short test summary info ===========================
+ERROR tomato_sandbox/tests/integration/test_section15_boundary.py
+ERROR tomato_sandbox/tests/integration/test_section15_disagreement.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier1.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier2.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier3a.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier3b.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier3c.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier3d.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier4a.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier4b.py
+ERROR tomato_sandbox/tests/integration/test_section15_tier5.py
+ERROR tomato_sandbox/tests/integration/test_section15_tta.py
+ERROR tomato_sandbox/tests/integration/test_section15_underpowered.py
+!!!!!!!!!!!!!!!!!! Interrupted: 13 errors during collection !!!!!!!!!!!!!!!!!!!
+============================= 13 errors in 0.27s ==============================
