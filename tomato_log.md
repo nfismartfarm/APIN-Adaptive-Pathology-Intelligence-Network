@@ -602,3 +602,39 @@ Parallel dispatch is safe when downstream module's input contract is **spec-pinn
 ### Next: Batch 5 = T-IMPL-5 tier_assignment.py (S14)
 This is the **milestone batch** — landing the tier rule chain (Rules 1-9 + sub-rules 7a/7b/7c, 8a/8b/8c) makes the 13 Section 15 integration test files start collecting and the 135 deterministic test scenarios become measurable.
 
+
+
+## [2026-05-02 14:00] Phase 4 Batch 5 MILESTONE complete — 135/135 Section 15 tests PASS
+
+### Headline
+**135 of 135 Section 15 deterministic test scenarios PASS on first try after 3 spec-discovery-driven bug fixes within the implementer's own dispatch.** Success criteria were 70% target / >90% exceptional. **100% surpasses exceptional.**
+
+### Pre-batch corrections (Items 1 + 2 from user dispatch turn)
+- **Item 1 — BLK-010.2 cross-reference annotation.** BLK-010.2 was already accurate (showed all 9 ClassifierResult fields correctly since 2026-04-28). The 6-field paraphrase that user's Batch 4 dispatch chat referenced was transient summary, not the durable BLK ledger. Annotated BLK-010.2 with forward marker (option b) for fresh-session readers.
+- **Item 2 — Import contract verification.** Read `.claude/import_contract.md` in full; pasted to chat for verification. Caught two errors in user's Batch 5 dispatch parameters: (a) module path was `tier/assignment.py` — should be `tier/tier_assignment.py` per contract; (b) rule_id_fired list mixed tier labels with rule IDs (17 listed; only 12 are valid). User confirmed corrections; dispatch parameters revised.
+
+### Batch 5 dispatch — single implementer
+| Task | Spec | Files | DEC | Tests |
+|---|---|---|---|---|
+| T-IMPL-5 Tier Assignment | S14 | `tomato_sandbox/tier/{__init__,tier_assignment}.py` + `tests/unit/test_tier_assignment.py` | DEC-041 | **88 unit + 135 integration = 223 PASS** |
+
+Cumulative: 630 → **718 unit tests** (+88). Section 15: 0 → **135 PASS** (+135 — milestone).
+
+### BLK-011 — three spec-discovery sub-defects (all RESOLVED in dispatch)
+1. **Sub-defect 11.1:** Rule 4 evaluates BEFORE Rule 3. Spec/contract header said `Rule 1 > Rule 3 > Rule 4 > ...`; SB.10 scenario walk required `Rule 1 > Rule 4 > Rule 3 > ...`. Implementation uses scenario-body authority per BLK-004 precedent.
+2. **Sub-defect 11.2:** Rule 4 bypass condition (`size=2 AND max>=0.41`) absent from spec prose, implied by S3A.3, S3A.6, S3A.8, S3A.9 scenario bodies. Initial implementer hypothesis was `margin > 0.0`; corrected to `max >= 0.41` after S4A.4 broke. **BLK-011 prose updated post-anti-cheat (MEDIUM-1) to reflect DEC-041's final formulation.**
+3. **Sub-defect 11.3:** PSV is a valid T5 in-set late_blight probability source when PSV argmax == 2. Import contract enumeration didn't list PSV; SDIS.2 scenario required it.
+
+### Audit verdicts
+- Sacred 10/10 PASS in-sandbox (canonical per DEC-019).
+- Anti-cheat **milestone scan: 0 HIGH, 1 MEDIUM, 1 LOW** — both findings are documentation artifacts (BLK-011 prose obsolete intermediate hypothesis; import_contract.md priority list not yet updated). Both fixed in this session before commit.
+- Section 15 immutability verified: all 13 LF-normalized SHA256 hashes match DEC-032 baseline exactly.
+- DEC-038 compliance: zero implementer-driven commits since `4af9fc5`.
+
+### Anti-cheat findings fixed in-session (before commit)
+- **MEDIUM-1 fix:** annotated BLK-011 sub-defect 11.2 with `[CORRECTED 2026-05-02 per DEC-041 Decision 2]` note pointing to actual `max >= 0.41` formulation, superseding the obsolete `margin > 0.0` intermediate hypothesis.
+- **LOW-1 fix:** updated `.claude/import_contract.md` "Overall rule priority" to `Rule 1 > Rule 4 > Rule 3 > Rule 5 > ...` with `[CORRECTED 2026-05-02 per BLK-011 sub-defect 11.1 + DEC-041]` cross-reference.
+
+### Q4 ready to lift
+With all 135 Section 15 tests passing, port 8767 sandbox server launch is now meaningful for end-to-end smoke testing. Decision on whether to lift Q4 deferred to user's next direction.
+

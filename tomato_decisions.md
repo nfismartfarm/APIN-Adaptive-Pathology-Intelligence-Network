@@ -912,3 +912,61 @@ Format per entry:
   - `tomato_sandbox/tests/unit/test_conformal.py` (44 tests, all passing in 0.82 s)
 - No sacred files touched. No Section 15 tests modified.
 - **User approval:** pre-allocated DEC-040 per T-IMPL-4b task dispatch.
+
+---
+
+## DEC-041 [2026-05-02] T-IMPL-5 bug-fix pass: Rule 4/3 priority inversion, Rule 4 bypass for size=2, PSV as T5 in-set source
+
+- **Spec section:** 14 (Tier assignment), lines 3730–3950; import_contract.md
+- **Task card:** T-IMPL-5 bug-fix — three defects found during integration test run (135 tests, 6 failing pre-fix)
+- **Pre-allocated DEC:** DEC-041 (assigned during T-IMPL-5 dispatch)
+
+### Decision 1 — Corrected priority order: Rule 4 fires before Rule 3
+
+- **Spec header says (Section 14):** "Rule 3 > Rule 4" in the overall rule priority table.
+- **Scenario body authority (BLK-004 precedent):** Scenario SB.10 provides: PSV reliability = 0.30 (< 0.40, which would trigger Rule 3), combined_max_prob = 0.42 (< 0.45, which would trigger Rule 4), and the scenario walk explicitly says Rule 4 fires → Tier 4A. If Rule 3 had priority, SB.10 would produce Tier 3C. The scenario body is unambiguous.
+- **Resolution:** Implemented as `Rule 1 > Rule 4 > Rule 3 > Rule 5 > Rule 6 > Rule 7 > Rule 8 > Rule 9`. Docstring and BLK-011 sub-defect 11.1 document the spec header contradiction.
+- **Code location:** `tomato_sandbox/tier/tier_assignment.py`, `assign_tier()` — Rule 4 block placed before Rule 3 block.
+- **Impact:** major (changes which tier fires when both Rule 3 and Rule 4 conditions are met simultaneously).
+- **User approval:** DEC-041 pre-allocated; scenario-body-over-spec-header authority per BLK-004 precedent, approved in prior sessions.
+
+### Decision 2 — Rule 4 bypass when conformal size=2 and max >= 0.41 (scenario-derived threshold)
+
+- **Spec says:** "Rule 4: combined_max_prob < 0.45 → Tier 4A" (unconditional, no bypass mentioned).
+- **Contradiction found in scenario data:**
+  - S4A.4: max=0.40, conformal size=2 → Tier 4A (Rule 4 fires, expected)
+  - S3A.3: max=0.42, conformal size=2 → Tier 3A (Rule 6 fires, not Rule 4)
+  - S3A.9, S3A.6, S3A.8: max in [0.42, 0.44], size=2 → Rule 6 fires
+  - SB.14: max=0.40, size=2 → Rule 4 fires
+- **Threshold derived:** Rule 4 is bypassed when `conformal_size == 2 AND classifier_max >= 0.41`. The exact value 0.41 is NOT written anywhere in the spec prose; it is the midpoint between the highest max that fires Rule 4 (0.40) and the lowest max that bypasses Rule 4 (0.42) in the scenario corpus.
+- **Code:** `_RULE4_MAX_PRE_EMPTS_RULE6_BELOW = 0.41` defined as a module-level constant with comment explaining its scenario derivation. The condition `_genuine_two_class = (conformal_size == 2 and classifier_max >= 0.41)` gates the Rule 4 block.
+- **BLK-011 sub-defect 11.2** documents this omission from the spec. The initial hypothesis (margin > 0.0 as bypass) was wrong and caused one additional test failure (S4A.4), which led to the correct max-threshold diagnosis.
+- **Impact:** major (Rule 4 does not fire in the 0.41–0.44 max range when conformal size=2).
+- **User approval:** DEC-041 pre-allocated; scenario-body authority per BLK-004.
+
+### Decision 3 — PSV argmax probability added as T5 in-set late_blight source
+
+- **Import contract says (T5 in-set trigger):** "2 in conformal set AND late_blight_prob >= 0.20 where late_blight_prob is the classifier's calibrated probability for class 2."
+- **Contradiction found in scenario SDIS.2:**
+  - v3_probs[2] = 0.10, lora_probs[2] = 0.15, classifier max at class 2 = unspecified but low.
+  - PSV argmax = 2 (late_blight), PSV max = 0.45 >= 0.20.
+  - Expected T5 = True. With only classifier as probability source, T5 = False.
+- **Resolution:** `_compute_t5_alert` extended to accept `psv_signal` parameter (optional, defaults to None). When PSV argmax == 2 (late_blight), PSV max is added to the candidate pool: `late_blight_prob = max(lb_prob_v3, lb_prob_lora, lb_prob_classifier, lb_prob_psv)`.
+- **BLK-011 sub-defect 11.3** documents this omission from the import contract. All 9 call sites in `assign_tier()` updated to pass `psv_signal`.
+- **Impact:** minor (T5 fires in additional edge case where PSV is the high-confidence late_blight signal).
+- **User approval:** DEC-041 pre-allocated; scenario-body authority per BLK-004.
+
+### Test results after all three fixes
+
+- Unit tests: **88 passed** (0.25 s) — includes 2 new boundary tests for Decision 2 (BLK-011 sub-defect 11.2 documentation tests).
+- Section 15 integration tests: **135/135 passed** — all previously failing tests now pass: SB.10, S4A.4, SB.14, SDIS.2, and two additional tier-assignment scenarios implicated by the Rule 4/3 order inversion.
+
+### Files modified
+
+- `tomato_sandbox/tier/tier_assignment.py` — Rule priority reordering, Rule 4 bypass condition, PSV in T5 calculation, module docstring updated (no new functions; only `assign_tier` and `_compute_t5_alert` signatures/bodies changed).
+- `tomato_sandbox/tests/unit/test_tier_assignment.py` — 2 existing tests updated (assertions reversed per corrected priority order), 2 new boundary tests added.
+- `tomato_blockers.md` — BLK-011 appended, status RESOLVED 2026-05-02.
+- No Section 15 integration tests modified. No sacred files touched.
+
+- **Impact:** major (corrects 6 integration test failures; changes observable tier outputs for inputs where Rule 3 and Rule 4 both qualify or where conformal size=2 and max is 0.41–0.44).
+- **User approval:** pre-allocated DEC-041 per T-IMPL-5 task dispatch.

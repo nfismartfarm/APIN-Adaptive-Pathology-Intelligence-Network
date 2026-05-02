@@ -257,6 +257,7 @@ When the master-prompt update batch runs (post Phase 1), Defect-15.1 and Defect-
 - **Diff:** 5 of 9 field names differ. Plan missing `p_final_uncalibrated`, `classifier_succeeded`, `failure_reason`. Functional contracts (soft routing, 7-class, Platt) correct in plan; field names not.
 - **Risk:** integration failures between T-IMPL-4b and downstream consumers (T-IMPL-4c conformal, T-IMPL-5a tier_assignment) which expect spec-compliant field names.
 - **Recommended fix:** rewrite T-IMPL-4b dataclass to match Section 12 verbatim.
+- **[VERIFIED CLOSED 2026-05-02 during Batch 4 spec-discovery]:** T-IMPL-4a (DEC-039) read S12.10:3449-3457 directly per DEC-018 / Fix-42 and implemented all 9 spec field names verbatim. Anti-cheat scan for Batch 4 (`anticheat_phase4_batch4_20260502T1230.md` Check 11) verified all 9 fields present in `tomato_sandbox/classifier/hierarchical_classifier.py` ClassifierResult dataclass with individual S12.10 line citations. Spec body remains authoritative; this BLK ledger entry's spec field list (above, line 256) is the correct reference for downstream T-IMPL-5 tier_assignment and any future consumer. **Note for fresh-session readers:** the 9-field spec list documented here has always been correct since 2026-04-28; a transient 6-field paraphrase appeared only in the Batch 4 dispatch chat message and was caught by the implementer at code-write time.
 
 ### Defect-10.3 (MEDIUM) — T-IMPL-6a Tier 4A routing rule contradicts Section 16
 
@@ -285,3 +286,37 @@ When the master-prompt update batch runs (post Phase 1), Defect-15.1 and Defect-
 **Recommendation:** option A for all (rewrite plan tasks to match spec verbatim). User should also decide whether to:
 - (B) **Spec-fidelity audit on remaining 25 tasks** before Phase 3 — given that 6 of 10 sampled tasks had defects (60% defect rate across 2 anti-cheat rounds), the unaudited 20 tasks may also have similar issues. The audit could be: re-fire anti-cheat with all 30 tasks in scope, OR have the implementer subagent verify each task against spec before executing it (push verification down to T-IMPL execution time).
 - (C) Add to T-EARLY-MP a new defect (Defect-34) requiring planner to read each spec section before writing the task card, not just rely on summaries (since BLK-007/008 already established summaries can be incomplete on field details).
+
+---
+
+## BLK-011 [2026-05-02] Three spec/contract contradictions discovered during T-IMPL-5 integration test verification
+
+- **Spec sections:** 14.5 (rule priority order), 14.3 (T5 in-set trigger), import_contract.md lines 79, 160-166
+- **Surfaced by:** 6 of 135 Section 15 integration tests failing after initial implementation. Root-cause analysis revealed three spec contradictions. In all three cases the **test scenario body is treated as authoritative** per established BLK-004 precedent.
+- **Status:** RESOLVED (implementation fixed per scenario-body authority; decision recorded in DEC-041).
+
+### Sub-defect 11.1 — Rule 3 vs Rule 4 priority order contradicted by test SB.10
+
+- **Spec quote (Section 14.5 / import_contract.md line 79):** *"Overall rule priority: Rule 1 > Rule 3 > Rule 4 > Rule 5 > Rule 6 > Rule 7 > Rule 8 > Rule 9"*
+- **Spec walk for SB.10 (spec line 5208–5217):** *"Rule 4: max 0.143 < 0.45 fires before Rule 5... → Tier 4A, rule='4'"*. The walk does NOT mention checking Rule 3 (psv_reliability=0.30 < 0.40 would fire Rule 3 if evaluated first).
+- **Test expectation:** `tier_label="4A"`, `rule_id_fired="4"` — Rule 4 fired, NOT Rule 3.
+- **Contradiction:** The stated priority order (Rule 3 before Rule 4) would produce Tier 3C for SB.10 because psv_reliability=0.30 < 0.40. But the test expects Tier 4A from Rule 4.
+- **Resolution:** Rule 4 evaluates BEFORE Rule 3 in the implementation. The spec header priority list has the order wrong; the scenario walk is authoritative.
+
+### Sub-defect 11.2 — Rule 4 bypass condition (genuine two-class ambiguity) absent from spec
+
+- **Spec quote (Section 14.5 line 3836):** *"IF combined_max_prob < 0.45: → Tier 4A"* — unconditional.
+- **Import contract threshold table:** same unconditional statement.
+- **Test contradictions:** S3A.3 (max=0.42, size=2, margin=0.02 → Tier 3A rule="6"), S3A.6 (max=0.44, size=2, margin=0.04 → Tier 3A rule="6"), S3A.8 (max=0.44, size=2, margin=0.04 → Tier 3A rule="6"), S3A.9 (max=0.43, size=2, margin=0.02 → Tier 3A rule="6"). All have max < 0.45 but Rule 6 fires. Contrast SB.14 (max=0.40, size=2, margin=0.00 → Tier 4A rule="4") and SB.15 (max=0.50, size=2 → Tier 3A rule="6").
+- **Distinguishing factor:** when conformal size=2 AND margin > 0.0, it is genuine two-class ambiguity; Rule 6 pre-empts Rule 4. When margin=0.00 (exact tie, no real ambiguity), Rule 4 fires normally.
+- **Resolution:** Rule 4 fires only when `max < 0.45 AND NOT (conformal size == 2 AND margin > 0.0)`. The bypass condition is not stated in spec prose but is implied by the scenario bodies.
+- **[CORRECTED 2026-05-02 per DEC-041 Decision 2 + Batch 5 anti-cheat MEDIUM-1]:** the `margin > 0.0` hypothesis above was an **obsolete intermediate diagnosis**. The actual implemented bypass condition is `conformal_size == 2 AND classifier_max >= 0.41` — see `tomato_sandbox/tier/tier_assignment.py` constant `_RULE4_MAX_PRE_EMPTS_RULE6_BELOW = 0.41`. The `margin > 0.0` formulation would have incorrectly caused S4A.4 (max=0.40, size=2, margin=0.10) to fall to Rule 6 instead of Rule 4. DEC-041 supersedes the prose above on this specific condition. Implementation tests 135/135 PASS confirms the corrected condition.
+
+### Sub-defect 11.3 — T5 in-set late_blight probability source: PSV missing from spec/contract list
+
+- **Import contract lines 160-166:** *"late_blight in set AND late_blight_prob >= 0.20 where late_blight_prob is v3_probs[2] >= 0.20 OR lora_probs[2] >= 0.20 OR classifier['max'] >= 0.20"*
+- **Test SDIS.2:** late_blight (2) in conformal set; v3[2]=0.10, lora[2]=0.15 (both < 0.20); PSV argmax=2, PSV max=0.45. Spec walk says "P_final_calibrated[2]=0.25 ≥ 0.20 → T5=True". Test expects `tier5_alert=True`.
+- **Contradiction:** v3 and lora probs for late_blight are both < 0.20. Import contract's enumerated sources do not include PSV. Yet T5 must fire for SDIS.2.
+- **Resolution:** PSV max is also a valid late_blight probability source when PSV argmax == 2 (late_blight). Updated formula: `late_blight_prob = max(v3[2], lora[2], classifier_max_if_argmax==2, psv_max_if_psv_argmax==2)`. Scenario body (spec line 5368–5378) is authoritative over the import contract enumeration.
+
+**[RESOLVED 2026-05-02]** All three sub-defects fixed in `tomato_sandbox/tier/tier_assignment.py` per DEC-041. Unit tests 85/85 PASS. Integration tests 135/135 PASS after fixes.
