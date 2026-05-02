@@ -970,3 +970,233 @@ Format per entry:
 
 - **Impact:** major (corrects 6 integration test failures; changes observable tier outputs for inputs where Rule 3 and Rule 4 both qualify or where conformal size=2 and max is 0.41–0.44).
 - **User approval:** pre-allocated DEC-041 per T-IMPL-5 task dispatch.
+
+---
+
+## DEC-044 [2026-05-02] T-IMPL-6c: Severity grading (S17) + multi-image aggregation (S18) — module paths, PSV feature access, aggregation strategy
+
+- **Spec sections:** 17 (Severity grading), lines 5941-6083; 18 (Multi-image input), lines 6085-6271
+- **Pre-allocated DEC:** DEC-044 per T-IMPL-6c task dispatch
+
+### Decision 1 — File naming: spec says grader.py / aggregator.py; task card says severity.py / multi_image.py
+
+- **Spec S21 file layout (lines 6536-6539):**
+  - `tomato_sandbox/severity/grader.py` — "Severity grading (Section 17)"
+  - `tomato_sandbox/multi_image/aggregator.py` — "Multi-image aggregation (Section 18.4)"
+- **Task card says:** `tomato_sandbox/severity/severity.py` and `tomato_sandbox/multi_image/multi_image.py`
+- **Resolution:** canonical implementation at spec-named files (`grader.py`, `aggregator.py`). Task-card-named files (`severity.py`, `multi_image.py`) provided as re-export shims, so both import paths work. `__init__.py` re-exports all public symbols from grader.py / aggregator.py respectively.
+- **Why:** spec body path wins per DEC-018 / Critical Rule 9. Task card path is accommodated via shim (same pattern as DEC-029 for validate_input).
+- **Impact:** minor.
+
+### Decision 2 — PSV feature access by name, not by magic index
+
+- **Spec 17.2 (lines 5954-5960):** severity reads `disease_coverage_pct`, `mean_lesion_intensity` (G3), `lesion_count`, `lesion_size_distribution` (G7/G8 mean/std), and `psv_reliability` by name.
+- **Spec 17.2 (line 5962):** "Section 17 reads these features by name from `SignalCResult.features`." However, `SignalCResult` has `raw_features: np.ndarray` (26 floats), not a named-dict. The feature names are in `tomato_sandbox/signals/psv/features.py::FEATURE_NAMES`.
+- **Resolution:** severity grader imports `FEATURE_NAMES` from `tomato_sandbox.signals.psv.features` and resolves indices at module load: `_IDX = {name: i for i, name in enumerate(FEATURE_NAMES)}`. Feature access is `raw_features[_IDX["disease_coverage_pct"]]`.
+- **Note:** spec 17.2 says "mean_lesion_intensity" (G3) but FEATURE_NAMES has no `mean_lesion_intensity` entry — the G3 group (indices 7-10) contains `yellow_pixel_fraction`, `brown_pixel_fraction`, `necrotic_pixel_fraction`, `leaf_color_variance`. "G2" has `mean_lesion_size` (index 3). This is a BLK candidate (see below). Resolution: use `mean_lesion_size` (closest G2 match to spec's "mean_lesion_intensity") and document the mismatch. Severity grades by coverage_pct + lesion_count primarily; mean intensity is ancillary.
+- **Spec 17.2 says `lesion_size_distribution`: mean and standard deviation (G7, G8).** FEATURE_NAMES maps G7 to indices 19-21 (sharpness, aggregate_quality, psv_aggregate_reliability) — these are IQA metrics, not size distribution. G2 (indices 3-6) contains `mean_lesion_size` and `lesion_size_std`. Discrepancy: spec narrative references incorrect group numbers for these features. Resolution: use `mean_lesion_size` (idx 3) and `lesion_size_std` (idx 4) from the actual feature catalog, which matches the semantic description (mean and std of lesion sizes). Document as BLK candidate.
+- **Impact:** minor — the grading rule uses `disease_coverage_pct` and `lesion_count` as primary signals; size distribution features are informational.
+
+### Decision 3 — Severity primary grading rule: coverage_pct is primary, lesion_count is OR-joined
+
+- **Spec 17.3 (lines 5972-5980):** table headers read "Mild (coverage_pct, lesion_count)" with the format `< 5%, 1-5 lesions` etc. The "or" in the Severe column is explicit: `> 15% OR > 15 lesions`. For Mild/Moderate the table uses comma, implying AND-relationship for the range bounds — the coverage range AND the lesion count range define the bucket.
+- **However, YLCV and mosaic rows (lines 5977-5980):** "only coverage matters." No lesion_count threshold for these two diseases.
+- **Resolution (implemented):**
+  - For foliar, septoria, late_blight: severity is primarily `coverage_pct`. If coverage_pct alone is ambiguous at the moderate/severe boundary, `lesion_count` can push to severe (OR logic per the explicit "or" in the Severe column). For mild/moderate: coverage_pct is the determinant; lesion_count is a sanity check but does not downgrade.
+  - Mild condition: `coverage_pct < mild_max_pct`
+  - Severe condition: `coverage_pct > severe_min_pct OR lesion_count > severe_min_count` (per spec "or > N lesions")
+  - Moderate: everything else between mild and severe.
+  - For ylcv, mosaic: coverage_pct only (spec line 5980: "only coverage matters").
+- **Impact:** minor.
+
+### Decision 4 — Severity omit conditions (spec 17.7)
+
+- **Spec 17.7 (lines 6051-6071):** severity omitted (grade = null) when:
+  1. Tier 4A (low confidence)
+  2. Tier 4B (pipeline failure)
+  3. `psv_reliability < 0.50`
+  4. `disease_coverage_pct < 1.0` (too small, may be noise)
+- **Resolution:** `compute_severity` accepts `tier_label: str` and `psv_reliability: float` in addition to psv features. Returns `SeverityResult` with `grade=None` for omit conditions.
+- **Per spec 17.6:** for healthy (class 5) and OOD (class 6) argmax, grade = null with appropriate `human_readable`.
+- **Impact:** minor.
+
+### Decision 5 — SeverityResult dataclass fields (from spec 17.4 JSON schema)
+
+- **Spec 17.4 (lines 5991-6011):** JSON block defines: `grade`, `human_readable`, `details.disease_coverage_pct`, `details.lesion_count`, `details.psv_confidence_in_severity`, `details.thresholds_used.{mild_max, moderate_max, disease}`, `recommended_action`.
+- **Resolution:** `SeverityResult` is a dataclass with: `grade: Optional[str]`, `human_readable: str`, `disease_coverage_pct: Optional[float]`, `lesion_count: Optional[int]`, `psv_confidence_in_severity: Optional[float]`, `thresholds_used: Optional[dict]`, `recommended_action: str`.
+- **Impact:** minor.
+
+### Decision 6 — Multi-image aggregation: AggregatedResult is a dataclass holding final tier + per-image results
+
+- **Spec 18.4 (lines 6144-6186):** 7-step aggregation. The output must supply: final tier assignment, per-image summary list, T5 aggregation, warnings list.
+- **Spec 18.3 (line 6140):** "Per-image results are also returned in the response."
+- **Resolution:** `AggregatedResult` dataclass: `final_tier: TierAssignment`, `per_image_summaries: list[PerImageSummary]`, `tier5_alert_fired: bool`, `tier5_reason: str`, `warnings: list[str]`, `primary_class: Optional[int]`, `combined_max_prob: Optional[float]`, `combined_margin: Optional[float]`, `conformal_set: set[int]`, `iqa_decision: str`, `psv_reliability: float`, `chilli_leakage: float`. `PerImageSummary` is a smaller dataclass per spec 18.6 JSON.
+- **Tier assignment from aggregated values:** `aggregate_multi_image` assembles the aggregated dict values and calls `assign_tier()` — same rule chain, per spec 18.5 line 6193: "The aggregated values are passed through assign_tier() as if from a single image."
+- **Impact:** minor.
+
+### Decision 7 — IQA REJECT per-image handling (spec 18.4 pre-step)
+
+- **Spec 18.4 line 6151:** "IQA REJECT per-image is treated like a pipeline failure (Tier 4B equivalent): the rejected image is excluded from class voting."
+- **Resolution:** `aggregate_multi_image` accepts `list[TierAssignment]` PLUS parallel list of per-image dicts (containing `primary_class`, `primary_confidence`, `conformal_set`, etc.) needed for Steps 3-6. Images with `tier_label == "4B"` or flagged as IQA-rejected are excluded from class voting. If ALL excluded, return Tier 4B aggregate.
+- **Impact:** minor.
+
+### BLK candidates
+
+- **BLK-012 candidate:** Spec 17.2 references "mean_lesion_intensity (G3)" and "lesion_size_distribution (G7, G8)". These group numbers do not match `FEATURE_NAMES` from `features.py`: G3 is color fractions, G7 is IQA metrics. Semantic intent is clear (mean and std of lesion sizes = G2 `mean_lesion_size`, `lesion_size_std`). Resolution applied: use G2 features by semantic name. **Status: BLK candidate — not a blocker for implementation since severity grading is primarily coverage_pct + lesion_count; the ancillary features degrade gracefully.**
+
+### Impact
+- 6 new files: `severity/grader.py`, `severity/severity.py`, `severity/__init__.py`, `multi_image/aggregator.py`, `multi_image/multi_image.py`, `multi_image/__init__.py`
+- 2 test files: `tests/unit/test_severity.py`, `tests/unit/test_multi_image.py`
+- No sacred files touched. No Section 15 tests modified.
+- **User approval:** pre-allocated DEC-044 per T-IMPL-6c task dispatch.
+
+---
+
+## DEC-043 [2026-05-02] T-IMPL-6b: Response builder — Section 16 output schema
+
+- **Spec section:** 16 (Output schema and response construction), lines 5637-5939
+- **Pre-allocated DEC:** DEC-043 (assigned in T-IMPL-6b task dispatch)
+- **Batch:** 6
+
+### Decision 1 — Module placement: tomato_sandbox/response/response_builder.py
+
+- **Task card says:** `tomato_sandbox/response/response_builder.py` with sub-package re-export shim.
+- **DEC-033 pattern:** sub-package + `__init__.py` re-export.
+- **Spec says (16.1 line 5643):** `build_response(tier_assignment, classifier_result, conformal_result, iqa_result, signal_a, signal_b, signal_c, request_metadata) -> ResponseDict`
+- **What we implemented:** `build_response(tier_assignment, classifier_result, conformal_result, iqa_result, *, request_metadata=None, route_ambiguous_to_queue=False, model_version="tomato-sandbox-v1.0.0") -> dict`
+- **Deviation from spec signature:** `signal_a`, `signal_b`, `signal_c` are listed in the spec signature (line 5643) but Section 16's schema does not consume them directly — severity (Section 17) uses PSV features, not the builder. The builder only reads the already-computed `ClassifierResult`, `ConformalResult`, and `IQAResult`. Including raw signal objects would be dead parameters. We omit them as unused per spec body authority over the spec signature notation. The `route_ambiguous_to_queue` and `model_version` parameters are builder-layer concerns added for completeness and testability.
+- **Impact:** minor (dead parameters omitted; caller does not need to pass signal objects).
+
+### Decision 2 — Tier 4B is absolute exception to "T5 fires → always routed" rule
+
+- **Spec line 5854:** "Tier 5 alert fires → always routed"
+- **Spec line 5857:** "Tier 4B → NOT routed (pipeline issue, not a model uncertainty)"
+- **Apparent conflict:** The "always routed" statement at 5854 could be read as overriding the Tier 4B exclusion at 5857.
+- **Resolution:** Spec line 5857 explicitly excludes Tier 4B with a parenthetical reason ("pipeline issue, not a model uncertainty"). Tier 4B fires from Rule 1 (signal forward_succeeded=False); in that state, T5 alert is computed over degenerate signals and is not meaningful for routing. The explicit exclusion at 5857 wins. Implementation checks `tier_label == "4B"` FIRST, before the T5 branch.
+- **Test:** `test_tier4b_not_routed_even_with_t5` — PASS.
+- **Impact:** minor (Tier 4B never routed regardless of T5).
+- **User approval:** pre-allocated DEC-043; spec-body specificity authority.
+
+### Decision 3 — Tier 4A user string includes "below 45%" per spec 16.6
+
+- **Spec line 5813:** "For Tier 4A (low confidence), display as 'below 45%' rather than the actual number"
+- **Context:** spec says these display rules apply to "user-facing strings", which is exactly the `explanation.user_strings` field.
+- **What we implemented:** The Tier 4A template includes `{confidence_pct}` which `_format_confidence_pct` renders as `"below 45%"` for that tier. This satisfies the spec display contract.
+- **Impact:** minor (template wording only).
+
+### Decision 4 — severity block emits null placeholders (Section 17 not yet landed)
+
+- **Spec line 5711:** "severity block content is computed and populated per Section 17"
+- **T-IMPL-6b scope:** Section 16 only (Section 17 is T-IMPL-6c, Batch 6 sibling not yet landed).
+- **Resolution:** `severity` block emitted with `grade: null, human_readable: null, details: null`. The server layer or Section 17 module will fill these after computing severity. The schema is stable and all three keys are present.
+- **Impact:** minor (severity always null until Section 17 integration).
+
+### Decision 5 — Tier 4B queue routing is evaluated before T5 branch (not in spec order)
+
+- Same as Decision 2 — ordered explicitly to ensure the 4B absolute exclusion cannot be bypassed.
+
+### Decision 6 — queue_id emitted as null from pure builder; server layer assigns real ID
+
+- **Spec line 5872:** "queue_id is generated server-side at routing time"
+- **Resolution:** Pure builder returns `queue_id: null` (a valid null per stable-schema contract). The server layer that calls `build_response` assigns the actual queue ID when `routed=True`. This keeps the response builder pure (no side effects, no UUID generation).
+- **Impact:** minor.
+
+### Contract mismatches found between upstream Batch 4-5 dataclasses and S16 expectations
+
+1. **`signal_a`, `signal_b`, `signal_c` in spec signature (16.1 line 5643) not consumed by Section 16's schema.** Section 16's fields come from ClassifierResult, ConformalResult, IQAResult only. The raw signal objects are not needed. Omitted as dead parameters (Decision 1).
+
+2. **`ConformalResult` field name `prediction_set` (list[int]) vs spec 16.2 example uses class name strings.** The response builder converts indices → strings using `_CLASS_SHORT_NAMES`. No mismatch; conversion is the builder's responsibility.
+
+3. **`TierAssignment` has only 3 fields (`tier_label`, `tier5_alert`, `rule_id_fired`)** — no `sub_rule_id_fired` or `reasons_structured` attributes. Spec 16.1 line 5641 references "sub_rule_id_fired" from the TierAssignment. The actual dataclass (DEC-041) does not expose it. We map `sub_rule_id_fired` in the structured block as a copy of `rule_id_fired` (they are the same string for sub-rules like "7c", "8a"). No BLK required — the distinction is cosmetic in the current implementation; full sub-rule decomposition is a monitoring dashboard concern (Section 25).
+
+### Test results
+
+- **78 unit tests, 78 passing** (0.37 s)
+- **135 Section 15 integration tests, 135 passing** (0.39 s) — no regressions
+- **30 sacred guard tests, 30 passing** — no sacred files touched
+- Pre-fix: 2 tests failing (Tier 4B T5 routing, Tier 4A "below 45%" display). Both fixed in same session.
+
+### Files created
+
+| File | Bytes | Purpose |
+|------|-------|---------|
+| `tomato_sandbox/response/response_builder.py` | 26,521 | Canonical implementation of Section 16 |
+| `tomato_sandbox/response/__init__.py` | 337 | Re-export shim (DEC-033 pattern) |
+| `tomato_sandbox/tests/unit/test_response_builder.py` | 23,560 | 78 unit tests |
+
+No sacred files modified. No Section 15 tests modified.
+
+- **Impact:** minor (new module, no existing module changes)
+- **User approval:** pre-allocated DEC-043 per T-IMPL-6b task dispatch.
+
+---
+
+## DEC-042 [2026-05-02] T-IMPL-6a Pipeline orchestrator: canonical placement, GPU lock semantics, TTA/PSV exclusion, NaN guard, all-signals-failed sentinel
+
+- **Spec section:** 21 (Pipeline orchestrator), lines 6604-6861
+- **Pre-allocated DEC:** DEC-042 (assigned during T-IMPL-6a dispatch)
+
+### Decision 1 — File naming: canonical at pipeline.py, shim at orchestrator.py
+
+- **Spec says (21.1 line 6608):** "Pipeline entry: `tomato_sandbox/orchestrator/pipeline.py`"
+- **Task card says (DEC-033 pattern):** both `orchestrator/pipeline.py` (spec-named) and `orchestrator/orchestrator.py` (task-card alias) must work
+- **Resolution:** canonical implementation at `tomato_sandbox/orchestrator/pipeline.py`. Flat alias shim at `tomato_sandbox/orchestrator/orchestrator.py` re-exports all public symbols from `pipeline`. `__init__.py` re-exports with explicit `__all__`. This mirrors the DEC-033 / DEC-029 pattern used for validate_input, iqa, classifier, conformal, and tier.
+- **Impact:** minor (extra shim file, same public surface).
+
+### Decision 2 — GPU lock acquisition in synchronous context (unit tests vs async production)
+
+- **Spec 21.3 step 4:** "Acquire GPU lock (on timeout: SERVER_OVERLOAD 503)"
+- **Production pattern (spec Section 19 / main.py):** FastAPI server holds the lock via `async with gpu_lock.acquired()` before calling `run_in_executor(predict_single)`. So when `predict_single` runs inside the executor, the lock is already held. The orchestrator does not need to re-acquire it.
+- **Unit test pattern:** `predict_single` called directly (no event loop, no pre-held lock). In this context the orchestrator must attempt lock acquisition if a `gpu_lock` is in `PipelineContext`.
+- **Resolution:** Orchestrator attempts lock acquisition via asyncio event-loop detection: if no running loop, uses `asyncio.run()`; if loop running, assumes caller already holds it. This covers both unit-test paths (sync, explicit lock) and production paths (async, pre-held lock). Documented in code with inline comment.
+- **Impact:** minor (unit-test compatibility pattern).
+
+### Decision 3 — Signal C (PSV) runs strictly outside GPU lock
+
+- **Spec says (10.2, 21.3 step 8):** "PSV is CPU-only: no GPU API, no gpu_lock"
+- **Implementation:** GPU lock is acquired for steps 5-7 (IQA + Signal A + Signal B). Lock released in `try/finally` before Signal C runs. Signal C is step 8, after the `finally` block. This is enforced by code structure, not by convention.
+- **Impact:** architectural (any future GPU-bound preprocessing must NOT be placed in step 8 without adding a new lock acquisition).
+
+### Decision 4 — TTA: PSV not re-invoked; original Signal C flows through to post-TTA classifier
+
+- **Spec says (11.1 line 2925, 11.9 lines 3139-3140):** "PSV does NOT participate in TTA"
+- **Implementation:** `apply_tta` returns `(SignalAResult, SignalBResult, TTAReport)`. Orchestrator calls `compute_classifier(sa=agg_a, sb=agg_b, sc=signal_c)` using the ORIGINAL single-view `signal_c` (not re-run during TTA). The `sc` variable is never reassigned during the TTA block.
+- **Impact:** behavioral — PSV features remain fixed across all TTA views, which is the spec-required behavior.
+
+### Decision 5 — NaN guard marks all signals failed (not just the source signal)
+
+- **Spec 21.4 pseudocode (lines 6684-6710):** "mark ALL signals forward_succeeded=False if any classifier output is NaN"
+- **Rationale:** NaN in classifier output means the feature vector is corrupt. Since all three signals contribute to the feature vector, we cannot attribute the NaN to one signal. Marking all failed guarantees tier Rule 1 fires (→ 4B), not Rule 9 (→ 4A on random corrupt probs).
+- **Implementation:** `_apply_nan_guard` rebuilds all three signal dataclasses with `forward_succeeded=False` and `failure_reason="nan_in_classifier_output"`. Uses explicit field reconstruction (no `dataclasses.replace`) for clarity.
+- **Impact:** behavioral (NaN → 4B is safer than NaN → 4A or silent corrupt result).
+
+### Decision 6 — All-signals-failed short-circuit skips classifier entirely
+
+- **Spec 21.5 lines 6745-6755:** "if ALL signals failed: skip classifier forward pass, set sentinel classifier result, route directly to tier (Rule 1 → 4B)"
+- **Implementation:** `_make_sentinel_classifier_result("all_signals_failed")` creates a `ClassifierResult` with all-zeros probs, `combined_max_prob=0.0`, `classifier_succeeded=False`. Tier assignment is called directly with the three failed signal dicts; Rule 1 fires (any signal failed → 4B).
+- **Why skip classifier:** zeros_vector() input to classifier is legal numerically but meaningless semantically. Any tier produced from it would be spurious. Spec explicitly says "skip classifier entirely" for this case.
+- **Impact:** behavioral (all-signals-failed → 4B via correct path, not via sentinel probabilities leaking into Rule 9).
+
+### Decision 7 — Fallback ConformalResult: all-7-classes set (maximally conservative)
+
+- **Spec says:** "conformal always returns a valid set; failure defaults to widest possible set"
+- **Implementation:** `_make_fallback_conformal()` returns `prediction_set=list(range(7))`, `prediction_set_size=7`, `tau=1.0`. This is the most conservative possible output (all classes in set, maximum uncertainty). Tier rules reading conformal set size see 7 (not 0 or 1), which correctly prevents Rules 5/6 (which require size <= 2) from firing on a degenerate conformal result.
+- **Impact:** minor (failure path safety net).
+
+### Test results
+
+- Unit tests: see test run below (reported in same session).
+- Section 15 integration tests: 135/135 passing (no regressions).
+- Sacred files: verified unchanged.
+
+### Files created
+
+| File | Purpose |
+|------|---------|
+| `tomato_sandbox/orchestrator/pipeline.py` | Canonical orchestrator (spec 21.1) |
+| `tomato_sandbox/orchestrator/__init__.py` | Re-export shim (DEC-033 pattern) |
+| `tomato_sandbox/orchestrator/orchestrator.py` | Task-card alias shim (DEC-033) |
+| `tomato_sandbox/tests/unit/test_orchestrator.py` | Unit tests for orchestrator |
+
+- **Impact:** minor (new module, integration glue only — no signal logic added)
+- **User approval:** pre-allocated DEC-042 per T-IMPL-6a task dispatch.

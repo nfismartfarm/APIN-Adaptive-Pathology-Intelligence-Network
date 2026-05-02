@@ -638,3 +638,36 @@ Cumulative: 630 → **718 unit tests** (+88). Section 15: 0 → **135 PASS** (+1
 ### Q4 ready to lift
 With all 135 Section 15 tests passing, port 8767 sandbox server launch is now meaningful for end-to-end smoke testing. Decision on whether to lift Q4 deferred to user's next direction.
 
+
+
+## [2026-05-02 15:30] Phase 4 Batch 6 complete: orchestrator + response builder + severity + multi-image (Section 15 milestone preserved)
+
+### Pre-batch
+Logged Defect-58 / Fix-58 (LOW) in T-EARLY-MP queue position 33: plan rule_fired literal strings outdated; recommended option (b) annotation per DEC-015 pattern. No Phase 4 blocker.
+
+### Batch 6 dispatch — three parallel implementers
+| Task | Spec | Files | DEC | Tests |
+|---|---|---|---|---|
+| T-IMPL-6a Pipeline Orchestrator | S21 | `orchestrator/{__init__, pipeline, orchestrator}.py` + test | DEC-042 | 52 PASS |
+| T-IMPL-6b Response Builder | S16 | `response/{__init__, response_builder}.py` + test | DEC-043 | 78 PASS |
+| T-IMPL-6c Severity + Multi-Image | S17 + S18 | `severity/{__init__, grader, severity}.py` + `multi_image/{__init__, aggregator, multi_image}.py` + 2 tests | DEC-044 | 45 + 58 = 103 PASS |
+
+Cumulative: 718 → **951 unit tests** (+233). **Section 15: 135 → 135 PRESERVED** (regression check passed). Grand total: **1086 passing**.
+
+### Critical verifications
+- **Section 15 regression (135/135):** PRESERVED. Live pytest 0.30s. All 13 LF-normalized SHA256 hashes match DEC-032 baseline.
+- **No upstream mutations:** `git diff c757c5e..HEAD` for signals/, classifier/, conformal/, iqa/, tier/, preprocessing/, utils/, input_validation.py — empty. Batch 6 is purely additive.
+- **Sacred 10/10 PASS** in-sandbox (canonical per DEC-019).
+- **Anti-cheat: 0 HIGH, 0 MEDIUM, 1 LOW** (defensive `except Exception: pass` in GPU lock release `finally` block — standard cleanup pattern, not test-gaming).
+- **DEC-038 compliance:** `git log c757c5e..HEAD` empty before this commit. Three implementers, full Bash access, zero implementer-driven commits.
+- **Pre-allocation rule:** DEC-042/043/044 sequential, no collisions. Fifth batch in a row clean.
+
+### BLK-012 surfaced + RESOLVED
+Spec S17.2 lines 5955-5960 reference `mean_lesion_intensity` (G3) and `lesion_size_distribution` (G7/G8) — neither exists in `FEATURE_NAMES` (T-IMPL-3c canonical list). T-IMPL-6c used `mean_lesion_size` (G2 idx 3) and `lesion_size_std` (G2 idx 4) as proxies. Severity grading is primarily driven by `disease_coverage_pct` + `lesion_count` (which DO exist); ancillary features do not affect grade buckets. Filed for spec_changelog at T-EARLY-MP cycle.
+
+### Three-parallel safety pattern reaffirmed
+This is the second three-parallel batch (Batches 2, 3 Wave 1, and now 6) producing clean regression-free output. Heuristic: parallel is safe when implementers' outputs are downstream consumers of upstream-stable contracts AND no cross-implementer dependency exists.
+
+### Q4 status
+Batch 7 (server endpoint wiring) is the path to Q4 lift. After Batch 7 lands, posting an image to `localhost:8767/predict` will produce a real prediction.
+

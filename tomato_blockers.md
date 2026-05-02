@@ -320,3 +320,19 @@ When the master-prompt update batch runs (post Phase 1), Defect-15.1 and Defect-
 - **Resolution:** PSV max is also a valid late_blight probability source when PSV argmax == 2 (late_blight). Updated formula: `late_blight_prob = max(v3[2], lora[2], classifier_max_if_argmax==2, psv_max_if_psv_argmax==2)`. Scenario body (spec line 5368–5378) is authoritative over the import contract enumeration.
 
 **[RESOLVED 2026-05-02]** All three sub-defects fixed in `tomato_sandbox/tier/tier_assignment.py` per DEC-041. Unit tests 85/85 PASS. Integration tests 135/135 PASS after fixes.
+
+---
+
+## BLK-012 [2026-05-02] S17.2 references "mean_lesion_intensity (G3)" and "lesion_size_distribution (G7, G8)" — group numbers wrong vs feature catalog
+
+- **Spec section:** 17.2 (lines 5955-5960)
+- **Quote (verbatim, spec lines 5955-5960):**
+  - *"`mean_lesion_intensity`: mean pixel intensity of the disease mask region in the LAB-CLAHE-preprocessed image. (Section 7 feature G3.)"*
+  - *"`lesion_size_distribution`: mean and standard deviation of connected-component sizes. (Section 7 features G7, G8.)"*
+- **Why uncertain:** `FEATURE_NAMES` from `tomato_sandbox/signals/psv/features.py` (which IS the implementation of Section 7 PSV features) has NO entry named `mean_lesion_intensity`. G3 in FEATURE_NAMES (indices 7-10) contains `yellow_pixel_fraction`, `brown_pixel_fraction`, `necrotic_pixel_fraction`, `leaf_color_variance` — colour/appearance features, not intensity. `mean_lesion_size` and `lesion_size_std` are at G2 (indices 3-4). G7 (indices 19-21) contains `sharpness`, `aggregate_quality`, `psv_aggregate_reliability` — IQA metrics. The spec's group number citations (G3 for intensity, G7/G8 for size distribution) are inconsistent with the feature catalog as implemented.
+- **Options:**
+  A. Use `mean_lesion_size` (G2 idx 3) as a proxy for "mean_lesion_intensity" (semantic intent: average lesion area, not pixel intensity). Use `lesion_size_std` (G2 idx 4) for the std.
+  B. Treat `mean_lesion_intensity` as unavailable (set to 0.0 / NaN sentinel); only use `disease_coverage_pct` and `lesion_count` for severity grading (these are unambiguously present).
+  C. File a proper blocker and pause severity grading until clarified.
+- **Resolution applied in T-IMPL-6c (DEC-044 Decision 2):** Option A applied for `lesion_size_distribution` (use `mean_lesion_size` and `lesion_size_std` from G2). For `mean_lesion_intensity`: not used in the grading decision logic (spec 17.3 thresholds only reference `coverage_pct` and `lesion_count`); it is treated as informational-only and set to `mean_lesion_size` as a reasonable proxy. The grading rule is not affected.
+- **Status:** NON-BLOCKING (severity grading uses coverage_pct + lesion_count primarily; ancillary features degrade gracefully). Filed for agronomic team review before pilot deployment. No implementation pause required.
