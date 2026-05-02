@@ -462,3 +462,112 @@ Append-only chronological log of meaningful units of work. Format per entry:
 - Each will import from `tomato_sandbox.utils.logging`, `gpu_lock`, `nan_guards`, `degraded_mode` as applicable.
 - Sacred status: 10/10 PASS at DEC-019 baseline. Pre-commit hook armed.
 - Servers running: legacy APIN PID 30160 on 8766; APIN v2 PID 19020 on 8768. Unchanged. Sandbox server NOT launched (per Q4).
+
+
+## [2026-05-02 09:30] Pre-Batch-3 prep: git-tracking policy + module-layout policy + Batch 3 dispatch parameters
+
+### Item 1 — DEC-032 git-tracking policy
+- `.gitignore` updated: `tomato_sandbox/` and `tomato_progress_reports/` removed from broad ignore (was caught by `Tomato*/` on Windows case-insensitive matching). Negation patterns added; re-ignore for `scratch/`, `models/`, `__pycache__/`, `*.pyc` retained inside `tomato_sandbox/`.
+- `git add tomato_sandbox/ tomato_progress_reports/` — backfilled tracking for all Batch 0/1/2 source files (~80 files) and progress reports.
+- `git rm --cached tomato_sandbox/iqa/__pycache__/*.pyc` — removed two .pyc artifacts T-IMPL-2b's force-add accidentally committed.
+- Resolves anti-cheat LOW-3 from Batch 2 checkpoint (uneven provenance).
+
+### Item 2 — DEC-033 module-layout policy
+- Codified pattern: when spec describes flat module and plan describes sub-package, implementer creates sub-package + `from .actual_module import *` re-export shim with explicit `__all__`. Optional flat-path shim at spec-cited location.
+- Both import paths must work; tests cover both at least once.
+- Empirical basis: three Batch 2 implementers (2a/2b/2c) independently arrived at this pattern. Codifying eliminates re-derivation cost in Batch 3+.
+
+### Item 3 — Batch 3 dispatch parameters (4 parallel implementers, pre-allocated DEC numbers per Fix-55)
+| Task | Spec | Files | DEC |
+|---|---|---|---|
+| T-IMPL-3a Signal A v3 | S8 | `tomato_sandbox/signals/v3_signal.py` + tests | DEC-034 |
+| T-IMPL-3b Signal B LoRA | S9 | `tomato_sandbox/signals/lora_signal.py` + tests | DEC-035 |
+| T-IMPL-3c Signal C PSV | S10 | `tomato_sandbox/signals/psv/*.py` + tests | DEC-036 |
+| T-IMPL-3d TTA orchestration | S11 | `tomato_sandbox/signals/tta.py` + tests | DEC-037 |
+
+Critical contract pins (from BLK resolutions and prior decisions):
+- T-IMPL-3a: v3 → canonical remap `[0, 2, 1, 3, 4, 5]` MUST be applied INSIDE `extract_v3_outputs`. Signal A returns canonical-ordered probs (BLK-009 Defect-9.2).
+- T-IMPL-3b: LoRA index ordering matches canonical; no remap needed (Section 9.1).
+- T-IMPL-3c: CPU-only; no `gpu_lock` import. 26 PSV features per Section 10. BLK-007 traceability comments required.
+- T-IMPL-3d: `should_trigger_tta(combined_max_prob: float) -> int` per BLK-009 Defect-9.1. PSV not invoked in TTA per Section 11.
+
+Each implementer prompt will cite: assigned spec section, assigned DEC number (do not pick a different one), DEC-018 (read spec body), DEC-021 (master prompt authoritative for ordering), DEC-033 (sub-package + re-export shim if layout disagrees), required imports from utility modules.
+
+Q4 reminder: sandbox server launch on 8767 still held. Re-evaluate after Batch 4. Legacy APIN 8766 + APIN v2 8768 stay running. Sacred manifest at DEC-019 baseline.
+
+
+### DEC-032 addendum [2026-05-02 09:50] — one-time --no-verify bypass for initial Section 15 tracking
+
+Pre-commit hook at `.git/hooks/pre-commit` (sacred, md5 `24eb46f308751df3a125faca0680c9c7`) literal logic blocks ALL `git diff --cached` matches on `tomato_sandbox/tests/integration/test_section15_*.py`, including first-time additions (untracked → tracked). Hook intent (DEC-008 / Phase 3 closure) was to block post-Phase-3 MODIFICATIONS, not initial-tracking transitions. The 13 Section 15 files were never under git tracking before commit `a926d3d`.
+
+User authorized one-time `--no-verify` bypass via Batch 3 prep approval message. Verification trail:
+
+- **Pre-commit SHA256 (recorded before bypass):**
+  - test_section15_boundary.py: 0cfdae923b18ac71a7796b62edce6a41d35233c00d0eba7c742a3bc7541c6a05
+  - test_section15_disagreement.py: 78b8f8c83c9a1a10b31887a86e86402fcd01f223651f186682d3015e8e7c20e1
+  - test_section15_tier1.py: 7dd63be0e127cd1c467073d4bd3a5b0983623549cba3d78a029f70a452ec4c1b
+  - test_section15_tier2.py: fc5eada27ee07af06d05517e655a4b4f83c2ae6a170be47dfe5639644123733e
+  - test_section15_tier3a.py: b15f71dc7a2cec15e461bdd8648586fd4101befb91b9b6d532068f09a5699147
+  - test_section15_tier3b.py: bc413eaff72179080c7949c089f961de287c8cfee39ee29e4f4285d669d16d00
+  - test_section15_tier3c.py: 67ab89bd3421bf6d607b94ee3a26ad362cca1b26b15d70c3f5c0f023025dbbf9
+  - test_section15_tier3d.py: 814db57ca6b84e8e094c020c84238eb5a0f1f9feb9f193ea0c296b34bc0dc4e9
+  - test_section15_tier4a.py: 5193b0a7c7113b8576885af549ccd6799f67aac40bdcb6a2ac0979ffd7292c4c
+  - test_section15_tier4b.py: 6792aae32ec834cfaf429cb7d4af27f3544abacfe5039aaa8102d4265b478e66
+  - test_section15_tier5.py: dac139192370da54a299e412676b8f1c06c9807f8b176b62ccb0b201bc744db7
+  - test_section15_tta.py: 202ee630458d0cdd988b15b1ddd9381972fb09d6e3bc027f511a18e1e52cd25f
+  - test_section15_underpowered.py: 36c0595cd87284f757d6693115a256b416d17c317d5c29b47ce6e63eb678e046
+
+- **Post-commit verification:** all 13 LF-normalized SHA256 hashes identical to pre-commit baseline. Verified via `tr -d '\r' < FILE | sha256sum`. Working-copy raw byte hashes differ from baseline due to Windows `core.autocrlf=true` flipping LF→CRLF on `git checkout` — this is a Windows artifact, not content drift. Git itself reports all 13 files clean (`git status` empty, `git diff` empty).
+
+- **Hook-still-armed verification:** synthetic edit to `test_section15_tier1.py` (`echo "# synthetic test edit" >> ...`), then `git add` + `git commit` (without `--no-verify`) → hook fired correctly with the spec-canonical error message. Synthetic edit reverted via `git checkout --`. Final file state LF-normalized hash matches pre-commit baseline.
+
+- **Filed candidate for T-EARLY-MP queue:** Fix-56 — pre-commit hook at line 3 should distinguish initial-tracking additions from modifications via `git diff --cached --diff-filter=M` instead of plain `git diff --cached`. Severity: LOW (only fires once per file lifecycle). Sacred manifest update would be required to amend the hook; deferred unless pattern recurs.
+
+
+
+## [2026-05-02 11:00] Batch 3 commit close-out: Q1/Q2/Q3 resolutions + DEC-038
+
+### Q1 — Track 4 critical top-level tomato files (APPROVED)
+Files added to git tracking in this batch's commit:
+- `tomato_3_signal_system.md` — the 8756-line spec (locked source of truth). Was untracked since project start; provenance gap closed.
+- `tomato_master_prompt.md` — the 6-phase protocol.
+- `tomato_blockers.md` — BLK ledger (10 BLKs).
+- `spec_changelog.md` — spec version history.
+
+### Q2 — Track DEC-027 outputs missed in DEC-032 backfill (APPROVED)
+- `pyproject.toml` — Python project config (T-IMPL-1c output per Section 26.6).
+- `.pre-commit-config.yaml` — pre-commit framework config (T-IMPL-1c output).
+Both at repo root, missed by DEC-032's `git add tomato_sandbox/` scope.
+
+### Q3 — Commit discipline (APPROVED → DEC-038)
+- Implementer subagents do NOT call `git add` or `git commit`. Main thread handles all git operations after batch verification.
+- Trigger: T-IMPL-2b auto-commit (`69d8ce7`) and T-IMPL-3c auto-commit (`2d32188`) showed asymmetric commit behavior.
+- Past commits stand; rule applies from Batch 4 onward.
+- `.claude/agents/implementer.md` rule 12 edited inline (was "You commit to git..."; now "Hard rule per DEC-038: do NOT call git add or git commit").
+- Defect-55 queued in T-EARLY-MP for master prompt update at next batch-fix cycle.
+
+### Batch 3 commit composition
+Single commit closing Phase 4 Batch 3 deliverables + provenance backfill:
+- 8 in-scope tomato_sandbox files (Signals A/B/TTA + tests + flat-path shim)
+- 2 modified ledger files (tomato_decisions.md with DEC-029..038, tomato_log.md)
+- 2 batch reports (anti-cheat + checkpoint_003)
+- 4 top-level tomato project files (Q1)
+- 2 DEC-027 outputs (Q2)
+- 1 agent definition edit (implementer.md per Q3)
+PSV (DEC-036) deliverables already in `2d32188`; not re-committed.
+
+### Out-of-scope items deliberately NOT staged this commit
+- okra/brassica project changes (CLAUDE.md root, agents/, decisions.md root, scripts/train_model3_simple.py, setup/, tools/) — pre-session, unrelated.
+- Raw dataset directories (gigabytes) — gitignored.
+- Sub-project dirs under scripts/ (apin/, apin_v2/, model3_training/, ladi_net/, dinov2_probe/) — sacred read-only.
+- Phase-history docs and helper scripts at root — out of scope.
+
+### Pre-Batch-4 baseline after this commit
+- Sacred 10/10 PASS in-sandbox; manifest unchanged.
+- Anti-cheat Batch 3 PASS clean (1 MEDIUM cosmetic, 4 LOW).
+- 538 unit tests passing.
+- Section 15 still 13 ModuleNotFoundError on `tomato_sandbox.tier` (expected; T-IMPL-4 territory).
+- Pre-commit hook armed (md5 24eb46f308751df3a125faca0680c9c7).
+- Q4 (sandbox server on 8767): still held; re-evaluate after Batch 4.
+- Legacy APIN 8766 + APIN v2 8768 running (PIDs 24452 + 23132, relaunched this session).
+

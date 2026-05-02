@@ -1,0 +1,287 @@
+# Tomato 3-Signal System — Open Blockers
+
+Open questions awaiting user. Format per entry:
+
+```
+## BLK-NNN [YYYY-MM-DD] <short description>
+- Spec section: ...
+- Quote: <verbatim>
+- Why I'm uncertain: ...
+- Options: A / B / C
+- Status: open / resolved (with resolution note)
+```
+
+When a blocker is open, work pauses on the affected area until it resolves.
+
+---
+
+## BLK-001 [2026-04-27 18:50] Project-level subagents in `.claude/agents/` not registered with Agent tool; harness-level reload required before Phase 1
+
+- **Spec section:** N/A (this is a Claude Code harness issue, not a spec issue)
+- **Source instruction:** user-specified Phase 0 → Phase 1 transition gate (item 2, this turn): *"For Phase 1, /tomato-phase-exit 1 must invoke real subagents in isolated contexts. ... If subagents still don't register after the standard reload, that's a blocker. Stop, write to tomato_blockers.md, ask user. Do not proceed to Phase 1 with inline approximations."*
+- **Test performed:** invoked `Agent` tool with `subagent_type: "spec-cartographer"` and a trivial registration-test prompt.
+- **Test result:** error returned: *"Agent type 'spec-cartographer' not found. Available agents: claude-code-guide, Explore, feature-dev:code-architect, feature-dev:code-explorer, feature-dev:code-reviewer, general-purpose, Plan, statusline-setup"*
+- **Why I'm uncertain:** Claude Code's documentation indicates project-level subagents in `.claude/agents/` are loaded by the harness at session start, not mid-session. I created the 11 project subagents in `.claude/agents/` during this session AFTER the Agent-tool allowlist was set, so they are not in my available `subagent_type` list. I cannot restart my own session.
+- **Options:**
+  - **A.** User triggers a fresh Claude Code session (close + reopen, or whatever harness restart mechanism is available). On reopen, the 11 project agents in `.claude/agents/` should be discoverable. Verification: in the new session, the Agent tool's `subagent_type` allowlist should include `spec-cartographer`, `phase-exit-auditor`, etc.
+  - **B.** User reloads agents via Claude Code's `/agents` slash command (if the harness supports mid-session agent reload).
+  - **C.** Proceed with Phase 1 using inline orchestration as Phase 0 did. **User explicitly forbade this option.**
+  - **D.** Diagnose: maybe the agents need a different file format, location, or registration step the master prompt didn't specify. (No evidence this is the case; the agent files are syntactically valid YAML+markdown and live at `.claude/agents/<name>.md` per master prompt section 7.)
+- **Status:** RESOLVED.
+
+**[Resolved 2026-04-27 19:15] Session restart resolved harness registration. All 11 project subagents probed successfully (each returned the literal "<name> registered" string when invoked via Agent tool with subagent_type=<name>). Isolation verified via context-window probe to spec-cartographer: subagent reported "Context contains only the spec-cartographer system prompt and this single user prompt; no prior conversation history visible." — confirming real isolated context, not name-only routing. Phase 1 begins.**
+
+Probed agents (all PASS): spec-cartographer, planner, section15-encoder, implementer, sacred-guardian, spec-auditor, anti-cheat-inspector, progress-reporter, phase-exit-auditor, prompt-validator, prompt-defect-detector.
+
+---
+
+## BLK-002 [2026-04-27 19:25] Spec contradiction: port 8766 vs 8767
+
+- **Spec sections:** Section 0 (Sandbox Directive) vs Section 1.3 vs Section 2.3 vs Section 3.2
+- **Quote 1 (Section 1.3, In scope, first bullet):** *"The full request/response pipeline for tomato images entering the system at port 8766"*
+- **Quote 2 (Section 2.3, Existing FastAPI server entry):** *"After this work, the wrapper IS the server bound to port 8766; APIN's previous server entry point (`scripts/apin/section8_apin_server.py` in standalone mode) is no longer used."*
+- **Quote 3 (Section 0 Sandbox Directive):** *"A new top-level directory `tomato_sandbox/` containing: A new FastAPI server, bound to port **8767** (not 8766)"* + *"It is **not** a replacement for the 8766 server. The 8766 server keeps running unchanged."*
+- **Quote 4 (Section 3.2):** *"`POST localhost:8767/predict` as multipart form data"*
+- **Why uncertain:** Sections 1.3 and 2.3 carry leftover text from the pre-Sandbox-Directive wrapper-server-at-8766 design. Section 3.3 acknowledges this design "is no longer the plan," and Sandbox Directive + Section 3.2 + Section 4.4 all confirm port 8767 is the sandbox port. But Sections 1.3 and 2.3 were not updated to reflect this, creating a textual contradiction.
+- **Options:**
+  - A. Treat Sections 0, 3.2, 4.4 as authoritative (port 8767 is the sandbox port; port 8766 stays APIN). Update spec text in Sections 1.3 and 2.3 to match. Logged in `spec_changelog.md`.
+  - B. Leave the spec as-is; agent code follows the Sandbox Directive (port 8767 for sandbox); the contradiction stays a documentation issue.
+- **Status:** RESOLVED 2026-04-27 23:45 via DEC-012 — option A confirmed by user (Sandbox Directive authoritative; port 8767 sandbox, 8766 APIN). Spec text cleanup at S1.3/S2.3 queued in T-EARLY-MP.
+
+---
+
+## BLK-003 [2026-04-27 19:25] Spec contradiction: APIN imported as Python library vs sandbox-no-import
+
+- **Spec sections:** Section 2.3 vs Section 0 (Sandbox Directive)
+- **Quote 1 (Section 2.3):** *"the new wrapper imports APIN as a library but does not modify any file within `scripts/apin/`"*
+- **Quote 2 (Section 0 Sandbox Directive):** *"It does **not** import APIN as a Python library. If sandbox code needs APIN (it doesn't, but for completeness), it calls APIN's 8766 server over HTTP like any other client."*
+- **Why uncertain:** Section 2.3 describes the older wrapper pattern that was rescinded. Sandbox Directive explicitly forbids the same behavior. Section 3.3 confirms the sandbox "has zero shared state with APIN" and section 4.1 lists `clients/apin_client.py` as an HTTP client (not a library import). Component 4 in 4.1 also notes APIN client is "not used in default config" (Section 20 expected to detail this).
+- **Options:**
+  - A. Sandbox Directive wins. Section 2.3's "imports APIN as a library" sentence is stale text; sandbox uses HTTP client only when APIN is needed (which is "not in default config"). Update spec text in Section 2.3. Logged in `spec_changelog.md`.
+  - B. Leave the spec as-is; agent code follows the Sandbox Directive (no library import); the contradiction stays a documentation issue.
+- **Status:** RESOLVED 2026-04-27 23:45 via DEC-012 — option A confirmed by user (Sandbox Directive authoritative; HTTP-client only; sandbox does NOT import APIN as library). Spec text cleanup at S2.3 queued in T-EARLY-MP.
+
+---
+
+## BLK-004 [2026-04-27 20:00] Section 15 internal defects (must resolve before Phase 3 begins)
+
+- **Spec section:** 15 (Decision scenarios)
+- **Why uncertain:** Phase 1 Batch 3b comprehension surfaced six internal defects in Section 15. Most are documentation noise. Two are material to Phase 3 work (section15-encoder will encode 135 scenarios verbatim).
+
+### Defect-15.1 (BLOCKING for Phase 3) — S1.1 v3 probability vector mismatch between scenario body and test-code snippet
+
+**[CORRECTED 2026-04-27 23:30 after user-requested verification]** Earlier draft of this entry claimed three different verbatim vectors at three lines (4098 / 4117 / 5558). Direct `sed` inspection of the spec showed the cartographer overstated: line 4098 contains a NARRATIVE reference ("S1.1's v3 vector sums to 0.97") with no literal vector. Only two literal vectors exist:
+
+- **Quote 1 (Convention 1 narrative, line 4098):** *"All scenarios in this section show v3 vectors that satisfy this constraint exactly — for example, S1.1's v3 vector sums to 0.97 (chilli_leak=0.03)."* — narrative reference; consistent with Quote 2 below.
+- **Quote 2 (S1.1 scenario body, line 4117):** *"v3: probs=[0.89, 0.04, 0.01, 0.01, 0.01, 0.01], chilli_leak=0.03"* — sum=0.97 ✓ matches Convention 1 (`tomato_probs` sum to `1 − chilli_leakage`).
+- **Quote 3 (test code snippet, line 5558):** *"probs=[0.92, 0.04, 0.01, 0.01, 0.01, 0.01], chilli_leak=0.03"* — sum=**1.00** ✗ violates Convention 1.
+
+**Concern:** the section15-encoder's job in Phase 3 is to encode each scenario VERBATIM. With two conflicting literal vectors for the same S1.1 scenario, the encoder must choose; the master prompt forbids unilateral choice.
+
+**Options:**
+- A. **Recommended.** Treat Quote 2 (line 4117 scenario body) as authoritative. The scenario body is internally consistent with the spec's own Convention 1 (line 4098 narrative). Line 5558's test-code snippet is a typo (someone forgot to subtract chilli_leak from class 0). Resolution recorded in `spec_changelog.md`; Phase 4 implementer corrects the spec text or leaves it with a footnote referencing the resolution.
+- B. Treat Quote 3 (line 5558) as authoritative. Would require either: (i) re-stating Convention 1 to allow non-renormalized vectors when chilli_leak is small enough to be rounding error (which it isn't at 0.03 vs 0.03), or (ii) accepting that the spec contradicts itself between Convention 1 and the test code. Less coherent.
+- C. Reproduce both verbatim in the test fixture — encoding conflict, not viable.
+
+**Status:** RESOLVED 2026-04-27 23:45 via DEC-012 — option A confirmed by user (line 4117 scenario body authoritative; encoder uses `[0.89, 0.04, 0.01, 0.01, 0.01, 0.01]`). Phase 3 entry preconditions: (a) `spec_changelog.md` entry written, (b) PDA Defect-16 patched in master prompt 8.3 — both scheduled in `tomato_plan.md` as T-PHASE-3-PRECONDITIONS.
+
+### Defect-15.2 (BLOCKING for monitoring) — T5 alert distribution arithmetic
+
+- **Quote (lines 5487–5490):** *"T5 fires (True): 51, T5 does not fire (False): 81, Total explicitly specified: 132. ... All 135 scenarios are now fully specified with deterministic T5 outcomes."*
+- **Concern:** 51 + 81 = 132, not 135. Three scenarios are unaccounted for in this distribution table. Either the counts are wrong or three scenarios genuinely lack a deterministic T5 specification.
+- **Options:**
+  - A. Recount manually during Phase 3 encoding; identify which 3 scenarios have unspecified T5; classify them per the Section 14.3 rules. Fix logged via `spec_changelog.md`.
+  - B. Treat the table as wrong arithmetic but the textual claim ("all 135 fully specified") as true; just an arithmetic typo in the summary.
+- **Status:** RESOLVED 2026-04-27 23:45 via DEC-012 — option A confirmed by user (encoder enumerates the 3 missing scenarios at Phase 3 start; classify per Section 14.3 rules; fix logged via `spec_changelog.md`).
+
+### Defect-15.3 through 15.6 (NOISE, document only)
+
+- **Misfit scenarios in subsections** — S3B.4 in 15.6 produces Tier 4A; S3C.8/S3C.9/S3C.12 in 15.7 produce Tier 2/4A/4A. Section 15.1 says "grouped by intended outcome" but subsection headers say "All Tier <X> scenarios share..." — minor contradiction. Phase 3 encoder must group scenarios by their actual produced tier, not by their subsection. **Resolution:** treat subsection IDs as content-organization, not outcome-classification. No spec change needed.
+- **S5.7 v3 vector explicitly violates Convention 1** — *"v3 is shown summed to 0.80 with leakage 0.10; real F.0 normalizes"* (line 5062). The spec acknowledges this directly. Phase 3 encoder treats S5.7 as documented; no spec change needed.
+- **S3B.9 Walk T5 alert: True** — subsection header says "all share `prediction_set_size >= 3` AND `combined_max_prob >= 0.45`" with no T5 mention. T5 fires correctly via Section 14.3 rule. Documentation noise; no defect. No spec change needed.
+- **SDIS.1 Walk uses "Possible classifier"** — line 5362 has `argmax=0, max=0.50, margin=0.25` framed as "possible" rather than definitive. Phase 3 encoder treats these values as the test inputs. No spec change needed.
+
+### Master-prompt update queued for T-EARLY-MP
+
+When the master-prompt update batch runs (post Phase 1), Defect-15.1 and Defect-15.2 fixes go into `spec_changelog.md` (since they require modifying spec text). The other four are documentation noise that the encoder protocol handles without spec change.
+
+---
+
+## BLK-005 [2026-04-27 20:30] Part VI Reference Appendices (A-F) declared in spec outline but absent from spec file
+
+- **Spec sections:** outline lines 48-54 (Part VI declaration) vs spec end at line 8756 (Section 32 closing prose)
+- **Quote (lines 48-54, outline):**
+  > ## Part VI — Reference Appendices
+  > A. Metric reference — INDEX of every metric (with cross-reference to its body section). Body sections are the source of truth for definitions.
+  > B. Tier scenario decision matrix (full)
+  > C. PSV feature catalog (all 26)
+  > D. tier_rules.yaml example
+  > E. Class index conventions and remap tables
+  > F. File and artifact catalog (with sandbox paths)
+- **Verification:**
+  - `wc -l tomato_3_signal_system.md` → 8756
+  - `grep -n "^## Appendix\|^# Appendix"` → no matches in file
+  - `tail` → Section 32 closing paragraph; no appendix content
+- **Why I'm uncertain:** The outline declares appendices and the body cross-references them (e.g., "Appendix B = full scenario matrix" implied by Section 15; Appendix D = `tier_rules.yaml` example referenced when discussing Section 14 implementation). G18 fix at outline line 59 mitigates Appendix A explicitly: body sections are source of truth, Appendix A is INDEX/cross-reference only. The other five have no equivalent disclaimer.
+- **Most consequential gap:** **Appendix D (`tier_rules.yaml` example).** Phase 4 implementation of `tier_assignment.py` needs a concrete YAML schema. Section 14 prose describes Rules 1-9, 7a/7b/7c, 8a/8b/8c, but no YAML example exists.
+- **Other gaps and their body-section equivalents:**
+  - Appendix A → Section 12, 13, 17, 25 metric tables (mitigated by G18)
+  - Appendix B → Section 15 scenario blocks (full content present in body; Phase 3 `section15-encoder` works directly from body)
+  - Appendix C → Section 11 PSV description (may be incomplete; verify in Phase 4 PSV implementation)
+  - Appendix D → Section 14 prose (no YAML example)
+  - Appendix E → Section 8 + Section 12 remap `[0,2,1,3,4,5]`; userMemories index spaces (sufficient)
+  - Appendix F → Section 2.6 sacred manifest + Section 28.5 bringup (sufficient)
+- **Options:**
+  - **A.** Section 14 prose remains authoritative for tier rules. Implementer derives `tier_rules.yaml` schema during Phase 4 with explicit traceability comments referencing Section 14 paragraph numbers. Spec author may later supply Appendix D content as confirmation. **Recommended.**
+  - **B.** Block Phase 4 on spec author providing Appendix D content first.
+  - **C.** Treat the missing appendices as a documentation-only gap; do not file a spec_changelog entry; rely entirely on body sections.
+- **Status:** RESOLVED 2026-04-27 23:45 via DEC-012 — option A confirmed by user (T-IMPL-5 derives `tier_rules.yaml` schema from Section 14 prose with traceability comments referencing Section 14 paragraph numbers; spec author may later supply Appendix D as confirmation).
+
+---
+
+## BLK-006 [2026-04-28 03:10] Section 12 Platt calibration parameter list incomplete in summary
+
+- **Spec section:** 12 (Hierarchical classifier — Platt calibration)
+- **Surfaced by:** Phase 2 planner during T-IMPL-4b decomposition.
+- **Why uncertain:** Spec summary `.claude/spec_summaries/section_12.md` cites "14 Platt calibration parameters" but does not enumerate the parameter names or the formula. Section 12 body in the spec contains the full enumeration; the summary captured only the count.
+- **Why LOW (not blocking):** The full content is in the spec body. T-IMPL-4b implementer reads Section 12 body before coding; same resolution pattern as BLK-005.
+- **Options:**
+  - A. **Recommended.** T-IMPL-4b implementer reads full Section 12 body (lines 3145–3507) before coding. Implementer-derived parameter list goes into `tomato_sandbox/classifier/calibration.py` with `# spec: 12.N` traceability comments. No Phase 2 action needed.
+  - B. Re-fire spec-cartographer for Section 12 to expand the summary. Cost: 1 subagent invocation; benefit: cleaner reference material.
+- **Status:** OPEN. Phase 2 (planning) not blocked. Phase 4 T-IMPL-4b honors option A by default. Recommendation: option A.
+
+---
+
+## BLK-007 [2026-04-28 03:10] Section 10 PSV 26-feature list incomplete in summary
+
+- **Spec section:** 10 (Signal C — PSV); Appendix C absent (per BLK-005)
+- **Surfaced by:** Phase 2 planner during T-IMPL-3c decomposition.
+- **Why uncertain:** Appendix C (PSV feature catalog, all 26) is declared in spec outline but absent from spec file (per BLK-005). Section 10 body contains feature descriptions, but the summary did not enumerate all 26 features in canonical order. T-IMPL-3c needs the full ordered list to implement `psv_features.py`.
+- **Why LOW (not blocking):** Same resolution pattern as BLK-005. Section 10 body is authoritative; implementer derives the catalog with traceability.
+- **Options:**
+  - A. **Recommended.** T-IMPL-3c implementer reads full Section 10 body before coding. Derived 26-feature list goes into `tomato_sandbox/signals/psv_features.py` docstring with `# spec: 10.N paragraph M` traceability comments. Spec author may later supply Appendix C as confirmation.
+  - B. Block T-IMPL-3c on spec author supplying Appendix C content first.
+- **Status:** OPEN. Phase 2 (planning) not blocked. Phase 4 T-IMPL-3c honors option A. Recommendation: option A.
+
+---
+
+## BLK-008 [2026-04-28 03:10] Section 9 prototype_blend() blend coefficients in body, not summary
+
+- **Spec section:** 9 (Signal B — single-pass LoRA)
+- **Surfaced by:** Phase 2 planner during T-IMPL-3b decomposition.
+- **Why uncertain:** Spec summary `.claude/spec_summaries/section_09.md` cites the `prototype_blend()` function signature but does not list the exact blend-weight coefficients. Section 9 body in the spec contains them.
+- **Why LOW (not blocking):** Resolved by reading Section 9 body during T-IMPL-3b implementation.
+- **Options:**
+  - A. **Recommended.** T-IMPL-3b implementer reads Section 9 body (lines 1793–2003) before coding. Coefficients go into `tomato_sandbox/signals/signal_b.py` with `# spec: 9.N` traceability comments.
+  - B. Re-fire spec-cartographer for Section 9 to expand the summary.
+- **Status:** OPEN. Phase 2 (planning) not blocked. Phase 4 T-IMPL-3b honors option A. Recommendation: option A.
+
+---
+
+## BLK-009 [2026-04-28 03:45] Phase 2 plan + dependency graph contain 3 spec-citation defects (anti-cheat-inspector finding)
+
+- **Surfaced by:** anti-cheat-inspector during Phase 2 exit gate; 3 of 5 sampled task-level spec citations had material discrepancies vs `.claude/spec_summaries/`. All 3 verified by main-thread `grep` against the relevant summary files.
+- **Severity overall:** **HIGH** for Phase 4 implementation correctness. The 3 defects propagated from Phase 1 dependency graph into Phase 2 plan annotations. Auditor's NOT-READY verdict combined with these defects means the plan as written would mislead Phase 4 implementers.
+
+### Defect-9.1 (MEDIUM) — T-IMPL-3d TTA function signature wrong
+
+- **Plan (line 517):** `should_trigger_tta(signal_a, signal_b) -> bool` with `max_prob < 0.55 OR margin < 0.45`. Acceptance: `max_prob=0.40 → True`, `max_prob=0.80 → False`.
+- **Spec (`.claude/spec_summaries/section_11.md` lines 16-17):** *"`def should_trigger_tta(combined_max_prob: float) -> int` — Returns 1, 2, or 5 (number of views)"*. 3-level decision based on `combined_max_prob` only:
+  - `>= 0.55` → 1 view (no TTA)
+  - `[0.45, 0.55)` → 2-view TTA
+  - `< 0.45` → 5-view TTA
+- **Diff:** plan has wrong arity (2 params vs 1), wrong return type (bool vs int), invented `margin` parameter, missing 5-view path.
+- **Recommended fix:** Patch T-IMPL-3d to match spec. No spec change needed.
+
+### Defect-9.2 (HIGH) — T-IMPL-3a + dependency-graph critical edge 2 inverted on remap location
+
+- **Plan annotation (Batch 3 + line 399):** *"Signal A returns probs in NATIVE v3 ordering (NOT canonical). The remap [0,2,1,3,4,5] is applied ONLY at T-IMPL-4a."*
+- **Dependency graph (`.claude/spec_dependency_graph.md` line 72):** *"Index remap [0,2,1,3,4,5] (late_blight↔septoria swap) is applied here [S12], NOT in S8/S9. Implementer must NOT pre-remap upstream."*
+- **Spec (`section_08.md` lines 18, 32-33):** *"`SignalAResult.tomato_probs_canonical: np.ndarray [6], canonical ordering`"* and *"`extract_v3_outputs(probs_10d) -> {tomato_probs_canonical: [6], chilli_leakage: float, raw_probs_v3_order: [10]}`"*. The remap happens INSIDE `extract_v3_outputs` (Section 8.3); Signal A's contract returns already-canonical probs.
+- **Diff:** plan + dep graph both assert remap-at-fusion; spec says remap-inside-Signal-A. If implementer follows plan, T-IMPL-3a would skip remap (returning native order), then T-IMPL-4a would apply remap once — coincidentally producing correct output but contradicting Section 8's `tomato_probs_canonical` field name. If implementer follows Section 8 contract instead (returning canonical from Signal A) AND T-IMPL-4a applies remap again, output is double-remapped.
+- **Implication:** The "no upstream remap" annotation that the plan treats as a load-bearing architectural invariant is **wrong relative to the spec**. The dependency graph from Phase 1 had the same error; Phase 2 inherited it.
+- **Options:**
+  - **A. Trust spec (recommended)**: re-do dep graph critical edge 2 to say *"Index remap applied INSIDE Signal A (extract_v3_outputs); Signal A's output is already canonical. Signal B output is also canonical (per Section 9). T-IMPL-4a does NOT re-remap."* Patch plan T-IMPL-3a annotation, T-IMPL-4a annotation, plan-level acceptance criterion 5. Re-fire spec-cartographer for Sections 8 and 9 against spec body to verify (cartographer overstated BLK-004; could have misread here too).
+  - **B. Trust plan**: re-read spec Section 8 body directly (lines 1578-1792) to confirm whether the remap is inside Signal A or outside. If outside, then the spec_summary `tomato_probs_canonical` field name is wrong and BLK-007/009 widens to "spec_summary fidelity audit needed."
+  - **C. Defer to Phase 4 implementer to read Section 8 body and reconcile**: Risk: implementer choice may diverge from intended architecture; user loses control of the canonical-vs-native decision.
+
+### Defect-9.3 (MEDIUM) — T-IMPL-5a chilli_leakage threshold conflated
+
+- **Plan (line 675, 707):** *"R2: chilli_leakage guard (chilli_leakage >= 0.3 inclusive; BLK-004/BLK-005 boundary)"*. Acceptance: *"`chilli_leakage=0.30` → guard fires"*.
+- **Spec (`section_14.md`):**
+  - Rule 3 (Tier 3C): `chilli_leakage > 0.40` (strict) — line 48
+  - Tier 1 boundary: `chilli_leakage < 0.20` (strict) — line 65
+  - Tier 2 boundary: `chilli_leakage < 0.30` (strict) — line 75
+- **Diff:** Plan conflates Rule 3 threshold (0.40) with Tier 2 eligibility boundary (0.30) and uses wrong inequality direction (>= vs >). Plan also incorrectly cites BLK-004/BLK-005 as the source — neither blocker establishes a 0.30 threshold for any rule.
+- **Recommended fix:** Patch T-IMPL-5a R2 to: *"R3 (Tier 3C): chilli_leakage > 0.40 (strict)"*. Fix acceptance criterion to test boundary at 0.40, not 0.30. No spec change needed.
+
+### Status
+
+**[UPDATED 2026-04-28 04:30 — all 3 sub-defects PATCHED inline after user-authorized spec body verification.]**
+
+- **Defect-9.1: PATCHED.** `tomato_plan.md` T-IMPL-3d task card rewritten 2026-04-28 to match Section 11 spec verbatim. Function is now `should_trigger_tta(combined_max_prob: float) -> int` returning {1, 2, 5}. Dataclass renamed to canonical-ordered fields. Acceptance criteria include 3-level trigger test, NaN guard, 5-view path. Earlier `(signal_a, signal_b) -> bool` formulation explicitly marked as inverted.
+
+- **Defect-9.2: PATCHED.** Spec body lines 1578-1792 read directly by main thread; verbatim quotes pasted in this turn's message. **Outcome A confirmed:** spec_summary `section_08.md` was right; the dependency graph and Phase 2 plan annotations were wrong. Specifically: Section 8.3 lines 1672-1678 apply the remap `[0, 2, 1, 3, 4, 5]` INSIDE `extract_v3_outputs`; Section 8.6 line 1719 declares `SignalAResult.tomato_probs_canonical` (already canonical-ordered); Section 9.1 confirms LoRA output is canonical natively. T-IMPL-4a does NOT remap.
+  - Patches applied 2026-04-28: `.claude/spec_dependency_graph.md` critical edge 2 + cross-section table rows; `tomato_plan.md` Batch 3 annotation, T-IMPL-3a "What to build" + acceptance criteria, T-IMPL-4a "What to build" + acceptance criteria (now includes a "remap-NOT-here regression test"). Earlier wrong wording marked as inverted in each patched location.
+  - **Phase 1 spot-check failure:** the spot-check sampled Sections 17, 23, 11; none of them tested the architectural index-space invariant. Adding to T-EARLY-MP Fix-13: cartographer must quote function signatures and dataclass field names verbatim, never paraphrase index-space descriptions.
+
+- **Defect-9.3: PATCHED.** `tomato_plan.md` T-IMPL-5a rule chain rewritten 2026-04-28 to match Section 14 spec verbatim. Rule 3 now correctly states `psv_reliability < 0.40 (strict) OR chilli_leakage > 0.40 (strict)`. Tier 1/2 chilli boundaries (0.20 / 0.30) correctly distinguished. `rule_fired` literal strings enumerated per Section 14 conventions.
+
+### Defect-9.4 (MEDIUM, NEW, 2026-04-28) — T-IMPL-5a rule numbering broader divergence beyond chilli threshold
+
+- **Discovered during Defect-9.3 patching:** the entire R1-R9 rule chain in T-IMPL-5a deviated from Section 14 spec, not just the chilli threshold. Plan's "R2: chilli_leakage guard / R3: OOD class / R4: underpowered class guard" did not match spec's "Rule 3: psv_reliability OR chilli_leakage / Rule 4: combined_max_prob low / Rule 5: prediction_set size".
+- **Status: PATCHED 2026-04-28** along with Defect-9.3. T-IMPL-5a rule chain now matches Section 14 spec verbatim with correct rule numbering, sub-rules 7a/7b/7c and 8a/8b/8c, and Tier 5 alert independent evaluation.
+- **Implication:** the planner's mis-numbering escaped Phase 2 review because the auditor's checklist did not include "verify rule chain numbering matches Section 14." Consider adding to phase-exit-auditor for Phase 4 (T-EARLY-MP candidate; not adding now to keep T-EARLY-MP scope bounded).
+
+**Phase 2 exit gate after patches:** plan and dep graph now reflect spec correctly. Re-firing the gate next.
+
+---
+
+## BLK-010 [2026-04-28 06:30] Phase 2 Round 3 anti-cheat surfaced 3 more spec-citation defects + 2 process gaps
+
+- **Surfaced by:** anti-cheat-inspector during Phase 2 Round 3 exit gate. Re-sampled 5 different tasks (T-IMPL-1b/2b/4b/6a/7a) than Round 1's sample (T-IMPL-3a/3d/4c/5a/9a). 3 of 5 had material spec-citation defects.
+- **Severity overall:** **HIGH** for Phase 4 implementation correctness. The pattern matches BLK-009: planner systematically fabricates plausible-but-wrong content; phase-exit-auditor + PVA + PDA are systematically blind to it; only anti-cheat's spec-citation sampling catches it. **Two consecutive sample rounds (10 tasks total, 6 with defects) suggest most or all tasks may have similar issues.** This is a second-order finding: even patching these 3 doesn't resolve the meta-problem.
+
+### Defect-10.1 (HIGH) — T-IMPL-2b IQA dimensions/dataclass fabricated
+
+- **Plan (lines 307-347):** 7 IQA dimensions named `blur, exposure, noise, contrast, color cast, compression artifacts, resolution`. `IQAResult` fields: `{decision, overall_score, dim_scores, rejection_reason, iqa_failed}`.
+- **Spec (`.claude/spec_summaries/section_06.md`, verified 2026-04-28 by `grep`):** 7 dimensions: `sharpness, leaf_presence, leaf_fill, background_contamination, wetness, exposure, resolution`. `IQAResult` fields: `{decision, aggregate_score, per_dimension, failing_dimensions, retake_message, green_mask}`.
+- **Diff:** 5 of 7 dimension names diverge. 5 of 6 dataclass fields diverge. `green_mask` field (which Section 6.5 says "passed to PSV as hint" — flows to Section 10) entirely absent.
+- **Risk:** Phase 4 implementer following T-IMPL-2b verbatim builds a wrong IQA module.
+- **Recommended fix:** rewrite T-IMPL-2b to match Section 6 verbatim. No spec change needed.
+
+### Defect-10.2 (MEDIUM) — T-IMPL-4b ClassifierResult fields diverge
+
+- **Plan:** `{combined_probs, combined_max_prob, argmax, margin, stage1_diseased_prob, stage2_probs, platt_applied, status}`
+- **Spec (`.claude/spec_summaries/section_12.md`, verified 2026-04-28):** `{p_final_calibrated, combined_argmax, combined_max_prob, combined_margin, p_final_uncalibrated, p_stage1, p_stage2, classifier_succeeded, failure_reason}`.
+- **Diff:** 5 of 9 field names differ. Plan missing `p_final_uncalibrated`, `classifier_succeeded`, `failure_reason`. Functional contracts (soft routing, 7-class, Platt) correct in plan; field names not.
+- **Risk:** integration failures between T-IMPL-4b and downstream consumers (T-IMPL-4c conformal, T-IMPL-5a tier_assignment) which expect spec-compliant field names.
+- **Recommended fix:** rewrite T-IMPL-4b dataclass to match Section 12 verbatim.
+
+### Defect-10.3 (MEDIUM) — T-IMPL-6a Tier 4A routing rule contradicts Section 16
+
+- **Plan T-IMPL-6a AC:** "Queue routing: Tier 4A input → `route_to_queue=True` in queue block."
+- **Spec (`section_16.md` line 157, verified 2026-04-28):** *"Tier 4A → routed only if Tier 5 also fires; otherwise user opt-in only"*
+- **Diff:** plan says always-route; spec says conditional-route. Behavioral mismatch.
+- **Risk:** Phase 4 implementer routes all Tier 4A cases to queue, overwhelming agronomist queue with non-urgent low-confidence cases.
+- **Recommended fix:** rewrite T-IMPL-6a AC to "Tier 4A routes only if Tier 5 also fires; otherwise user opt-in only."
+
+### Defect-10.4 (HIGH, process) — Round 3 phase-exit-auditor returned text, no file saved
+
+- **Issue:** `tomato_log.md` line 178 claimed "Round 3 phase-exit-auditor verdict: READY" but no audit file existed on disk. The auditor declined to write its file due to internal instruction conflict.
+- **Resolution applied 2026-04-28 06:30:** main thread retroactively scribed `phase_2_exit_audit_round3_20260428T0530.md` with the auditor's text content from the prior conversation turn.
+- **Pattern:** PDA Defect-10 (audit subagents lack Write tool) keeps biting. T-EARLY-MP Fix-10 will add Write to Amendment 2 agents — but this hasn't run yet.
+
+### Defect-10.5 (MEDIUM, process) — sacred-guardian Round 3 report has hallucinated persona and conclusion
+
+- **Issue:** `sacred_phase2_round3_20260428T0600.md` self-identifies as "File Integrity Specialist subagent" (not sacred-guardian) and concludes "Phase 2 Round 3 exit gate is clear for advancement to Phase A (production transition)" — Phase A doesn't exist; phases are 0-6.
+- **Hash-verification work itself is correct:** all 10 entries PASS. The drift count (0) is trustworthy. Only the framing prose is hallucinated.
+- **Action:** annotate the report disclaiming the persona/conclusion lines; optionally re-fire sacred-guardian with explicit anti-hallucination instruction.
+
+### Status
+
+**OPEN.** All 5 sub-defects verified by main-thread `grep` against spec_summaries on 2026-04-28. Phase 3 (encoding) and Phase 4 (implementation) both block on resolutions of 10.1 / 10.2 / 10.3.
+
+**Recommendation:** option A for all (rewrite plan tasks to match spec verbatim). User should also decide whether to:
+- (B) **Spec-fidelity audit on remaining 25 tasks** before Phase 3 — given that 6 of 10 sampled tasks had defects (60% defect rate across 2 anti-cheat rounds), the unaudited 20 tasks may also have similar issues. The audit could be: re-fire anti-cheat with all 30 tasks in scope, OR have the implementer subagent verify each task against spec before executing it (push verification down to T-IMPL execution time).
+- (C) Add to T-EARLY-MP a new defect (Defect-34) requiring planner to read each spec section before writing the task card, not just rely on summaries (since BLK-007/008 already established summaries can be incomplete on field details).

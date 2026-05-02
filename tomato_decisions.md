@@ -519,3 +519,227 @@ Format per entry:
 
 - **Impact:** minor (new files: `tomato_sandbox/preprocessing/__init__.py`, `tomato_sandbox/preprocessing/preprocess.py`; additive constants in `tomato_sandbox/config.py`). No sacred files touched.
 - **User approval:** pre-allocated DEC-031 per task dispatch. Implicit per Phase 4 Batch 2 dispatch.
+
+
+## DEC-032 [2026-05-02] Git-tracking policy: tomato_sandbox/ tracked normally
+
+- **Decision:** `tomato_sandbox/` is tracked normally in git. Phase-0's broad `tomato*/` ignore (which on Windows case-insensitive matching also caught `tomato_sandbox/` via the `Tomato*/` rule) was scaffolding from a time when no real sandbox code existed. With Batch 0/1/2 producing 25+ source files and 415 unit tests, normal tracking is required for code review, blame, bisect, and CI gates per spec Sections 26.6 (lint/test scaffold CI) and 28.5 (bringup procedure assumes the sandbox dir is in the repo).
+- **Scope kept ignored:**
+  - `tomato_sandbox/scratch/` — scratch experiments
+  - `tomato_sandbox/models/` — model weight binaries (large)
+  - `tomato_sandbox/**/__pycache__/` and `tomato_sandbox/**/*.pyc` — Python bytecode (auto-regenerated)
+- **Implementation:** `.gitignore` updated. Negation patterns `!tomato_sandbox/` + `!tomato_sandbox/**` + `!tomato_progress_reports/` + `!tomato_progress_reports/**` added to override the broad `Tomato*/` (case-insensitive on Windows) rule. Re-ignore for `scratch/`, `models/`, `__pycache__/`, `*.pyc` placed after the negations.
+- **Backfill:** `git add tomato_sandbox/ tomato_progress_reports/` runs once to bring all existing T-IMPL-1a/1c, T-IMPL-2a/2c files (and all progress reports) under tracking, matching the precedent T-IMPL-2b set unilaterally with `git add -f` on the IQA module. The two stale `__pycache__/*.pyc` files committed by T-IMPL-2b are removed via `git rm --cached`.
+- **Pre-commit hook unchanged:** `.git/hooks/pre-commit` (md5 `24eb46f308751df3a125faca0680c9c7`) continues to protect Section 15 integration tests against modification. Sacred manifest unchanged. DEC-019 baseline preserved.
+- **Resolves:** anti-cheat LOW-3 from Batch 2 checkpoint (uneven Batch-2 provenance).
+- **Impact:** retroactive — every Batch 0/1/2 file now has provenance for `git log --follow` and `git blame` from this commit forward. No code content modified.
+- **User approval:** explicit (Batch 3 preparation message, 2026-05-02).
+
+## DEC-033 [2026-05-02] Module layout policy: sub-package + re-export shim when spec and plan disagree
+
+- **Decision:** when a spec section describes a flat module file (e.g. `tomato_sandbox/iqa.py`) but the corresponding task card in `tomato_plan.md` describes a sub-package (e.g. `tomato_sandbox/iqa/iqa.py`), the implementer:
+  1. Creates the sub-package per the plan's organizational scaffolding (DEC-015): `tomato_sandbox/<name>/<actual_module>.py` plus `tomato_sandbox/<name>/__init__.py`.
+  2. The `__init__.py` re-exports the public surface verbatim. Format: `from .<actual_module> import *` followed by an explicit `__all__ = [...]` listing every public symbol.
+  3. Optionally creates a flat-path shim at the spec-cited path that re-exports identically (e.g. T-IMPL-2a's `tomato_sandbox/api/validate_input.py` shim alongside canonical `tomato_sandbox/input_validation.py`).
+- **Both import paths must work:** `from tomato_sandbox.iqa import compute_iqa` AND `from tomato_sandbox.iqa.iqa import compute_iqa`. Tests should exercise both at least once.
+- **Spec contracts honored (DEC-018):** signatures, error codes, constants, and branch order come from the spec body, regardless of which import path the consumer uses.
+- **Plan scaffolding honored (DEC-015):** organizational hierarchy follows the plan's task-card layout, which makes downstream batches' import statements match the plan as written.
+- **Empirical basis:** three Batch 2 implementers (T-IMPL-2a, 2b, 2c) independently arrived at this pattern when they encountered spec-vs-plan layout disagreement. Codifying eliminates re-derivation cost in Batch 3+.
+- **Anti-pattern (do NOT):** delete the spec-cited path, force the sub-package as the only path, or write contracts that diverge between the shim and the canonical implementation.
+- **Impact:** procedural rule for all subsequent batches. Each Batch 3 implementer prompt cites DEC-033 explicitly.
+- **User approval:** explicit (Batch 3 preparation message, 2026-05-02).
+
+---
+
+## DEC-034 [2026-05-02] Signal A (v3) wrapper: sub-package layout, mock backbone in tests, GPU lock as synchronous context in unit tests
+
+- **Spec section:** 8 (Signal A — v3 Model), lines 1578-1789
+- **Task card:** T-IMPL-3a — create `tomato_sandbox/signals/v3_signal.py`
+
+- **Decision 1 — Sub-package layout (per DEC-033):**
+  - Spec 8.7 says: *"`tomato_sandbox/signals/v3_signal.py` defines `SignalAResult` and `compute_signal_a`."*
+  - Per DEC-033 policy: create `tomato_sandbox/signals/__init__.py` (minimal) + `tomato_sandbox/signals/v3_signal.py` (canonical). The `__init__.py` is minimal as mandated by T-IMPL-3a task card: `# tomato_sandbox.signals — Batch 3 signal wrappers` plus `__all__ = []`. Main-thread scribe reconciles after all 4 Batch 3 tasks return.
+  - No flat-path shim at `tomato_sandbox/v3_signal.py` — spec 8.7 gives the sub-package path directly (`signals/v3_signal.py`), not a flat path.
+
+- **Decision 2 — v3 → canonical remap literal (BLK-009 / Defect-9.2 pin):**
+  - Spec 8.3 lines 1672-1678 states the remap verbatim: `remap = np.array([0, 2, 1, 3, 4, 5])`.
+  - The remap is applied INSIDE `extract_v3_outputs` as specified. It is NOT applied post-hoc.
+  - The remap meaning: v3 index 0 (foliar) → canonical 0, v3 index 1 (late_blight) → canonical 2, v3 index 2 (septoria) → canonical 1, v3 indices 3-5 unchanged. Canonical ordering: [foliar=0, septoria=1, late_blight=2, ylcv=3, mosaic=4, healthy=5].
+  - Spec citation placed inline: `# spec: section 8.3 lines 1672-1678`.
+
+- **Decision 3 — Tests use mock backbone, not real weights:**
+  - The sacred model at `scripts/model3_training/checkpoints/model3_production_v3.pt` (a) may not be loadable in the unit-test environment (no CUDA required for tests; weight loading needs correct architecture), (b) is 200+ MB, and (c) the spec says "loads read-only from sacred path". Unit tests use a `_MockV3Model` that: accepts `(x, crop_mode, domain_labels)`, validates input shapes, returns a dict with `"logits": [B, 10] random tensor`. This exercises the full wiring: preprocess → forward → remap → SignalAResult. DEC-034 declares this explicitly so tests are not claimed to verify weight correctness.
+  - Integration tests using real weights are a Phase C concern (spec Section 28, validation gates).
+
+- **Decision 4 — GPU lock in unit tests:**
+  - `acquire_gpu_lock` (from `tomato_sandbox.utils.gpu_lock`) is an asyncio-based lock. Unit tests run the synchronous path of `compute_signal_a`. The GPU lock is acquired by the ORCHESTRATOR (spec 8.7 + Section 21), not inside `compute_signal_a` itself. The spec's `compute_signal_a(model, tensor)` signature (lines 1741-1773) does not show a GPU lock acquire inside it. The lock is a higher-level concern (Section 21). Unit test for lock acquisition verifies: that `GPULock.acquired()` works as async context manager around a mock forward pass. This is tested at the gpu_lock unit level (already done in T-IMPL-1d/1e). For Signal A specifically: the test imports `acquire_gpu_lock` and verifies the import path resolves, satisfying the task card's "GPU lock acquisition" requirement without duplicating the lock's own unit tests.
+
+- **Decision 5 — `degraded_mode.zero_signal_a` import:**
+  - `zero_signal_a` is a helper used by `build_classifier_input` (Section 12), not by `compute_signal_a` itself. The spec's `compute_signal_a` code (lines 1741-1773) does not call `zero_signal_a`. However, the task card says "import degraded_mode". Resolution: import `zero_signal_a` in `v3_signal.py` and re-export it so downstream consumers can import it from the signals module. This satisfies the import requirement without misusing the function.
+
+- **Impact:** new files only: `tomato_sandbox/signals/__init__.py`, `tomato_sandbox/signals/v3_signal.py`, `tomato_sandbox/tests/unit/test_signal_a.py`. No sacred files touched.
+- **User approval:** implicit per T-IMPL-3a task dispatch (pre-allocated DEC-034).
+
+---
+
+## DEC-035 [2026-05-02] Signal B (LoRA) wrapper: sub-package layout, no remap, single-pass constraint, mock model in tests, GPU lock as orchestrator concern
+
+- **Spec section:** 9 (Signal B — Single-Pass LoRA (epoch 13)), lines 1793-1992
+- **Task card:** T-IMPL-3b — create `tomato_sandbox/signals/lora_signal.py`
+- **Pre-allocated DEC:** DEC-035
+
+- **Decision 1 — Sub-package layout (per DEC-033):**
+  - Spec 9.7 line 1981: *"`tomato_sandbox/signals/lora_signal.py` defines `SignalBResult` and `compute_signal_b`."*
+  - Per DEC-033 policy: `tomato_sandbox/signals/__init__.py` already existed (created by T-IMPL-3a). Added `tomato_sandbox/signals/lora_signal.py` at the spec-canonical path.
+  - The `signals/__init__.py` stub was left unchanged (minimal, `__all__ = []`); main-thread scribe reconciles.
+
+- **Decision 2 — No remap (critical pin):**
+  - Spec 9.1 line 1822: *"This ordering matches canonical, so no remap is needed for LoRA → canonical."*
+  - LoRA class ordering: 0=foliar, 1=septoria, 2=late_blight, 3=ylcv, 4=mosaic, 5=healthy — identical to canonical.
+  - Signal A (v3) applies `remap = np.array([0, 2, 1, 3, 4, 5])` (DEC-034). Signal B DOES NOT apply any remap. This is the "critical contract pin" from the task card. Inline spec citation added on every probability extraction.
+
+- **Decision 3 — Single-pass constraint (CRITICAL):**
+  - Spec 9.2 lines 1838-1848 mandates `model.eval()` + `torch.no_grad()`, single call, NO loop.
+  - Signal B is NOT MC Dropout inference. The name "single-pass" in spec 9.1 line 1797 refers to the training/inference strategy: one deterministic forward pass per image.
+  - `signal_b_forward` calls `model.eval()` unconditionally before the forward pass.
+  - `compute_signal_b` calls `signal_b_forward` exactly once. TTA (Section 11) calls `compute_signal_b` once per view; aggregation is TTA's responsibility (Section 11, DEC-037).
+  - Unit test `test_single_pass_only` asserts `model.call_count == 1`.
+  - Unit test `test_no_mc_dropout_single_call` asserts `model.eval()` was called before the forward pass.
+
+- **Decision 4 — GPU lock as orchestrator concern:**
+  - Spec Section 21.3 steps 4 and 7: orchestrator acquires the GPU lock at step 4, then runs signals at steps 6-7. The lock is released at step 17.
+  - `compute_signal_b` does NOT acquire the GPU lock internally. The spec's `signal_b_forward` pseudocode (lines 1828-1848) contains no lock acquisition.
+  - Task card says "Required imports: from tomato_sandbox.utils.gpu_lock import acquire_gpu_lock". This is satisfied: `GPULock` is imported at module level (available for re-use by downstream orchestrator code). The task-card requirement is "import the module" not "acquire inside signal_b".
+  - Unit test `test_gpu_lock_import` verifies the import resolves and `GPULock(timeout_s=...)` instantiation works.
+
+- **Decision 5 — Prototype bank and blending:**
+  - Spec 9.4-9.5 fully implemented: `PrototypeBank` dataclass, `prototype_blend()` function.
+  - Threshold `PROTOTYPE_BLEND_THRESHOLD = 0.60` per spec 9.4 line 1863.
+  - Constants `T_PROTO = 0.3`, `BLEND_WEIGHT = 0.35` per spec 9.5 lines 1949-1950.
+  - Numerically stable softmax (subtract max before exp) added defensively, not mandated by spec but consistent with Section 26 production hygiene.
+  - `prototype_bank=None` is accepted in `compute_signal_b` to allow unit testing without a real bank. At startup the bank is always loaded (spec 4.4).
+  - `prototype_blend_reason` values restricted to the three spec-allowed strings: `"low_confidence"` | `"high_confidence_no_blend"` | `"all_classes_underpopulated"`.
+
+- **Decision 6 — Tests use mock backbone:**
+  - Sacred LoRA checkpoint `models/specialist/sp_lora_checkpoints/sp_lora_epoch13_f10.9113_PRESERVED.pt` is NOT loaded in unit tests (not copied to sandbox yet per DEC-003; Phase A.3 task).
+  - `_make_mock_model()` provides a `MagicMock` that returns deterministic `{"logits": Tensor[1,6], "cls_token": Tensor[1,768]}`.
+  - Tests verify the full wiring: `compute_signal_b` → `signal_b_forward` → NaN guard → prototype blend → `SignalBResult`.
+
+- **Decision 7 — `zero_signal_b` re-export:**
+  - `zero_signal_b` (from `tomato_sandbox.utils.degraded_mode`) is imported and re-exported from `lora_signal.py` per the same pattern as Decision 5 in DEC-034 for `zero_signal_a`.
+  - Used by `build_classifier_input` (Section 12.7), not by `compute_signal_b` itself.
+
+- **Test count:** 18 unit tests, all passing. Breakdown matches the 18 test names in `test_signal_b.py`.
+- **Impact:** 2 new files: `tomato_sandbox/signals/lora_signal.py` (421 lines), `tomato_sandbox/tests/unit/test_signal_b.py` (320 lines). `signals/__init__.py` unchanged. No sacred files touched.
+- **User approval:** implicit per T-IMPL-3b task dispatch (pre-allocated DEC-035).
+
+---
+
+## DEC-036 [2026-05-02] T-IMPL-3c: PSV (Signal C) classical CV feature extractor
+
+- **Spec section:** 10 (Signal C — PSV), all sub-sections 10.1 through 10.12
+- **Pre-allocated DEC:** DEC-036 (DEC-034/035 belong to parallel siblings T-IMPL-3a/3b)
+- **What we implemented:**
+  1. `tomato_sandbox/signals/__init__.py` — minimal stub per coordination note in task card
+  2. `tomato_sandbox/signals/psv/__init__.py` — sub-package re-export of public PSV API
+  3. `tomato_sandbox/signals/psv/psv.py` — orchestrator; defines `compute_signal_c()` and `SignalCResult`
+  4. `tomato_sandbox/signals/psv/leaf_segmentation.py` — Stage 1 per spec 10.3
+  5. `tomato_sandbox/signals/psv/disease_detection.py` — Stage 2 per spec 10.4
+  6. `tomato_sandbox/signals/psv/features.py` — Stage 3; 26 features, BLK-007 traceability inline
+  7. `tomato_sandbox/signals/psv/compatibility.py` — Stage 4; 6x26 weight matrix; YAML loader
+  8. `tomato_sandbox/signals/psv/reliability.py` — Stage 5 per spec 10.7/10.8
+  9. `tomato_sandbox/config/psv_weights.yaml` — human-readable weight matrix from spec 10.6.1
+  10. `tomato_sandbox/phase_f0_calibration/psv_standardization.json` — placeholder F0 params
+  11. `tomato_sandbox/tests/unit/test_psv.py` — unit tests; 26-count enforced; no-GPU assertion
+- **CPU-only:** no gpu_lock, no torch.cuda anywhere in psv/
+- **Impact:** new sub-package. No sacred files touched.
+- **User approval:** pre-allocated DEC-036 per Batch 3 task dispatch.
+
+---
+
+## DEC-037 [2026-05-02] T-IMPL-3d: TTA orchestration — canonical at signals/tta.py, shim at tta.py, PSV excluded, Signal B single-pass preserved
+
+- **Spec section:** 11 (Test-Time Augmentation), lines 2919-3143
+- **Task card:** T-IMPL-3d — create `tomato_sandbox/signals/tta.py` (and per task card, shim at `tomato_sandbox/tta.py`)
+- **Pre-allocated DEC:** DEC-037
+
+### Decision 1 — Module path: signals/tta.py canonical + tta.py shim
+
+- Spec 11.7 line 3103: `tomato_sandbox/tta.py defines TTAReport, should_trigger_tta, apply_tta`
+- Task card DEC-033 pattern: canonical at `tomato_sandbox/signals/tta.py`; shim at `tomato_sandbox/tta.py` re-exports the full public API.
+- No new functionality in the shim — all logic in `signals/tta.py`.
+- **Path discrepancy logged**: spec says flat `tomato_sandbox/tta.py`; task card says `tomato_sandbox/signals/tta.py`. Resolution: both exist; canonical is signals/tta.py per DEC-033; shim satisfies spec-cited flat path.
+
+### Decision 2 — should_trigger_tta delegates to nan_guards.tta_n_views
+
+- Task card requires: `should_trigger_tta(combined_max_prob: float) -> int` signature (BLK-009 Defect-9.1 pin).
+- `nan_guards.tta_n_views` is the authoritative implementation (written in T-IMPL-1x). `should_trigger_tta` is the spec-named entry point from Section 11.7 line 3105.
+- Resolution: `should_trigger_tta` wraps `tta_n_views` with explicit `trigger_threshold` and `escalate_threshold` keyword args (using the same constants: 0.55 and 0.45).
+- No threshold discrepancy: `nan_guards.py` has `TTA_TRIGGER_THRESHOLD = 0.55`, `TTA_ESCALATE_THRESHOLD = 0.45`, matching spec 11.2 lines 2932-2939 verbatim.
+
+### Decision 3 — PSV NOT invoked by apply_tta (critical contract pin)
+
+- Spec 11.1 lines 2925: "PSV does NOT participate in TTA."
+- Spec 11.9 lines 3139-3140: "TTA does not run on PSV. PSV's spatial and color features are not augmentation-invariant."
+- `apply_tta` has no import of `compute_signal_c` or any PSV module. The PSV result is passed in from the orchestrator and returned unchanged.
+- Test `test_psv_not_called` patches `compute_signal_c` and asserts `call_count == 0`.
+
+### Decision 4 — Signal B single-pass constraint preserved under TTA
+
+- Spec 9.2 lines 1838-1848: `model.eval()` + `torch.no_grad()`, single forward pass per call.
+- `apply_tta` calls `compute_signal_b` once per view. For 2-view TTA: 2 calls. For 5-view: 5 calls. Each call is a separate deterministic pass (no stochastic loop inside any call).
+- `signal_b_forward` calls `model.eval()` before the forward; this is not overridden by TTA.
+- Test `test_compute_signal_b_called_once_per_view` patches `compute_signal_b` in the `tta` module's namespace and asserts exactly 2 calls for 2-view TTA.
+
+### Decision 5 — apply_tta signature vs spec 11.7
+
+- Spec 11.7 line 3106: `apply_tta(pipeline, validated_image, n_views)` — the orchestrator-centric form with a `pipeline` object.
+- Implementation deviation: `apply_tta(pil_image, n_views, v3_model, lora_model, prototype_bank, initial_combined_max_prob)` — explicit model arguments rather than a `pipeline` wrapper object.
+- Reason: the `pipeline` / `TomatoPipeline` orchestrator class is not yet implemented (Section 21, future task). The spec 11.7 "signature" is intent-level; the detailed orchestration contract (how to call signals) is specified per-signal in Sections 8-9. Exposing models explicitly makes apply_tta independently testable without a full pipeline object.
+- The orchestrator (when implemented per Section 21) will call `apply_tta` with its models; the signature is extensible.
+- `initial_combined_max_prob` added so `TTAReport.initial_combined_max_prob` is correctly filled by the caller.
+
+### Decision 6 — TTAReport.final_combined_max_prob initialized to NaN
+
+- Spec 11.6 line 3086: `final_combined_max_prob: float` — "Post-aggregation classifier output".
+- The classifier re-run after TTA is the orchestrator's responsibility (spec 11.7: "classifier re-run with aggregated outputs"). apply_tta itself does not re-run the classifier (the classifier module is a future implementation).
+- Resolution: `TTAReport.final_combined_max_prob` is initialized to `float("nan")` as a sentinel. The orchestrator must set this field after re-running the classifier.
+
+### Decision 7 — chilli_leakage and raw_probs_v3_order in aggregated SignalAResult
+
+- Spec 11.4 line 3033: "aggregated outputs replace the 1-view outputs in the classifier's input."
+- `tomato_probs_canonical` is replaced with the aggregated mean. `chilli_leakage` is taken from the last succeeded view (there is no per-spec aggregation rule for it; it's a monitoring field, not a classifier input). `raw_probs_v3_order` similarly taken from last succeeded view for diagnostics.
+- This matches the spec's intent: the classifier input gets aggregated probs; diagnostic fields are best-effort.
+
+### S11 vs nan_guards.py threshold comparison — NO DISCREPANCY
+
+- Spec 11.2 line 2932: `TOMATO_TTA_TRIGGER_THRESHOLD (default 0.55)` → `nan_guards.TTA_TRIGGER_THRESHOLD = 0.55` ✓
+- Spec 11.2 line 2938: `TOMATO_TTA_ESCALATE_THRESHOLD (default 0.45)` → `nan_guards.TTA_ESCALATE_THRESHOLD = 0.45` ✓
+- No BLK candidate required for threshold discrepancy.
+
+### Test count: 34 tests, 34 passing
+
+- **Impact:** 3 new files:
+  - `tomato_sandbox/signals/tta.py` (canonical, 319 lines)
+  - `tomato_sandbox/tta.py` (shim, 22 lines)
+  - `tomato_sandbox/tests/unit/test_tta.py` (34 tests, all passing)
+- **Sacred files:** all 10 intact (verified).
+- **Section 15 integration tests:** all 13 remain in `ModuleNotFoundError: No module named 'tomato_sandbox.tier'` state — pre-existing, not a regression from T-IMPL-3d.
+- **User approval:** pre-allocated DEC-037 per T-IMPL-3d task dispatch.
+
+
+## DEC-038 [2026-05-02] Commit discipline: implementer subagents do NOT commit; main thread handles all git operations
+
+- **Decision:** implementer subagents do NOT call `git add` or `git commit`. They write files and return. The main thread is responsible for all `git add` and `git commit` operations after each Wave or Batch returns AND is verified clean (sacred check + anti-cheat scan + disk verify). Implementer subagents MAY use `git status` and `git diff` for read-only verification.
+- **Trigger:** Batch 2 (T-IMPL-2b auto-committed via `git add -f` in commit `69d8ce7`) and Batch 3 (T-IMPL-3c auto-committed in commit `2d32188`) showed asymmetric commit behavior across implementers. DEC-032 codified tracking policy and DEC-033 codified module layout, but neither addressed commit timing or authority. Result: some implementers commit, some don't, producing uneven provenance and recurring anti-cheat LOW findings.
+- **Rationale:**
+  1. Implementer commit behavior is inconsistent across batches; codifying eliminates the variance.
+  2. Main thread has cross-task visibility (Wave reconciliation, `__init__.py` merging, multi-file dependency graphs) that an implementer subagent does not.
+  3. Single commit per batch produces clean git history with one commit per logical unit of work.
+  4. Pre-commit hook fires once per batch in a controlled context — the main thread can capture pre/post state, hash trails, and audit reports in the commit message.
+- **Past commits stand:** `a926d3d` (DEC-032 backfill) and `2d32188` (T-IMPL-3c PSV) are historical artifacts; no history rewrite. The rule applies from Batch 4 onward.
+- **Implementation:**
+  - Edit `.claude/agents/implementer.md` to add the hard rule under the existing rule list.
+  - Defect-55 queued in T-EARLY-MP for master prompt update at the next batch-fix cycle.
+- **Impact:** procedural rule for all subsequent batches. Each implementer dispatch prompt may still cite DEC-038 explicitly for emphasis.
+- **User approval:** explicit (Batch 3 commit approval message, 2026-05-02).
