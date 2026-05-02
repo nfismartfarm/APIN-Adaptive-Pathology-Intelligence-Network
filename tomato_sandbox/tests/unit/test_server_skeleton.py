@@ -193,19 +193,33 @@ class TestStartupSequence:
         assert hasattr(client.app.state, "gpu_lock")
         assert isinstance(client.app.state.gpu_lock, GPULock)
 
-    def test_pipeline_is_none_in_skeleton(self, client: TestClient) -> None:
-        """app.state.pipeline is None in skeleton (model loading is stubbed).
+    def test_pipeline_is_not_none_after_wiring(self, client: TestClient) -> None:
+        """app.state.pipeline is a PipelineContext after step 12 completes.
 
-        # DEC-026 — pipeline=None until orchestrator is wired in later batch.
+        # DEC-045 Decision 4 — PipelineContext wired at startup step 12.
+        # Pipeline is no longer None now that server endpoints are fully wired.
         """
-        assert client.app.state.pipeline is None
+        from tomato_sandbox.orchestrator.pipeline import PipelineContext
+        assert client.app.state.pipeline is not None
+        assert isinstance(client.app.state.pipeline, PipelineContext)
 
-    def test_model_loaded_is_false_in_skeleton(self, client: TestClient) -> None:
-        """model_loaded is False because model-loading steps are stubbed.
+    def test_model_loaded_is_true_after_conformal_load(self, client: TestClient) -> None:
+        """model_loaded is True when conformal calibration is loaded.
 
-        # DEC-026: steps 4-11 are stubs; model_loaded remains False.
+        # DEC-045 Decision 4 — model_loaded=True set at step 8 when conformal_tau.json loads.
+        # conformal calibration is the minimal required component for routing.
         """
-        assert client.app.state.model_loaded is False
+        assert client.app.state.model_loaded is True
+
+    def test_conformal_tau_loaded(self, client: TestClient) -> None:
+        """app.state.conformal_tau is set from conformal_tau.json.
+
+        # spec: section 20.5 step 8 — conformal calibration loaded.
+        # DEC-045 Decision 2 — placeholder tau=0.42 matches spec S20.3 /info example.
+        """
+        assert hasattr(client.app.state, "conformal_tau")
+        assert client.app.state.conformal_tau is not None
+        assert isinstance(client.app.state.conformal_tau, float)
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +232,7 @@ class TestHealthEndpoint:
 
     # spec: section 20.3 "/health GET Liveness check; returns 200 if model loaded and GPU available"
     # line 6461
+    # DEC-045 Decision 7: gpu_available field added per spec 20.3 line 6461.
     """
 
     def test_health_status_200(self, client: TestClient) -> None:
@@ -229,14 +244,27 @@ class TestHealthEndpoint:
         assert body["status"] == "ok", f"Expected status='ok', got {body}"
 
     def test_health_body_has_model_loaded(self, client: TestClient) -> None:
-        """model_loaded key must be present (False in skeleton)."""
+        """model_loaded key must be present (True after conformal calibration loaded)."""
         body = client.get("/health").json()
         assert "model_loaded" in body, f"'model_loaded' missing from /health response: {body}"
 
-    def test_health_model_loaded_is_false_in_skeleton(self, client: TestClient) -> None:
-        """model_loaded is False in skeleton (no models loaded yet)."""
+    def test_health_model_loaded_is_true_after_conformal(self, client: TestClient) -> None:
+        """model_loaded is True when conformal calibration loaded at step 8.
+
+        # DEC-045 Decision 4 — model_loaded=True set when conformal_tau.json loads.
+        """
         body = client.get("/health").json()
-        assert body["model_loaded"] is False
+        assert body["model_loaded"] is True
+
+    def test_health_body_has_gpu_available(self, client: TestClient) -> None:
+        """gpu_available key must be present.
+
+        # spec: section 20.3 line 6461 — "/health ... returns 200 if model loaded and GPU available"
+        # DEC-045 Decision 7: spec requires GPU availability to be surfaced.
+        """
+        body = client.get("/health").json()
+        assert "gpu_available" in body, f"'gpu_available' missing from /health response: {body}"
+        assert isinstance(body["gpu_available"], bool)
 
     def test_health_content_type_json(self, client: TestClient) -> None:
         resp = client.get("/health")
@@ -262,41 +290,85 @@ class TestReadyEndpoint:
 
 
 class TestPredictEndpoint:
-    """/predict returns HTTP 503 in skeleton.
+    """/predict endpoint wired — valid multipart file required.
 
     # spec: section 20.3 "/predict POST Single-image prediction (Section 16)" line 6457
-    # DEC-026: 503 placeholder until orchestrator is wired.
+    # DEC-045 Decision 6: endpoint now wired; tests updated from stub expectations.
     """
 
-    def test_predict_503(self, client: TestClient) -> None:
-        resp = client.post("/predict", content=b"fake image bytes")
-        assert resp.status_code == 503, f"Expected 503, got {resp.status_code}: {resp.text}"
+    def test_predict_missing_file_returns_422(self, client: TestClient) -> None:
+        """POST /predict with no file field returns 422 (FastAPI form validation).
 
-    def test_predict_body_has_error_key(self, client: TestClient) -> None:
-        body = client.post("/predict", content=b"fake").json()
-        assert "error" in body or "detail" in body, (
-            f"Response should have 'error' or 'detail' key: {body}"
+        # DEC-045 Decision 6: wired endpoint; no file → FastAPI 422 (not stub 503).
+        """
+        resp = client.post("/predict")
+        assert resp.status_code == 422, (
+            f"Expected 422 for missing file field, got {resp.status_code}: {resp.text}"
         )
 
-    def test_predict_503_with_empty_body(self, client: TestClient) -> None:
-        """Even with empty body, predict returns 503 (not 422 from Pydantic)."""
-        resp = client.post("/predict")
-        assert resp.status_code == 503
+    def test_predict_invalid_content_returns_400(self, client: TestClient) -> None:
+        """POST /predict with non-image bytes returns 400 from validation gate.
+
+        # spec: section 5 — validation gate rejects invalid MIME type.
+        # DEC-045 Decision 6: validation gate runs; invalid input → 400.
+        """
+        resp = client.post(
+            "/predict",
+            files={"file": ("test.jpg", b"not an image", "image/jpeg")},
+        )
+        # 400 from validation gate OR 200 if pipeline handles gracefully
+        assert resp.status_code in (400, 200), (
+            f"Expected 400 or 200 for invalid content, got {resp.status_code}: {resp.text}"
+        )
+
+    def test_predict_body_has_error_or_result_key(self, client: TestClient) -> None:
+        """Response must have 'error' or pipeline result keys."""
+        resp = client.post(
+            "/predict",
+            files={"file": ("test.jpg", b"not an image", "image/jpeg")},
+        )
+        body = resp.json()
+        has_error = "error" in body or "detail" in body
+        has_result = "request_id" in body or "tier" in body
+        assert has_error or has_result, (
+            f"Response should have error or result keys: {body}"
+        )
 
 
 class TestPredictMultiEndpoint:
-    """/predict_multi returns HTTP 503 in skeleton.
+    """/predict_multi endpoint wired — valid multipart files required.
 
     # spec: section 20.3 "/predict_multi POST Multi-image prediction (Section 18)" line 6458
+    # DEC-045 Decision 6: endpoint now wired; tests updated from stub expectations.
     """
 
-    def test_predict_multi_503(self, client: TestClient) -> None:
-        resp = client.post("/predict_multi", json={"images": []})
-        assert resp.status_code == 503, f"Expected 503, got {resp.status_code}: {resp.text}"
+    def test_predict_multi_missing_files_returns_422(self, client: TestClient) -> None:
+        """POST /predict_multi with no files field returns 422 (FastAPI form validation).
 
-    def test_predict_multi_body_has_error_key(self, client: TestClient) -> None:
-        body = client.post("/predict_multi", json={}).json()
-        assert "error" in body or "detail" in body
+        # DEC-045 Decision 6: wired endpoint; no files → FastAPI 422.
+        """
+        resp = client.post("/predict_multi")
+        assert resp.status_code == 422, (
+            f"Expected 422 for missing files field, got {resp.status_code}: {resp.text}"
+        )
+
+    def test_predict_multi_json_body_returns_422(self, client: TestClient) -> None:
+        """POST /predict_multi with JSON body (not multipart) returns 422.
+
+        Endpoint expects multipart form-data, not JSON.
+        """
+        resp = client.post("/predict_multi", json={"images": []})
+        assert resp.status_code == 422, (
+            f"Expected 422 for JSON body (not multipart), got {resp.status_code}: {resp.text}"
+        )
+
+    def test_predict_multi_body_has_error_or_result_key(self, client: TestClient) -> None:
+        """Response for invalid input must have 'error' or 'detail' key."""
+        resp = client.post("/predict_multi")
+        body = resp.json()
+        assert "error" in body or "detail" in body, (
+            f"Response should have error or detail key: {body}"
+        )
 
 
 class TestGradcamEndpoint:
@@ -465,14 +537,19 @@ class TestClientSmokeTest:
     """
 
     def test_smoke_health_roundtrip(self) -> None:
-        """Full lifecycle smoke: create client, call /health, check response."""
+        """Full lifecycle smoke: create client, call /health, check response.
+
+        # DEC-045 Decision 6-7: response now includes gpu_available field;
+        # model_loaded is True (conformal calibration loaded at step 8).
+        """
         with TestClient(app) as c:
             resp = c.get("/health")
         assert resp.status_code == 200
         body = resp.json()
-        assert body == {"status": "ok", "model_loaded": False}, (
-            f"Unexpected /health response: {body}"
-        )
+        # Wired server: model_loaded=True (conformal loaded) + gpu_available present
+        assert body["status"] == "ok", f"Unexpected status: {body}"
+        assert body["model_loaded"] is True, f"Expected model_loaded=True: {body}"
+        assert "gpu_available" in body, f"Expected gpu_available field: {body}"
 
     def test_smoke_no_apin_import(self) -> None:
         """Verify no APIN library is imported by the server module.

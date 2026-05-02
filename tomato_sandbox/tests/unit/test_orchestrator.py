@@ -545,28 +545,38 @@ class TestPredictSingleHappyPath:
             return predict_single(img_bytes, "req-happy-1", ctx)
 
     def test_happy_path_returns_tier_label(self) -> None:
+        # S16.2: tier is now a nested block; tier["label"] carries the tier string
         result = self._run_happy_path()
-        assert "tier_label" in result
-        assert result["tier_label"] == "1"
+        assert "tier" in result
+        assert result["tier"]["label"] == "1"
 
     def test_happy_path_has_signal_health_fields(self) -> None:
+        # S16.2: signal_a/b/c_succeeded are not top-level response fields.
+        # Semantic intent: when all signals succeed, the pipeline produces a valid
+        # non-error response and assigns a non-4B tier (degraded-mode 4B only fires
+        # when all signals fail). The conformal set size < 7 (fallback size)
+        # also confirms signals contributed meaningful probability mass.
         result = self._run_happy_path()
-        assert "signal_a_succeeded" in result
-        assert "signal_b_succeeded" in result
-        assert "signal_c_succeeded" in result
-        assert result["signal_a_succeeded"] is True
-        assert result["signal_b_succeeded"] is True
-        assert result["signal_c_succeeded"] is True
+        assert "error" not in result, f"Unexpected error: {result.get('error')}"
+        assert result["tier"]["label"] != "4B", (
+            "Expected a successful tier (not 4B) when all signals succeed"
+        )
+        # Conformal set comes from mock (1 element), not the 7-element fallback
+        assert len(result["prediction"]["prediction_set"]) < 7, (
+            "Expected a narrow conformal set when signals succeed"
+        )
 
     def test_happy_path_has_conformal_fields(self) -> None:
+        # S16.2: conformal fields are nested under result["prediction"]
         result = self._run_happy_path(conformal_set=[3, 5])
-        assert "prediction_set" in result
-        assert "prediction_set_size" in result
+        assert "prediction_set" in result["prediction"]
+        assert len(result["prediction"]["prediction_set"]) == 2
 
     def test_happy_path_no_tta_fired(self) -> None:
-        # max_prob=0.82 → no TTA (threshold is 0.55)
+        # S21.3 step 22: tta_fired is surfaced as a warning string, not a bare bool key.
+        # When TTA did NOT fire, the sentinel warning string is absent from warnings.
         result = self._run_happy_path(clf_max_prob=0.82)
-        assert result["tta_fired"] is False
+        assert "TTA was triggered for this request." not in result.get("warnings", [])
 
     def test_happy_path_processing_time_present(self) -> None:
         result = self._run_happy_path()
@@ -710,7 +720,8 @@ class TestTTADoesNotInvokePSV:
             result = predict_single(img_bytes, "req-tta-1", ctx)
 
         mock_tta.assert_called_once()
-        assert result["tta_fired"] is True
+        # S21.3 step 22: tta_fired is surfaced as a warning string, not a bare bool key.
+        assert "TTA was triggered for this request." in result.get("warnings", [])
 
     def test_tta_not_fired_when_confidence_high(self) -> None:
         """
@@ -747,7 +758,8 @@ class TestTTADoesNotInvokePSV:
             result = predict_single(img_bytes, "req-no-tta-1", ctx)
 
         mock_tta.assert_not_called()
-        assert result["tta_fired"] is False
+        # S21.3 step 22: tta_fired is surfaced as a warning string, not a bare bool key.
+        assert "TTA was triggered for this request." not in result.get("warnings", [])
 
 
 # ---------------------------------------------------------------------------
@@ -788,11 +800,15 @@ class TestSignalFailureDegradedMode:
         ):
             result = predict_single(img_bytes, "req-sa-fail-1", ctx)
 
-        # Pipeline should produce a valid result with tier_label (not an error)
+        # Pipeline should produce a valid S16.2 result with tier block (not an error).
+        # S16.2: top-level "tier" block replaces old "tier_label" key.
         assert "error" not in result, f"Unexpected error: {result.get('error')}"
-        assert "tier_label" in result
-        assert result["signal_a_succeeded"] is False
-        assert result["signal_b_succeeded"] is True
+        assert "tier" in result
+        # When A failed but B+C succeeded the pipeline continues in degraded mode;
+        # the mock assign_tier returns tier "2" (not the pipeline-failure tier "4B").
+        assert result["tier"]["label"] != "4B", (
+            "Expected degraded-mode tier (not 4B) when only signal A fails"
+        )
 
     def test_signal_b_fails_pipeline_continues(self) -> None:
         img_bytes = _tiny_jpeg_bytes()
@@ -820,8 +836,15 @@ class TestSignalFailureDegradedMode:
         ):
             result = predict_single(img_bytes, "req-sb-fail-1", ctx)
 
+        # S16.2: pipeline continues when only B fails; result has a tier block, no error.
+        # "signal_b_succeeded" is not a top-level S16.2 key; the semantic guarantee is
+        # that the pipeline continues (produces a valid tier response, not an error dict).
         assert "error" not in result
-        assert result["signal_b_succeeded"] is False
+        assert "tier" in result
+        # A+C succeeded so pipeline does not short-circuit to all-signals-failed 4B
+        assert result["tier"]["label"] != "4B", (
+            "Expected degraded-mode tier (not 4B) when only signal B fails"
+        )
 
     def test_signal_c_fails_pipeline_continues(self) -> None:
         img_bytes = _tiny_jpeg_bytes()
@@ -849,8 +872,14 @@ class TestSignalFailureDegradedMode:
         ):
             result = predict_single(img_bytes, "req-sc-fail-1", ctx)
 
+        # S16.2: pipeline continues when only C fails; result has a tier block, no error.
+        # "signal_c_succeeded" is not a top-level S16.2 key; the semantic guarantee is
+        # that the pipeline continues (A+B succeeded so no all-signals-failed short-circuit).
         assert "error" not in result
-        assert result["signal_c_succeeded"] is False
+        assert "tier" in result
+        assert result["tier"]["label"] != "4B", (
+            "Expected degraded-mode tier (not 4B) when only signal C fails"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -888,13 +917,15 @@ class TestAllSignalsFailed:
 
         # Should not return an HTTP error — pipeline should produce a valid (degraded) result
         assert "error" not in result, f"Unexpected error: {result.get('error')}"
-        # Tier 4B because Rule 1 fired (all signals failed)
-        assert result.get("tier_label") == "4B", (
-            f"Expected tier_label='4B' from all-signals-failed, got: {result.get('tier_label')}"
+        # S16.2: tier is now a nested block; tier["label"] carries the tier string.
+        # Tier 4B because Rule 1 fired (all signals failed).
+        assert result.get("tier", {}).get("label") == "4B", (
+            f"Expected tier.label='4B' from all-signals-failed, got: "
+            f"{result.get('tier', {}).get('label')}"
         )
-        assert result["signal_a_succeeded"] is False
-        assert result["signal_b_succeeded"] is False
-        assert result["signal_c_succeeded"] is False
+        # signal_a/b/c_succeeded are not top-level S16.2 fields.
+        # The semantic guarantee is that the all-signals-failed short-circuit fired
+        # (producing 4B) and no error was raised — verified above.
 
     def test_all_signals_failed_classifier_not_called(self) -> None:
         """
@@ -949,6 +980,13 @@ class TestGPULockBehavior:
         iqa = _make_iqa_result()
 
         mock_lock = MagicMock()
+        # spec: section 21.3 step 4 (sync-acquire path) — DEC-045 / Batch 7 cross-loop fix:
+        # orchestrator only attempts to acquire when no running loop AND `gpu_lock.locked`
+        # is False (note: locked is a @property on GPULock, not a method).
+        # MagicMock auto-attribute access returns a truthy MagicMock by default,
+        # which would bypass the acquire path. Override with a literal False so the
+        # property-style read returns False and the acquire path is reached.
+        mock_lock.locked = False
         # Simulate timeout on acquire_with_timeout
         import asyncio
 

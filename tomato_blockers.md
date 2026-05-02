@@ -336,3 +336,65 @@ When the master-prompt update batch runs (post Phase 1), Defect-15.1 and Defect-
   C. File a proper blocker and pause severity grading until clarified.
 - **Resolution applied in T-IMPL-6c (DEC-044 Decision 2):** Option A applied for `lesion_size_distribution` (use `mean_lesion_size` and `lesion_size_std` from G2). For `mean_lesion_intensity`: not used in the grading decision logic (spec 17.3 thresholds only reference `coverage_pct` and `lesion_count`); it is treated as informational-only and set to `mean_lesion_size` as a reasonable proxy. The grading rule is not affected.
 - **Status:** NON-BLOCKING (severity grading uses coverage_pct + lesion_count primarily; ancillary features degrade gracefully). Filed for agronomic team review before pilot deployment. No implementation pause required.
+
+---
+
+## BLK-013 [2026-05-02] Pipeline IQA call site contract mismatch — orchestrator passes raw PIL.Image instead of ValidatedImage
+
+- **Spec section:** 6.6 (compute_iqa contract) + 21.3 step 5 (orchestrator IQA gate)
+- **Status:** **IDENTIFIED, NOT FIXED — deferred to Phase 5 audit per Option B closure of Batch 7.**
+
+### Symptom
+
+`tomato_sandbox/orchestrator/pipeline.py:527` calls:
+
+```python
+iqa_result = compute_iqa(pil_image)   # raw PIL.Image
+```
+
+But `compute_iqa(validated_image: Any) -> IQAResult` expects an object with a `.pil_image` attribute (per its docstring, line 327 of `tomato_sandbox/iqa/iqa.py`):
+
+> *"Any object with a ``pil_image`` attribute that is a PIL Image in RGB mode"*
+
+`compute_iqa` has its own try/except at the top of the body that catches the resulting `AttributeError`. On failure it logs `iqa_input_conversion_failed: 'Image' object has no attribute 'pil_image'` and returns `IQAResult(decision="REJECT", aggregate_score=0.0, ...)`. Every real-image POST to `/predict` short-circuits at the IQA gate with HTTP 200 + body `{"error": "IQA_REJECTED", "status": 422, ...}` regardless of image quality.
+
+### Why it wasn't caught
+
+The 29 in-process e2e tests in `tomato_sandbox/tests/integration/test_endpoints.py` mock `compute_iqa` to return a canned `IQAResult`. The mock hid this wiring bug because no test exercised the un-mocked path in the orchestrator → IQA call site. Surfaced only by the Batch 7 real-subprocess smoke test on port 8767 with a real image.
+
+### Mechanical fix (3 lines)
+
+```python
+# at pipeline.py:527, wrap raw PIL in a ValidatedImage-shaped adapter
+class _PILAdapter:
+    def __init__(self, pil): self.pil_image = pil
+iqa_result = compute_iqa(_PILAdapter(pil_image))
+```
+
+Or alternatively: have `predict_single` accept `image_bytes` and call `validate_request` itself to construct a real `ValidatedImage`. This is more invasive but eliminates the impedance mismatch by making the orchestrator entry use the same input shape as the rest of the pipeline.
+
+### Why deferred (not fixed in Batch 7 close)
+
+Per the user's Option B reasoning: the same TestClient-mocking pattern that hid this bug may have hidden integration bugs further down the pipeline (signals, classifier, conformal, response_builder). Five real bugs already surfaced in Batch 7's smoke-test debugging cycle. Fixing only the IQA wiring without re-validating downstream paths repeats the M2 architectural finding (mocking-at-integration-boundaries hides integration bugs).
+
+Phase 5 spec-auditor's mandate is exactly this kind of audit. Deferring BLK-013 there allows audit to surface this and any downstream wiring bugs **systematically**, not by debug-cycle iteration during Batch 7 close.
+
+### Resolution path
+
+Phase 5 entry prerequisite has been added to `tomato_master_prompt.md` Section 4: real-subprocess + real-image + real-models test must run before spec-auditor dispatches. Phase 5 audit's first finding category is "integration layer wiring" — BLK-013 + any further integration bugs surface here. Audit sub-dispatch corrects the call sites.
+
+### Constraints during deferral
+
+- Q4 sandbox server lift on 8767 stays held until BLK-013 closes.
+- BLK-013 closure is expected within Phase 5 entry tests. If it requires more than one audit sub-dispatch, additional BLKs will spawn for downstream wiring bugs surfaced during the same audit pass.
+- The Batch 7 fixes (DEC-046 logging fallback, GPU lock cross-loop, venv installs, orchestrator test shape) all stand. Phase 5 inherits a clean foundation.
+
+### Sibling integration bugs likely present (non-exhaustive, per M2)
+
+Plausible candidates for "next bug surfaces when IQA wiring is fixed":
+- **Signal A/B preprocessing call sites** in `pipeline.py` may have similar mismatches (the orchestrator decodes bytes to PIL, then calls `preprocess_for_v3(pil_image)` and `preprocess_for_lora(pil_image)`; both functions need verification against their actual contracts).
+- **Signal C / PSV** path uses `preprocess_for_psv(pil_image)` then passes results plus `iqa_green_mask` and `iqa_aggregate_score` to `compute_signal_c` — interfaces unverified.
+- **Response builder** consumes `TierAssignment + ClassifierResult + IQAResult + ConformalResult`; the orchestrator's construction of these dataclasses in pre-F.0 sandbox mode (no real models) may produce shapes the response builder rejects.
+
+These are speculation, not confirmed findings. Phase 5 audit will produce ground truth.
+

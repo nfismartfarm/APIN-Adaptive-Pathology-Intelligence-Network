@@ -461,28 +461,40 @@ def predict_single(
     # ------------------------------------------------------------------
     gpu_lock: Optional[GPULock] = context.gpu_lock
 
+    # Track whether THIS code path acquired the lock (for matching release).
+    # See cross-loop asyncio.Lock comment below + step-17 release block.
+    acquired_locally: bool = False
+
     try:
         if gpu_lock is not None:
             import asyncio
-            # In synchronous context, run the coroutine via asyncio
-            # In async context (FastAPI), caller holds lock before dispatching to executor
-            # Orchestrator is called from run_in_executor (Section 19 / main.py):
-            # the GPU lock is already handled at the server level for async usage.
-            # For sync-context unit testing, we acquire here.
             # spec: section 21.3 step 4 — "Acquire GPU lock"
-            # Note: In production the server holds the lock via 'async with gpu_lock.acquired()'
-            # before delegating to run_in_executor. Here we attempt synchronous acquire for
-            # environments where that pattern is not used (e.g., unit tests).
+            # Cross-loop asyncio.Lock semantics (DEC-045 + Batch 7 smoke-test fix):
+            # The server holds the lock in its FastAPI event loop, then dispatches
+            # this orchestrator call via run_in_executor (worker thread, no loop).
+            # The asyncio.Lock instance is bound to the server's loop; trying to
+            # re-acquire it from a fresh asyncio.run() in the worker thread hangs
+            # forever because the lock's internal Future is on a different loop.
+            #
+            # Resolution: if no running loop AND the lock is already locked, assume
+            # the caller (FastAPI handler) holds it and skip re-acquisition. This is
+            # safe because the server holds the lock for the full duration of the
+            # executor call (per server.py's `async with gpu_lock.acquired()`).
+            # Sync-context unit tests still work: lock is unlocked, acquire normally.
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # Already in async context — assume lock is pre-held by caller
+                running = asyncio.get_running_loop()
+                _ = running  # async context — caller holds lock; skip
+            except RuntimeError:
+                # No running loop in this thread.
+                # Note: GPULock.locked is a @property, not a method (gpu_lock.py:185).
+                if gpu_lock.locked:
+                    # Lock already held (in another loop, by the FastAPI handler).
+                    # Assume server.py holds it for our call duration; skip.
                     pass
                 else:
-                    loop.run_until_complete(gpu_lock.acquire_with_timeout())
-            except RuntimeError:
-                # No event loop — create one for sync use
-                asyncio.run(gpu_lock.acquire_with_timeout())
+                    # Lock is unlocked — sync test or standalone use; acquire it.
+                    asyncio.run(gpu_lock.acquire_with_timeout())
+                    acquired_locally = True
     except GPULockTimeoutError as exc:
         _logger.warning(
             "gpu_lock_timeout",
@@ -641,15 +653,15 @@ def predict_single(
     finally:
         # ------------------------------------------------------------------
         # Step 17 (early): Release GPU lock after signals A and B
-        # We release here in sync path; actual async usage holds lock via context manager.
         # spec: section 21.3 step 17 line 6669
+        # Only release if THIS code path acquired the lock (sync test path).
+        # In production, server.py holds the lock via `async with gpu_lock.acquired()`
+        # for the full executor-call duration; the server's __aexit__ releases it.
+        # Releasing here would either no-op (lock not actually held) or cross-loop fail.
         # ------------------------------------------------------------------
-        if lock_held:
+        if acquired_locally:
             try:
-                import asyncio as _asyncio
-                loop = _asyncio.get_event_loop()
-                if not loop.is_running():
-                    gpu_lock.release()
+                gpu_lock.release()
             except Exception:
                 pass  # Best-effort release
 
@@ -1048,12 +1060,17 @@ def _build_pipeline_result(
     image_hash: str,
     context: PipelineContext,
 ) -> dict:
-    """Assemble the final pipeline result dict.
+    """Assemble the final pipeline result dict using build_response().
 
     spec: section 21.3 steps 18-22 lines 6670-6674
-    Full response schema per Section 16 is implemented by the response builder (Batch 6b).
-    This function produces a minimal but complete result dict for now.
+    spec: section 16.1 lines 5643-5644 — build_response is a pure function
+    DEC-045 Decision 5: wired to build_response() from response_builder.
+
+    After build_response() returns the 14-key spec-compliant dict, severity
+    is computed via compute_severity() and merged into the 'severity' block.
     """
+    import datetime as _dt
+
     processing_ms = round((time.perf_counter() - t_start) * 1000, 1)
 
     # spec: section 21.9 lines 6832-6843 — structured log at each step
@@ -1070,33 +1087,84 @@ def _build_pipeline_result(
         succeeded=True,
     )
 
-    return {
-        # Core results
+    # Build request_metadata dict for build_response()
+    # spec: section 16.1 line 5651 — request_id, image_hash, timestamp, client_version
+    # DEC-045 Decision 5
+    timestamp_iso = _dt.datetime.utcnow().isoformat() + "Z"
+    request_metadata = {
         "request_id": request_id,
         "image_hash": image_hash,
-        "tier_label": tier_result.tier_label,
-        "tier5_alert": tier_result.tier5_alert,
-        "rule_id_fired": tier_result.rule_id_fired,
-        # Classifier output
-        "combined_argmax": classifier_result.combined_argmax,
-        "combined_max_prob": float(classifier_result.combined_max_prob),
-        "combined_margin": float(classifier_result.combined_margin),
-        "p_final_calibrated": classifier_result.p_final_calibrated.tolist(),
-        # Conformal
-        "prediction_set": conformal_result.prediction_set,
-        "prediction_set_size": conformal_result.prediction_set_size,
-        # Signal health
-        "signal_a_succeeded": signal_a.forward_succeeded,
-        "signal_b_succeeded": signal_b.forward_succeeded,
-        "signal_c_succeeded": signal_c.forward_succeeded,
-        # IQA
-        "iqa_decision": iqa_result.decision if hasattr(iqa_result, "decision") else iqa_result.get("decision", "ACCEPTABLE"),
-        # TTA
-        "tta_fired": tta_fired,
-        # Metadata
-        "processing_time_ms": processing_ms,
-        "warnings": [],
-        # Severity and GradCAM: populated by Batch 6b/6c modules
-        "severity": None,
-        "gradcam_b64": None,
+        "timestamp_iso": timestamp_iso,
+        "processing_time_ms": int(processing_ms),
+        "client_version": "tomato-sandbox-v1.0.0",
     }
+
+    # Build spec-compliant 14-key response using response builder
+    # spec: section 16.2 (full schema); DEC-045 Decision 5
+    from tomato_sandbox.response.response_builder import build_response
+    response = build_response(
+        tier_result,
+        classifier_result,
+        conformal_result,
+        iqa_result,
+        request_metadata=request_metadata,
+        model_version="tomato-sandbox-v1.0.0",
+    )
+
+    # Merge severity into response dict's 'severity' block
+    # spec: section 16.2 lines 5680-5684 — "populated per Section 17"
+    # spec: section 17.7 — severity omitted for 4A/4B, healthy, OOD, low PSV
+    # DEC-045 Decision 5
+    try:
+        from tomato_sandbox.severity.grader import compute_severity
+        psv_reliability = (
+            signal_c.psv_reliability
+            if hasattr(signal_c, "psv_reliability")
+            else 0.0
+        )
+        raw_features = (
+            signal_c.raw_features
+            if hasattr(signal_c, "raw_features")
+            else None
+        )
+        sev_result = compute_severity(
+            predicted_class=classifier_result.combined_argmax,
+            raw_features=raw_features,
+            psv_reliability=float(psv_reliability),
+            tier_label=tier_result.tier_label,
+        )
+        # Merge computed severity into the spec severity block
+        if sev_result.grade is not None:
+            response["severity"] = {
+                "grade": sev_result.grade,
+                "human_readable": sev_result.human_readable,
+                "details": {
+                    "disease_coverage_pct": sev_result.disease_coverage_pct,
+                    "lesion_count": sev_result.lesion_count,
+                    "psv_confidence_in_severity": sev_result.psv_confidence_in_severity,
+                    "thresholds_used": sev_result.thresholds_used,
+                },
+            }
+        else:
+            # grade=None means severity omitted; keep null block from builder
+            response["severity"] = {
+                "grade": None,
+                "human_readable": sev_result.human_readable,
+                "details": None,
+            }
+    except Exception as _sev_exc:
+        # Severity failure must never abort the response — log and leave null
+        _logger.warning(
+            "severity_computation_failed",
+            request_id=request_id,
+            error=str(_sev_exc),
+        )
+        # response["severity"] already null from build_response
+
+    # Attach tta_fired as a warning (not a spec field but useful for debugging)
+    if tta_fired:
+        response.setdefault("warnings", [])
+        if "TTA was triggered for this request." not in response["warnings"]:
+            response["warnings"].append("TTA was triggered for this request.")
+
+    return response

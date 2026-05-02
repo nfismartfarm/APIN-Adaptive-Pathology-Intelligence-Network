@@ -275,7 +275,22 @@ Entry: Phase 4 complete and user approved.
 
 **Recommendation: open a NEW Claude Code session for this phase.** A new session has zero implementation history. The `spec-auditor` subagent provides isolation, but a new session is even cleaner. The new session reads `tomato_master_[prompt.md](http://prompt.md)`, `[CLAUDE.md](http://CLAUDE.md)`, and runs the audit from scratch.
 
-Tasks:
+#### Phase 5 entry checks (PREREQUISITE to spec-auditor dispatch)
+
+**Added 2026-05-02 per Batch 7 close (Option B / BLK-013).** Before Phase 5 spec-auditor begins, the following must be confirmed:
+
+1. **Real-subprocess smoke test on the sandbox server (port 8767) under venv Python with real model loading.** Server boots cleanly. `/ready` returns 200. `/health`, `/info`, `/metrics` respond. The server must launch via `venv/Scripts/python.exe -m uvicorn tomato_sandbox.api.server:app --host 127.0.0.1 --port 8767` (NOT system Python; NOT in-process TestClient).
+
+2. **Real-image POST `/predict` end-to-end test.** A real leaf image (not synthetic noise; ideally an image from `data/specialist/model3/` or one of the held-out evaluation samples) goes through the full pipeline: `validate → IQA → preprocess → signals (A, B, C) → classifier → conformal → tier_assignment → response_builder`. Response shape matches spec Section 16.2 schema. Response is **NOT a structured error** (`422 IQA_REJECTED`, `503 SERVER_OVERLOAD`, etc.) UNLESS the test image legitimately triggers that path (an off-domain photo legitimately rejected by IQA does count, but every leaf image being rejected does not).
+
+3. **Spec-auditor's first finding category: "integration layer wiring."** All bugs in BLK-013 plus any further integration bugs surface here. The auditor's Pass 1 dispatches an integration sub-audit BEFORE contract-level audit. Audit sub-dispatch corrects the call sites; closure of BLK-013 and any spawned sibling BLKs is the gate.
+
+**Rationale.** Phase 4 in-process TestClient tests in `test_endpoints.py` mocked `compute_iqa` and possibly other integration boundaries. The real-image path through real-loaded models was not validated at Batch 7 close (BLK-013 surfaces this gap). Phase 5 audit must cover this gap before contract-level audit can claim full coverage. **The audit cannot certify what hasn't run end-to-end.**
+
+**Standing rule (Defect-60 / Fix-60):** ALL test-count reports in Phase 5 checkpoints must specify which Python interpreter ran them (system vs venv). Venv pytest is authoritative for production-equivalence claims.
+
+#### Phase 5 tasks (after entry checks pass)
+
 1. Use `spec-auditor` subagent (which runs in an isolated context window by design - the auditor cannot see implementation history, planning rationale, or developer intent) to read implementation code and check it against spec. Run two passes: Pass 1 finds deviations without consulting decisions log; Pass 2 cross-references with `tomato_[decisions.md](http://decisions.md)`.
 2. Use `anti-cheat-inspector` for a final sweep on the entire `tomato_sandbox/` codebase.
 3. Use `sacred-guardian` for final verification.

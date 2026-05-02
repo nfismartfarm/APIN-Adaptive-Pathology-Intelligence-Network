@@ -151,6 +151,84 @@ def _make_stdlib_logger(name: str) -> _stdlib_logging.Logger:
 
 
 # ---------------------------------------------------------------------------
+# Stdlib kwargs adapter (DEC-046 — fallback hardening)
+# ---------------------------------------------------------------------------
+# Production code uses structlog-style kwargs unconditionally:
+#     _log.debug("event_name", key1=val1, key2=val2)
+# Raw stdlib Logger.debug() rejects arbitrary kwargs (only accepts exc_info,
+# extra, stack_info, stacklevel) and raises TypeError. This adapter wraps a
+# stdlib Logger so the structlog-style call shape works in environments
+# without structlog installed.
+#
+# Surfaced via Batch 7 real-subprocess smoke test when venv was missing
+# structlog. The original Batch 0 fallback (DEC-022) returned a raw stdlib
+# Logger; ~20 production callsites broke immediately at import time.
+# spec: section 26.7 — "Use structlog for structured logging" (fallback design preserved per DEC-022 / DEC-046)
+
+
+class _StdlibKwargsAdapter:
+    """Wrap a stdlib Logger to accept structlog-style kwargs.
+
+    Mirrors the subset of structlog.BoundLogger API that production code uses:
+    ``debug``, ``info``, ``warning``, ``error``, ``critical``. Each method
+    accepts an event-name positional argument plus arbitrary **kwargs; arbitrary
+    keys go into stdlib's ``extra`` dict so the JSON formatter merges them as
+    top-level fields, matching structlog's JSON shape.
+
+    Reserved stdlib kwargs (exc_info, stack_info, stacklevel, extra) are
+    forwarded to stdlib unchanged. All other kwargs are merged into ``extra``.
+    Sensitive field names (per SENSITIVE_FIELDS) are NOT redacted here —
+    redaction is the caller's responsibility via log_step() helper.
+    """
+
+    # Reserved stdlib Logger kwargs that must NOT be merged into extra
+    _STDLIB_RESERVED: frozenset[str] = frozenset(
+        {"exc_info", "stack_info", "stacklevel", "extra"}
+    )
+
+    def __init__(self, logger: _stdlib_logging.Logger) -> None:
+        self._logger = logger
+
+    def _emit(self, level: int, event: str, **kwargs: Any) -> None:
+        stdlib_kwargs: dict[str, Any] = {}
+        extra_fields: dict[str, Any] = {}
+        for k, v in kwargs.items():
+            if k in self._STDLIB_RESERVED:
+                stdlib_kwargs[k] = v
+            else:
+                extra_fields[k] = v
+        # Merge any pre-existing extra dict the caller passed
+        if "extra" in stdlib_kwargs:
+            existing = stdlib_kwargs.pop("extra")
+            if isinstance(existing, dict):
+                extra_fields = {**existing, **extra_fields}
+        # 'event' field matches structlog convention so JSON output is consistent
+        extra_fields.setdefault("event", event)
+        self._logger.log(level, event, extra=extra_fields, **stdlib_kwargs)
+
+    def debug(self, event: str, **kwargs: Any) -> None:
+        self._emit(_stdlib_logging.DEBUG, event, **kwargs)
+
+    def info(self, event: str, **kwargs: Any) -> None:
+        self._emit(_stdlib_logging.INFO, event, **kwargs)
+
+    def warning(self, event: str, **kwargs: Any) -> None:
+        self._emit(_stdlib_logging.WARNING, event, **kwargs)
+
+    def error(self, event: str, **kwargs: Any) -> None:
+        self._emit(_stdlib_logging.ERROR, event, **kwargs)
+
+    def critical(self, event: str, **kwargs: Any) -> None:
+        self._emit(_stdlib_logging.CRITICAL, event, **kwargs)
+
+    # Compatibility: structlog's bind() returns a logger with bound context.
+    # The stdlib fallback's bind() returns the same adapter (best-effort);
+    # callers that re-pass bound kwargs at the call site lose nothing.
+    def bind(self, **_kwargs: Any) -> "_StdlibKwargsAdapter":
+        return self
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -162,18 +240,20 @@ def get_logger(name: str) -> Any:
         name: Logger name, typically ``__name__`` of the calling module.
 
     Returns:
-        A structlog BoundLogger if structlog is installed, otherwise a stdlib
-        Logger with JSON formatting. Both support the same log-level methods:
-        ``debug``, ``info``, ``warning``, ``error``, ``critical``.
+        A structlog BoundLogger if structlog is installed, otherwise an
+        ``_StdlibKwargsAdapter`` (DEC-046) wrapping a stdlib Logger with JSON
+        formatting. Both support the same log-level methods with structlog-
+        style kwargs: ``debug``, ``info``, ``warning``, ``error``, ``critical``.
 
     # spec: 26.7 lines 7758 — "Use structlog for structured logging; never
     # print() in production code."
+    # DEC-046 — fallback hardened to wrap stdlib in _StdlibKwargsAdapter
     """
     if _STRUCTLOG_AVAILABLE:
         import structlog  # noqa: PLC0415
 
         return structlog.get_logger(name)
-    return _make_stdlib_logger(name)
+    return _StdlibKwargsAdapter(_make_stdlib_logger(name))
 
 
 def _redact_sensitive(extra: dict[str, Any]) -> dict[str, Any]:

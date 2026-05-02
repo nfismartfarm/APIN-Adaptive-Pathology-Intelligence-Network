@@ -20,6 +20,8 @@ tomato_sandbox/scratch/
 tomato_sandbox/models/
 tomato_sandbox/**/__pycache__/
 tomato_sandbox/**/*.pyc
+# Runtime server logs (regenerated each launch; not project source)
+tomato_sandbox/sandbox_server_*.log
 
 # Override: this project's .claude/agents/ is tracked despite global ignore
 # (file is tomato-project-specific; DEC-018 / DEC-038 reference edits to it)
