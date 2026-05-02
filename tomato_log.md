@@ -724,3 +724,73 @@ Phase 4 closes with 1 IDENTIFIED-DEFERRED bug (BLK-013) and the architectural fi
 
 Phase 5 begins on user approval.
 
+
+
+## [2026-05-02 17:30] Phase 5a dispatch prep: ambiguity resolution + DEC-047 + master prompt clarification
+
+### Two ambiguities raised + resolved
+1. **Subagent choice.** spec-auditor is read-only by toolset (Read/Glob/Grep/Bash; no Edit/Write); cannot apply fixes. Phase 5a uses **`implementer` subagent** for the single dispatch. spec-auditor's value is reserved for Phase 5b contract audit.
+2. **"Real models" interpretation.** Original master prompt prerequisite text was ambiguous. Resolved as **(β): un-mocked signal-compute paths, NOT loaded model weights.** Real-weight loading remains Phase F.0 territory per spec Section 29; pre-F.0 startup skip on steps 4-7 stays intact.
+
+### DEC-047 logged
+Phase 5 prerequisite clarification — "real models" means un-mocked compute paths, not loaded weights. Master prompt Section 4 Phase 5 entry checks items 1 and 2 amended with explicit (β)-interpretation language and `[CLARIFIED 2026-05-02 per DEC-047]` annotations.
+
+### Phase 5a dispatch parameters
+- **Subagent:** `implementer` (single dispatch)
+- **Pre-allocated DECs:** DEC-048 primary (typically BLK-013 PIL adapter fix); DEC-049 / DEC-050 / etc. as needed for sibling integration bugs
+- **CLOSE criterion:** POST `/predict` returns spec-compliant S16.2 response with valid `tier.label` and no top-level `error` field. Tier 4B-degraded acceptable per DEC-047.
+- **STOP criteria:** 5-bug threshold (Batch 7 cap pattern); non-mechanical fix; sacred file at risk
+- **Standing rules in effect:** DEC-038 (no implementer git ops), Rule 6 (Section 15 immutable; pre-commit hook enforces), Rule 9 practice-aligned (DEC log at decision time, main thread reviews at close), Fix-42 (read spec body for contract details), Defect-60 (venv Python authoritative for tests)
+
+### Sequence
+1. ✓ Edit `tomato_master_prompt.md` Section 4 Phase 5 entry checks per (β)
+2. ✓ Log DEC-047 in `tomato_decisions.md`
+3. ✓ Append this log entry
+4. → Dispatch T-AUDIT-5a as `implementer` subagent
+5. After CLOSE: main-thread runs all venv tests + Section 15 regression + sacred verify + 2-3 different real images, writes `phase_5a_integration_audit.md`, single commit per DEC-038, updates BLK-013 → RESOLVED
+
+
+
+## [2026-05-03 close] Phase 5a CLOSED — BLK-013 RESOLVED via DEC-048; integration layer audit clean
+
+### Dispatch outcome
+T-AUDIT-5a (`implementer` subagent, single dispatch) returned with **CLOSE** status and 1 bug fixed (BLK-013, pre-identified at Batch 7 close). No sibling integration bugs surfaced. The orchestrator's PIL-handling at `preprocess_for_v3/lora/psv` and downstream call sites was already correct — only `compute_iqa` had the contract mismatch (it expects `ValidatedImage` per S6.6:1374, not raw PIL).
+
+### Fix applied (DEC-048)
+Added `_PILAdapter` inner class at `tomato_sandbox/orchestrator/pipeline.py:528-537`. Wraps raw PIL.Image with `.pil_image` attribute before calling `compute_iqa`. 3-line mechanical change.
+
+### Independent verification (main thread)
+- ✓ Disk: pipeline.py change present at line 528 with BLK-013 / DEC-048 citations
+- ✓ DEC-048 logged in `tomato_decisions.md` (line 1324)
+- ✓ BLK-013 status updated to RESOLVED 2026-05-03 in `tomato_blockers.md`
+- ✓ Sacred 10/10 PASS (in-sandbox `verify_manifest()`)
+- ✓ Section 15: 135/135 PRESERVED (unchanged through Phase 5a)
+- ✓ Unit tests under venv: 961 PASS
+- ✓ Grand total under venv: 1096 PASS
+- ✓ DEC-038 compliance: `git log fac25ef..HEAD` empty (no implementer commits)
+- ✓ Independent smoke test (main thread, real chilli anthracnose image, 521ms): tier.label="4B", rule_id_fired="1" (signal failure path per pre-F.0 (β)), full S16.2 schema, no top-level error → **CLOSE confirmed**
+
+### Smoke test stability (5 real images by implementer + 1 by main thread)
+- 4 anthracnose/healthy images: HTTP 200, tier.label="4B", IQA decision HIGH (passed) — pre-F.0 expected path
+- 1 cercospora image: HTTP 200, IQA_REJECTED (legitimate — image is wet per IQA wetness dimension; demonstrates IQA discriminates properly post-fix)
+- 1 main-thread re-test: matches implementer's results
+
+### Phase 5b readiness
+All Phase 5b prerequisites satisfied. spec-auditor's two-pass contract audit can dispatch immediately on user approval.
+
+### Q4 sandbox lift
+BLK-013 RESOLVED → Q4 hold lifted. Sandbox server on 8767 is genuinely operational under venv Python; pre-F.0 mode produces spec-compliant Tier 4B-degraded responses; awaits Phase F.0 for real-weight predictions.
+
+### Cumulative metrics post-Phase-5a
+| Metric | Value |
+|---|---|
+| Unit tests under venv | 961 PASS |
+| Section 15 integration | 135/135 PASS |
+| Grand total | 1096 PASS |
+| DECs logged | DEC-001..048 |
+| BLKs filed | 13 (all RESOLVED; 0 deferred) |
+| Master-prompt defects | 60 |
+| Sacred | 10/10 PASS unchanged |
+| Real-image E2E | passing on real subprocess (8767, venv Python) |
+| Phase status | Phase 4 closed; Phase 5a closed; Phase 5b unblocked |
+

@@ -520,11 +520,21 @@ def predict_single(
         # ------------------------------------------------------------------
         iqa_result = None
         try:
-            # compute_iqa takes a ValidatedImage-like object; for orchestrator
-            # usage we pass the PIL image wrapped in a minimal protocol.
-            # spec: section 6.6 line 1374 — compute_iqa(validated_image) -> IQAResult
-            # compute_iqa and IQAResult imported at module level for patchability.
-            iqa_result = compute_iqa(pil_image)
+            # compute_iqa expects an object with a .pil_image attribute (spec 6.6 line 1374).
+            # The orchestrator receives a raw PIL.Image from the decode step; wrap it in a
+            # minimal adapter so compute_iqa can access validated_image.pil_image.
+            # BLK-013 / DEC-048 — raw PIL passed here caused AttributeError inside compute_iqa
+            # which returned REJECT(0.0) for every real image regardless of quality.
+            class _PILAdapter:
+                """Minimal ValidatedImage-shaped wrapper for compute_iqa.
+
+                spec: section 6.6 line 1374 — compute_iqa expects an object with .pil_image attr.
+                BLK-013 / DEC-048 — orchestrator was passing raw PIL.Image; now wraps before call.
+                """
+                def __init__(self, pil):
+                    self.pil_image = pil
+
+            iqa_result = compute_iqa(_PILAdapter(pil_image))
         except Exception as exc:
             _logger.warning(
                 "iqa_failed_using_acceptable",

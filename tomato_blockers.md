@@ -342,7 +342,7 @@ When the master-prompt update batch runs (post Phase 1), Defect-15.1 and Defect-
 ## BLK-013 [2026-05-02] Pipeline IQA call site contract mismatch — orchestrator passes raw PIL.Image instead of ValidatedImage
 
 - **Spec section:** 6.6 (compute_iqa contract) + 21.3 step 5 (orchestrator IQA gate)
-- **Status:** **IDENTIFIED, NOT FIXED — deferred to Phase 5 audit per Option B closure of Batch 7.**
+- **Status:** **RESOLVED 2026-05-03 by T-AUDIT-5a (DEC-048). `_PILAdapter` inner class wraps raw PIL.Image at pipeline.py call site. See DEC-048.**
 
 ### Symptom
 

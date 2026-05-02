@@ -1300,3 +1300,35 @@ No sacred files modified. No Section 15 tests modified.
 - **Environment fix (collateral):** installed `structlog` + `pytest` + `pytest-asyncio` + `httpx` into `venv/`. Verified pytest under venv now produces identical 1118-pass count to system Python (warning count differs: system 71 from older Pillow, venv 15; non-defect Pillow version difference).
 - **Impact:** ~20 production callsites no longer require structlog at runtime. Code paths through PSV (compatibility.py, ~3 calls), conformal.py (~9 calls), severity/grader.py (~5 calls), multi_image/aggregator.py (~7 calls), pipeline.py (multiple), and sacred_guard.py work in both structlog-present and structlog-absent environments.
 - **User approval:** explicit (Batch 7 close-out option (b) selection, 2026-05-02).
+
+
+## DEC-047 [2026-05-02] Phase 5 prerequisite clarification — "real models" means un-mocked compute paths, not loaded weights
+
+- **Trigger:** Phase 5a dispatch preparation surfaced an ambiguity in the Phase 5 entry prerequisite text I added at Batch 7 close. The original wording — "real-subprocess + real-image + real-models test" — was intended to enforce the M2 lesson (un-mocked integration boundaries: no `compute_iqa` mock; no signal-compute mocks; full path through real wiring). But the phrase "real models" can be read two ways:
+  - **(α)** Real-loaded model weights from sacred files (e.g. `model3_production_v3.pt`, `sp_lora_epoch13_f10.9113_PRESERVED.pt`).
+  - **(β)** The orchestrator's actual un-mocked signal-compute call paths, with degraded-mode fallback when models are not loaded.
+- **Resolution:** **(β) confirmed.**
+- **Rationale:**
+  - The pre-F.0 sandbox deliberately defers model loading per spec Section 29. Startup steps 4-7 explicitly skip model loading (e.g., `"v3 model: not loaded in pre-F.0 sandbox"`). Lifting that skip in Phase 5a would conflate the integration audit with F.0 dry-run prep.
+  - The M2 finding (TestClient mocking hides integration bugs) targets the un-mocked-path requirement, not real-weight loading. Surfacing un-mocked wiring bugs is achievable without loaded weights — degraded-mode signals propagate through classifier → conformal → tier_assignment → response_builder exactly as the un-degraded path would, just with zero-vector slices instead of model probabilities.
+  - Tier 4B from all-signals-failed-degraded-mode is **a spec-compliant Section 14 / Section 16.2 response**, not a top-level error. The response shape exercises the same code paths as Tier 1A through Tier 4A.
+- **Phase 5a CLOSE criterion (clarified):** POST `/predict` returns spec-compliant S16.2 response with a valid `tier.label` value and no top-level `error` field — regardless of whether the prediction is high-confidence or Tier 4B-degraded. Real-prediction quality validation (non-degraded predictions on real loaded weights) is Phase F.0 territory.
+- **Phase 5b coverage (deferred to that dispatch):** spec-auditor's contract audit will additionally verify the un-degraded path makes architectural sense (e.g., classifier handles the all-degraded vector correctly without runtime error, tier rule chain reaches a defined terminal). Loading real weights is NOT required for Phase 5b either; that's Phase F.0.
+- **Master prompt updated:** `tomato_master_prompt.md` Section 4 Phase 5 entry checks items 1 and 2 amended with explicit (β)-interpretation language and a `[CLARIFIED 2026-05-02 per DEC-047]` annotation.
+- **Phase 5a DEC re-allocation:** DEC-047 covers this prerequisite clarification (main thread). DEC-048 onward is reserved for the Phase 5a implementer's architectural decisions during integration audit (typically the BLK-013 PIL adapter fix as DEC-048; DEC-049 / DEC-050 / etc. for sibling integration bugs).
+- **Impact:** Phase 5a scope is now bounded — it audits integration wiring under un-mocked compute paths with pre-F.0 model-load skips intact. Phase F.0 (Section 29 spec) handles real-weight validation. The two phases stay distinct.
+- **User approval:** explicit (Phase 5a dispatch confirmation message, 2026-05-02).
+
+---
+
+## DEC-048 [2026-05-03] BLK-013 PIL adapter fix — wrap raw PIL.Image for compute_iqa call site
+
+- **Spec section:** 6.6 line 1374 — `compute_iqa(validated_image: Any) -> IQAResult` where `validated_image` must have a `.pil_image` attribute (per compute_iqa docstring line 327 of `tomato_sandbox/iqa/iqa.py`).
+- **Spec says (iqa.py:357):** `pil_image = validated_image.pil_image` — the function immediately accesses `.pil_image` attribute.
+- **Bug (BLK-013):** `tomato_sandbox/orchestrator/pipeline.py:527` was calling `compute_iqa(pil_image)` with a raw `PIL.Image` object. `PIL.Image` has no `.pil_image` attribute. `compute_iqa`'s internal try/except caught the resulting `AttributeError`, logged `iqa_input_conversion_failed`, and returned `IQAResult(decision="REJECT", aggregate_score=0.0, ...)`. Every real image POST short-circuited at the IQA gate.
+- **Fix applied:** Added `_PILAdapter` inner class at the call site that wraps the raw `PIL.Image` with a `.pil_image` attribute, so `compute_iqa` receives the expected protocol object. Three-line mechanical change (class + wrapping call). No signal logic or architectural change.
+- **Why inner class (not module-level):** The adapter is specific to this single call site. It expresses "raw PIL.Image is NOT a ValidatedImage; wrap it". A module-level class would suggest it is a reusable type, which it is not — the real `ValidatedImage` is owned by `tomato_sandbox.input_validation`.
+- **Alternative considered:** Have `predict_single` call `validate_request` to produce a real `ValidatedImage` before the IQA gate. This is architecturally cleaner but more invasive (changes the orchestrator's entry contract and requires wiring input validation here). Deferred to Phase F.0 refactor. The adapter is the minimal mechanical fix.
+- **Test evidence:** Pre-fix: every real-image POST returned `{"error": "IQA_REJECTED", "status": 422, ...}`. Post-fix: IQA gate passes for normal leaf images and the pipeline continues to signals A/B/C.
+- **Impact:** blocking integration bug fixed — real-image path now progresses past IQA gate.
+- **User approval:** pre-allocated as DEC-048 in the Phase 5a dispatch instructions.
