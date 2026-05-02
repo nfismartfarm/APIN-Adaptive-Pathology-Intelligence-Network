@@ -571,3 +571,34 @@ PSV (DEC-036) deliverables already in `2d32188`; not re-committed.
 - Q4 (sandbox server on 8767): still held; re-evaluate after Batch 4.
 - Legacy APIN 8766 + APIN v2 8768 running (PIDs 24452 + 23132, relaunched this session).
 
+
+
+## [2026-05-02 12:30] Phase 4 Batch 4 complete: Hierarchical Classifier + Conformal Prediction
+
+### Pre-batch prep
+- Logged Defect-55 → Fix-56 (DEC-038 master prompt codification, LOW) and Defect-56 → Fix-57 (Rule 9 wording vs practice, LOW) in `tomato_plan.md` T-EARLY-MP queue (positions 31, 32). Both deferred to next batch-fix cycle; no Phase 4 blocker.
+- Added `.gitignore` exception block for `.claude/agents/*.md` so future tracking does not require `git add -f`.
+
+### Batch 4 dispatch — two parallel implementers (single wave)
+| Task | Spec | Files | DEC | Tests |
+|---|---|---|---|---|
+| T-IMPL-4a Hierarchical Classifier | S12 | `tomato_sandbox/classifier/{__init__,feature_builder,hierarchical_classifier}.py` | DEC-039 | 48 PASS |
+| T-IMPL-4b Conformal Prediction | S13 | `tomato_sandbox/conformal/{__init__,conformal}.py` | DEC-040 | 44 PASS |
+
+Cumulative unit tests: 538 → **630** (+92).
+
+### Spec discovery (significant)
+T-IMPL-4a discovered `ClassifierResult` has **9 fields** per S12.10:3449-3457, not the 6 listed in the user's dispatch prompt (which was based on incomplete BLK-010.2). Fields added: `combined_max_prob` (S12.10:3451), `p_stage1` (S12.10:3454), `p_stage2` (S12.10:3455). Spec wins per DEC-018. T-IMPL-4b correctly consumed `p_final_calibrated` (the spec-pinned canonical name) without needing to read T-IMPL-4a from disk first — proves parallel dispatch was structurally safe because the contract was spec-pinned. **BLK-010.2 closure note should be updated** to reflect 9-field spec; queue for next batch-fix cycle.
+
+### Compliance verifications this batch
+- **DEC-038 (no implementer commits):** verified empirically. `git log 84cbdb0..HEAD` returned empty before main-thread commit. The `.claude/agents/implementer.md` Rule 12 edit took effect immediately for both Batch 4 implementers.
+- **Pre-allocation rule:** DEC-039 + DEC-040 sequential, no collisions. Three batches in a row clean.
+- **Sacred:** in-sandbox `verify_manifest()` 10/10 PASS.
+- **Anti-cheat:** PASS clean — 0 HIGH, 0 MEDIUM, 1 LOW informational (justified `# noqa: S301` on pickle.load for trusted calibration file).
+
+### Two-parallel safety heuristic codified for future batches
+Parallel dispatch is safe when downstream module's input contract is **spec-pinned at the field/signature level**. Two-wave (Batch 3 pattern) is needed when the contract requires reading actual sibling code on disk (e.g. function signatures not pinned in spec).
+
+### Next: Batch 5 = T-IMPL-5 tier_assignment.py (S14)
+This is the **milestone batch** — landing the tier rule chain (Rules 1-9 + sub-rules 7a/7b/7c, 8a/8b/8c) makes the 13 Section 15 integration test files start collecting and the 135 deterministic test scenarios become measurable.
+

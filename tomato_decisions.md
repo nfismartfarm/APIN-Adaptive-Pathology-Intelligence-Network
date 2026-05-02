@@ -743,3 +743,172 @@ Format per entry:
   - Defect-55 queued in T-EARLY-MP for master prompt update at the next batch-fix cycle.
 - **Impact:** procedural rule for all subsequent batches. Each implementer dispatch prompt may still cite DEC-038 explicitly for emphasis.
 - **User approval:** explicit (Batch 3 commit approval message, 2026-05-02).
+
+---
+
+## DEC-039 [2026-05-02] T-IMPL-4a: Hierarchical classifier — sub-package layout, 9-field ClassifierResult, pre-F.0 sentinel fallbacks, no gpu_lock
+
+- **Spec section:** 12 (Hierarchical classifier), lines 3145–3505
+- **Task card:** T-IMPL-4a — create `tomato_sandbox/classifier/feature_builder.py` and `tomato_sandbox/classifier/hierarchical_classifier.py`
+- **Pre-allocated DEC:** DEC-039
+
+### Decision 1 — ClassifierResult field set: spec wins over task-card pin
+
+- **Task card BLK-010.2 pin** lists 6 fields: `p_final_calibrated`, `combined_argmax`, `combined_margin`, `p_final_uncalibrated`, `classifier_succeeded`, `failure_reason`.
+- **Spec S12.10 lines 3446-3458** lists 9 fields (verbatim dataclass):
+  `p_final_calibrated`, `combined_argmax`, `combined_max_prob`, `combined_margin`,
+  `p_final_uncalibrated`, `p_stage1`, `p_stage2`, `classifier_succeeded`, `failure_reason`.
+- **Resolution:** spec wins per Critical Rule 9 / DEC-018. All 9 fields are implemented.
+  The task card's 6-field list was a subset for "minimum downstream contract"; the 3 additional
+  fields (`combined_max_prob`, `p_stage1`, `p_stage2`) are required by Section 11.2 ("combined_max_prob
+  is the field TTA reads") and by any diagnostics consumer.
+- **Impact on downstream:** T-IMPL-4b (conformal) reads `p_final_calibrated`; T-IMPL-5 reads
+  `combined_argmax`, `combined_max_prob`, `combined_margin`. All 6 task-card-pinned fields are
+  present, so downstream cascade is not broken.
+
+### Decision 2 — Module layout: sub-package + flat shim per DEC-033
+
+- **Spec S12.11** says: `tomato_sandbox/classifier.py` (flat file, monolithic).
+- **Task card** says: `tomato_sandbox/classifier/feature_builder.py` and
+  `tomato_sandbox/classifier/hierarchical_classifier.py` (sub-package split).
+- **Resolution:** sub-package per DEC-033. `tomato_sandbox/classifier/__init__.py` re-exports
+  the full public surface. A flat shim at `tomato_sandbox/classifier.py` is NOT created
+  because the spec-cited path would collide with the `tomato_sandbox/classifier/` directory
+  on most filesystems. Both split-module paths work. No flat shim needed.
+- Import contract (from BLK-010.2) is satisfied by `tomato_sandbox.classifier.hierarchical_classifier`
+  for `ClassifierResult` and `compute_classifier`, and `tomato_sandbox.classifier.feature_builder`
+  for `build_classifier_input`. The `tomato_sandbox.classifier` package also re-exports all public symbols.
+
+### Decision 3 — Pre-F.0 sentinel fallbacks for calibration files
+
+- **Spec S12.11** states calibration files live in `tomato_sandbox/phase_f0_calibration/`.
+  At T-IMPL-4a time (pre-F.0), these files are missing:
+  - `classifier_stage1.pkl`
+  - `classifier_stage2.pkl`
+  - `classifier_platt.json`
+  - `classifier_feature_standardization.json`
+  - `jsd_sentinel.json` (referenced in S12.2)
+- **Spec S12.11 lines 3486-3487:** "If any of these files is missing, the sandbox refuses to start."
+  That is the RUNTIME startup contract; it applies when the full pipeline is wired.
+  Unit tests must work without real calibration files.
+- **Resolution:** loading functions check file existence. If files are absent, they return
+  _sentinel values_: identity standardization (mean=0, std=1 for all 19 features), equal-weight
+  Stage 1 and Stage 2 weights (uniform logits), identity Platt (alpha=1, beta=0), JSD sentinel=0.35.
+  The `ClassifierResult.failure_reason` is set to None (sentinel weights produce valid outputs).
+  At real startup (post-F.0), calibration files exist and real weights load. Unit tests use
+  the sentinel path.
+- **Important:** the sentinel fallback is for pre-F.0 testing ONLY. The production startup
+  check (spec S4.4 + S12.11) is separate from the classifier module — it is the server's
+  responsibility to refuse startup if files are missing. `compute_classifier` itself does not
+  exit the process; it uses fallback weights and logs a WARNING.
+
+### Decision 4 — No gpu_lock inside classifier (post-signal context)
+
+- **Spec S12.12:** "Hierarchical classifier" budget < 5 ms; all numpy, no GPU.
+- **Classifier receives pre-computed signal outputs (stacked design, S12.1).**
+  GPU lock is acquired by the orchestrator (Section 21.3 steps 4-17) and released AFTER
+  signal forward passes. Classifier runs AFTER all signals complete; GPU lock is already
+  released (or may still be held by orchestrator — either way the classifier does not touch it).
+- **Resolution:** no `gpu_lock` import in any classifier module. Verified by the unit test.
+
+### Decision 5 — JSD computation (matches S11.5 / S12.2 spec)
+
+- JSD uses natural log (log base e), bounded [0, log(2)] ≈ [0, 0.693].
+- Input vectors may not sum to 1 (v3's 6 tomato probs sum to `1 - chilli_leakage`).
+- **Spec S12.2 line 3197:** "The classifier sees both forms; it does not re-normalize either."
+  Therefore JSD is computed on the raw (un-renormalized) v3 probs alongside LoRA probs.
+  JSD with inputs that don't sum to 1 is formally undefined (KL divergence assumes distributions),
+  but the classifier treats the result as a feature — it does not require it to be a true divergence.
+  The JSD sentinel (median value from F.0 calibration) is used when either signal failed.
+- **JSD_SENTINEL default:** 0.35 (reasonable prior for two uncertain distributions; overridden
+  by `phase_f0_calibration/jsd_sentinel.json` when F.0 runs).
+
+### Decision 6 — Soft routing index mapping verbatim from spec
+
+- Spec S12.5 lines 3308-3315 gives explicit P_final equations. Stage 1 class_order is
+  ["healthy", "diseased", "OOD"] (index 0=healthy, 1=diseased, 2=OOD).
+  Stage 2 class_order is ["foliar", "septoria", "late_blight", "ylcv", "mosaic"].
+  Final 7-class: [0=foliar, 1=septoria, 2=late_blight, 3=ylcv, 4=mosaic, 5=healthy, 6=OOD].
+- These indices are spec-body constants; any change would break conformal and tier assignment.
+  Inline `# spec: section 12.5 lines 3308-3315` on every index literal.
+
+### Decision 7 — Tests use mock signal outputs (deterministic, no GPU)
+
+- Unit tests construct mock `SignalAResult`, `SignalBResult`, `SignalCResult` directly
+  (no real models, no GPU, no real calibration files). This is deterministic and fast.
+- Tests cover: 19-dim feature vector slot ordering, shape assertions, ClassifierResult
+  field names (all 9), soft-routing math, degraded-mode fallback (each of 3 signals failed),
+  calibrated vs uncalibrated probability invariants, combined_argmax correctness, margin sign.
+- Tests do NOT claim to verify classifier accuracy (no real weights loaded). Accuracy
+  is a Phase F.0 concern.
+
+### Impact
+
+- New files:
+  - `tomato_sandbox/classifier/__init__.py`
+  - `tomato_sandbox/classifier/feature_builder.py`
+  - `tomato_sandbox/classifier/hierarchical_classifier.py`
+  - `tomato_sandbox/tests/unit/test_classifier.py`
+- No sacred files touched. No Section 15 tests modified.
+- **User approval:** pre-allocated DEC-039 per T-IMPL-4a task dispatch.
+
+---
+
+## DEC-040 [2026-05-02] T-IMPL-4b: Conformal prediction — sub-package layout, 7-class nonconformity, tau file missing fallback, guard_array on input
+
+- **Spec section:** 13 (Conformal prediction), lines 3508–3661
+- **Task card:** T-IMPL-4b — create `tomato_sandbox/conformal/conformal.py`, `__init__.py`, and unit tests
+- **Pre-allocated DEC:** DEC-040
+
+### Decision 1 — Module layout: sub-package per DEC-033
+
+- **Spec S12.11 / S13 implicit:** no explicit flat-vs-package statement for conformal.
+- **Task card:** `tomato_sandbox/conformal/conformal.py` (explicit path in task dispatch).
+- **Resolution:** sub-package per DEC-033. Canonical at `tomato_sandbox/conformal/conformal.py`. Re-export shim at `tomato_sandbox/conformal/__init__.py`. Both import paths work.
+
+### Decision 2 — α = 0.10, n=40 as module-level constants (not config overrides)
+
+- **Spec S13.2 line 3538:** "n = 40, α = 0.10 (for 90% coverage)."
+- **Spec S13.3 line 3557:** "the 40-image held_out_subset."
+- Both are spec-pinned design constants, not runtime config values. Defined as `CONFORMAL_ALPHA = 0.10` and `CONFORMAL_N_CALIBRATION = 40` at module level. Not in TomatoConfig (no YAML override; pinned by protocol).
+- `compute_conformal_tau` accepts `alpha` as a parameter for testing but defaults to `CONFORMAL_ALPHA`.
+
+### Decision 3 — τ from conformal_tau.json; missing file → fallback 1.0
+
+- **Spec S13.5 lines 3602-3611:** τ stored at `tomato_sandbox/phase_f0_calibration/conformal_tau.json`.
+- At T-IMPL-4b time (pre-F.0), the file does not exist (only `psv_standardization.json` is present in `phase_f0_calibration/`).
+- **Resolution:** `load_tau()` checks `Path.exists()`. If missing, returns `1.0` — the conservative fallback. τ=1.0 means threshold = 1-τ = 0.0, so every class with p > 0 enters the prediction set (all-class set). This is the safest failure mode: the coverage guarantee holds trivially (true class always in the set).
+- The production version (post-F.0) writes a real `conformal_tau.json` via the calibration script. Unit tests pass `tmp_path` files to bypass the on-disk path.
+
+### Decision 4 — guard_array applied to p_final_calibrated input
+
+- **Spec S13 intent:** nonconformity scores = 1 - p_c. If upstream Platt calibration produced NaN (network exception, OOM, etc.), s_c = 1 - NaN = NaN, and set construction fails silently.
+- **Resolution:** `guard_array(p, NUM_CLASSES, 0.0)` applied at the top of `compute_conformal_set`. If any element is non-finite or length != 7, the entire vector is zero-filled. Zero-filled p → s_c = 1.0 for all c → no class passes any τ < 1.0 → empty set (or all-class set when τ=1.0). This is conservative failure mode.
+- `gpu_lock` is NOT imported — conformal is post-classifier, pure CPU numpy arithmetic. Per task card constraint and spec S13.8 (< 1 ms, all scalar).
+
+### Decision 5 — 7-class index space (not 6)
+
+- **Spec S13.7 line 3642:** "canonical+OOD indices in the set."
+- **Spec S12.10 lines 3448-3449:** `p_final_calibrated: np.ndarray [7]` (6 tomato + 1 OOD).
+- **Spec S13.2 line 3543:** "P_final_calibrated[c] for c = 0..6."
+- NUM_CLASSES = 7. All arrays are shape [7]. The import contract's `conformal["set"]` is `set[int]` with indices 0-6.
+
+### Decision 6 — p_final_calibrated consumed from ClassifierResult (T-IMPL-4a)
+
+- Task card pins the field name as `p_final_calibrated` (BLK-010.2 verbatim).
+- DEC-039 confirms `ClassifierResult.p_final_calibrated` is present (all 9 fields implemented).
+- T-IMPL-4a has NOT landed on disk at time of T-IMPL-4b dispatch (no `tomato_sandbox/classifier/` directory found). We use the spec-pinned field name `p_final_calibrated` per BLK-010.2 and DEC-039 confirmation.
+- No field-name conflict detected; no BLK candidate required.
+
+### Decision 7 — No APIN import
+
+- Conformal is pure numpy arithmetic on a probability vector. No GPU, no APIN, no signal models. Per task constraint.
+
+### Test count: 44 tests, 44 passing
+
+- **Impact:** 3 new files:
+  - `tomato_sandbox/conformal/__init__.py` (re-export shim, 15 lines)
+  - `tomato_sandbox/conformal/conformal.py` (canonical implementation, ~210 lines)
+  - `tomato_sandbox/tests/unit/test_conformal.py` (44 tests, all passing in 0.82 s)
+- No sacred files touched. No Section 15 tests modified.
+- **User approval:** pre-allocated DEC-040 per T-IMPL-4b task dispatch.
