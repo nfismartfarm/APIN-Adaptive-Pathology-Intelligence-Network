@@ -1390,3 +1390,79 @@ No sacred files modified. No Section 15 tests modified.
 
 - **Impact:** `grade_per_class` populated for Tier 3A/3B; single-class behavior unchanged.
 - **User approval:** pre-allocated DEC-050 per T-AUDIT-5b-fix dispatch.
+
+---
+
+## DEC-052 [2026-05-03] T-PHASE6-B: F.0 calibration script — validation sub-package, conformal reuse, severity defaults, labeled-data CSV layout
+
+- **Spec sections:** 29 (F.0 dry-run procedure), 13.5 (τ derivation), 12.8 (Platt scaling), 17.3 (severity thresholds), 8.4 + 4.5 (chilli_leakage threshold)
+- **Pre-allocated DEC:** DEC-052 (DEC-053 reserved for T-PHASE6-A; DEC-054+ for T-PHASE6-C)
+- **Phase:** 6 Component B — (β) interpretation per DEC-047
+
+### Decision 1 — Module layout: validation/ sub-package per DEC-033 pattern
+
+- Task card says: `tomato_sandbox/validation/__init__.py` + `tomato_sandbox/validation/fit_calibration.py`.
+- DEC-033 pattern: sub-package + `__init__.py` re-export with explicit `__all__`.
+- No flat alias shim required (no pre-existing import contract for this module).
+- `validation/` sub-package is consistent with the DEC-033 pattern applied throughout (conformal/, classifier/, signals/psv/, etc.).
+
+### Decision 2 — compute_conformal_tau: REUSE from conformal.py (not re-implement)
+
+- `tomato_sandbox/conformal/conformal.py` already exposes `compute_conformal_tau(p_final_calibrated_holdout, y_true, alpha)` implementing the exact spec S13.5 formula (lines 3585-3600 verbatim).
+- Re-implementing the formula in `fit_calibration.py` would create two code paths for the same contract, risking divergence.
+- Resolution: `fit_conformal_tau()` wraps `compute_conformal_tau` from conformal.py. The wrapper adds the output JSON structure (per S13.5 lines 3602-3611) and writes to the calibration file path. The core math is delegated.
+- Documented in code comment: `# Delegates math to conformal.compute_conformal_tau per DEC-052.`
+
+### Decision 3 — Platt scaling: per-class logistic regression, logit(p) input
+
+- Spec S12.8 line 3386: `p_c_calibrated = sigmoid(α_c × logit(p_c) + β_c)`.
+- "Logit" in spec means the log-odds transform: `logit(p) = log(p / (1 - p))`.
+- Spec S12.8 line 3393: `logits = np.log(P_final_uncal / (1.0 - P_final_uncal + 1e-12) + 1e-12)`.
+- Implementation uses scipy.special.expit for sigmoid and manual logit with epsilon guard.
+- Scipy is available in the environment (sklearn pulls it in). If absent, fallback is pure numpy.
+- Output JSON schema: `{"alpha": [7 floats], "beta": [7 floats], "n": int, "method": "platt_v1", "computed_at": isoformat}`. Note the spec uses `α` (alpha) and `β` (beta) per S12.8 line 3387; the JSON field names use the same names to match the spec's apply_platt() function.
+
+### Decision 4 — Severity thresholds: spec S17.3 defaults as fallback; per-disease fitting only when n >= 10
+
+- Spec S17.3 thresholds are explicitly "placeholders" that "Phase F.0 will replace." The defaults (per lines 5972-5979):
+  - foliar: mild_max=5.0, moderate_max=15.0
+  - septoria: mild_max=8.0, moderate_max=25.0
+  - late_blight: mild_max=2.0, moderate_max=8.0
+  - ylcv: mild_max=10.0, moderate_max=30.0
+  - mosaic: mild_max=15.0, moderate_max=40.0
+- When fewer than 10 labeled samples exist for a disease, use spec defaults and mark `"default_used": true`. Threshold: n >= 10 is a pragmatic lower bound for fitting 2 thresholds from data; below that, defaults are more reliable than fitted values.
+- When n >= 10: use percentile fitting — mild_max = p_{pct_mild} of coverage_pct for confirmed-mild samples; moderate_max = p_{pct_moderate} for mild+moderate samples. The percentile levels (e.g. 95th) can be tuned at F.0 time.
+
+### Decision 5 — chilli_leakage threshold: Youden J maximization
+
+- Spec S4.5 line 816: "F.0 sets to 95th percentile of chilli_leakage scores on confirmed-tomato images."
+- Spec S8.4 line 1695: "The threshold for 'high' is TOMATO_CHILLI_LEAKAGE_THRESHOLD (default 0.40, F.0-calibrated to the 95th percentile of confirmed-tomato images)."
+- The calibration function implements two approaches:
+  1. **Primary (spec-mandated):** 95th percentile of chilli_leakage on confirmed-tomato images. This is what spec mandates.
+  2. **Informational:** Youden J statistic (maximizes sensitivity + specificity - 1) on the full labeled set. Reported in output JSON as `youden_tau_informational`.
+- Output uses the 95th-percentile value as the primary `tau`; Youden is informational only. Method field: `"percentile_95_tomato_v1"`.
+
+### Decision 6 — Labeled data layout expected by run_full_calibration
+
+- `labeled_data_path` must point to a CSV file with columns:
+  - `image_path` (str) — path to image file (absolute or relative to CSV parent dir)
+  - `true_class` (str) — canonical class name: foliar | septoria | late_blight | ylcv | mosaic | healthy | OOD
+  - `split` (str) — `calibration` | `test` | `holdout` (per spec S29.2 60/20/20 partition)
+  - `true_severity` (str, optional) — mild | moderate | severe (for severity threshold fitting)
+  - `is_confirmed_tomato` (bool/int, optional) — 1 for confirmed tomato, 0 for confirmed non-tomato (for chilli_leakage threshold)
+- The function filters to `split == "calibration"` for conformal + Platt fitting.
+- The function calls `predict_single` from the orchestrator for each image in the calibration set.
+- If `pipeline_context` is in pre-F.0 degraded mode, all signals return zero-vectors → conformal and Platt fit on degraded mode outputs → calibration files produced are not meaningful for production. This is expected behavior; the caller documents pre-F.0 status.
+
+### Decision 7 — Output directory: use phase_f0_calibration/ always; tests use tmp_path
+
+- All 4 calibration JSON files write to `tomato_sandbox/phase_f0_calibration/`.
+- Unit tests pass a `tmp_path` fixture override to `output_dir` parameter so they never mutate production calibration files.
+- `run_full_calibration` accepts an optional `output_dir: Path = None` parameter; when None, uses the canonical `phase_f0_calibration/` path.
+
+### Decision 8 — No loading of model weights in this script
+
+- Per DEC-047 (β) interpretation: `fit_calibration.py` consumes pipeline outputs via `predict_single`. It does NOT load `model3_production_v3.pt` or `sp_lora_epoch13_f10.9113_PRESERVED.pt` directly. The orchestrator handles model loading (or degraded-mode fallback). This module is purely a calibration math layer above the orchestrator interface.
+
+- **Impact:** 3 new files created: `tomato_sandbox/validation/__init__.py`, `tomato_sandbox/validation/fit_calibration.py`, `tomato_sandbox/tests/unit/test_fit_calibration.py`.
+- **User approval:** pre-allocated DEC-052 per T-PHASE6-B task dispatch.

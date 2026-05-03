@@ -888,3 +888,51 @@ The Phase 5c auditor's consolidated report mis-attributed M4 to `signal_extra` p
 
 Most architecturally uncertain: real model loading. Same protocol pattern as Phase 5a (real-subprocess + real-image + real-models test; surface bugs; mechanical fixes; CLOSE on non-error response with non-zero confidence values).
 
+
+
+## [2026-05-04] Phase 6 Component B CLOSED — F.0 calibration script
+
+### Dispatch outcome
+T-PHASE6-B (`implementer` subagent) returned with **CLOSE** status. DEC-052 logged. 3 files created. 47 unit tests pass + 1 conditional skip (PipelineContext.make_degraded helper not yet present; Component C territory).
+
+### Files
+| File | Bytes | Purpose |
+|---|---|---|
+| `tomato_sandbox/validation/__init__.py` | 941 | Sub-package init with re-exports per DEC-033 |
+| `tomato_sandbox/validation/fit_calibration.py` | 36,625 | Calibration script: fit_conformal_tau, fit_platt_scaling, fit_severity_thresholds, fit_chilli_leakage_threshold, run_full_calibration |
+| `tomato_sandbox/tests/unit/test_fit_calibration.py` | 36,607 | 48 unit tests (47 pass + 1 conditional skip) |
+
+### Verification (main-thread independent)
+- ✓ Section 15: 135/135 PRESERVED
+- ✓ Sacred: 10/10 PASS
+- ✓ Cumulative venv tests: 1197 pass + 1 skip (1150 → +47 from Component B)
+- ✓ DEC-038: zero implementer commits since `ffaddb2`
+- ✓ DEC-052 logged at line 1396 of tomato_decisions.md
+
+### Anti-cheat: 0 HIGH, 0 MEDIUM, 0 LOW (cleanest dispatch yet)
+All 15 checks CLEAR including 7 component-specific checks:
+- SEVERITY_DEFAULTS values match spec S17.3 table exactly (5/5 diseases)
+- Conformal τ formula verbatim S13.5: `q = ceil((N+1)*(1-α))/N` with `method="higher"`; test asserts q=0.925 for N=40 α=0.10
+- labeled_data_path parameter (no hardcoded paths)
+- Tests use tmp_path isolation (zero production-dir writes)
+- Platt fallback chain honest (scipy → sklearn → identity with WARNING log)
+- Severity defaults fallback documented (_MIN_SEVERITY_SAMPLES=10 named constant; `default_used` key)
+- **No premature lifting of pre-F.0 deferral**: zero torch imports; zero sacred checkpoint paths
+
+### Architectural choices logged in DEC-052
+1. Sub-package layout `tomato_sandbox/validation/__init__.py` + `fit_calibration.py` per DEC-033
+2. `fit_conformal_tau` delegates to existing `compute_conformal_tau` in conformal.py (reuse, not reinvent)
+3. `_DEFAULT_OUTPUT_DIR` configurable; tests pass tmp_path
+4. `_MIN_SEVERITY_SAMPLES = 10` for default fallback
+5. Youden J informational only (default uses 95th percentile on confirmed-tomato per S4.5)
+6. PipelineContext.make_degraded helper expected from Component C; test self-skips until present
+7. Output JSON files written to `tomato_sandbox/phase_f0_calibration/` by default; overridable
+8. fit_calibration consumes pipeline outputs; does NOT load model checkpoints (β interpretation per DEC-047)
+
+### Phase 6 progress
+- ✅ Component B (calibration) CLOSED with DEC-052
+- ⏳ Component A (validation script) → DEC-053 (next; awaits user approval)
+- ⏳ Component C (real model loading) → DEC-054 + DEC-055/056/... for wiring fixes
+- ⏳ Tomato smoke retest at Phase 6 close
+- ⏳ BLK-006/007/008 disposition notes during Phase 6 close
+
