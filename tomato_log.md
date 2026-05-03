@@ -846,3 +846,45 @@ F-07 auditor paraphrase typed `grade_per_class` as `Dict[str, SeverityGrade]`; a
 ### Next: Phase 5c
 Single dispatch via `anti-cheat-inspector` subagent (read-only, returns text, main thread persists). Final anti-cheat sweep over the entire `tomato_sandbox/` codebase + final test run + Phase 5 consolidated report at `tomato_progress_reports/phase_5_audit.md`. After Phase 5c CLOSE → Phase 5 closed → Phase 6 (F.0 prep) authorized.
 
+
+
+## [2026-05-04 close] Phase 5 CLOSED — Phase 6 (F.0 prep) authorized
+
+### Phase 5c outcome
+T-AUDIT-5c (`anti-cheat-inspector` subagent, read-only) returned with **CLOSE** status: 0 HIGH, 2 MEDIUM (DEC ledger ordering anomalies; BLK-006/007/008 disposition notes absent), 3 LOW (config YAML fallback, GPU-lock cleanup, PSV degraded-mode shape extract — all justified). Both reports persisted by main thread to disk:
+- `tomato_progress_reports/anticheat_phase5c_final_sweep.md` (granular 12-check sweep)
+- `tomato_progress_reports/phase_5_audit.md` (consolidated 5a + 5b + 5c report)
+
+### Independent main-thread verification (trust-but-verify per M4 lesson)
+| Claim | Verified |
+|---|---|
+| Section 15 LF-SHA256 vs DEC-032 baseline (13 hashes) | ✅ all match exactly |
+| Pre-commit hook md5 `24eb46f308751df3a125faca0680c9c7` | ✅ unchanged |
+| 1150 tests pass under venv (986 unit + 135 int + 29 e2e) | ✅ live `pytest` confirmed: 1150 passed in 106.66s |
+| Sacred 10/10 PASS in-sandbox | ✅ `verify_manifest()` |
+| 49 real DEC entries (DEC-001..050 minus DEC-016 ghost) | ✅ `grep -cE "^## DEC-[0-9]"` = 49 |
+| 16 BLK headings (1 template + 15 real) | ✅ `grep -cE "^## BLK-"` = 16 |
+| Server endpoints `/health` `/info` `/ready` `/metrics` | ✅ all HTTP 200 |
+
+### Minor correction during persist
+The Phase 5c auditor's consolidated report mis-attributed M4 to `signal_extra` parameter; M4 is correctly about `grade_per_class` type-shape (list-of-dicts vs Dict[str, SeverityGrade]). Corrected inline when persisting `phase_5_audit.md`.
+
+### Phase 5 cumulative outcomes
+- **3 BLKs RESOLVED** in Phase 5: BLK-013 (DEC-048, Phase 5a), BLK-014 (DEC-049), BLK-015 (DEC-050) — last two via Phase 5b combined dispatch
+- **4 DECs added** in Phase 5: DEC-047 (β interpretation prerequisite clarification), DEC-048 (PIL adapter), DEC-049 (response_builder explanation.structured 8 fields), DEC-050 (severity multi-class loop)
+- **1 SPEC-INT entry** added: SPEC-INT-003 (S17.5 example coverage_pct drafting noise)
+- **1 M-series meta-finding** added: M4 (auditor false positives from spec-quote comments / type-shape paraphrase)
+- **+25 unit tests**: 14 BLK-014 coverage + 11 BLK-015 multi-class path
+- **Section 15 milestone preserved**: 135/135 unchanged across all of 5a + 5b + 5c
+- **Sacred 10/10 PASS preserved**
+
+### Phase 5 exit verdict
+**CLOSE.** Zero HIGH cheat findings, zero unresolved blocking defects, 1150/1150 tests passing, integration layer wiring confirmed, contract semantics audited, anti-cheat sweep clean. Phase 6 (F.0 prep per spec Section 29) authorized.
+
+### Phase 6 forward parameters (provisional, not yet dispatched)
+1. `tomato_sandbox/validation/run_f0.py` — F.0 validation script
+2. `tomato_sandbox/validation/fit_calibration.py` — calibration fitting
+3. Real model loading at startup steps 4-7 (lifts pre-F.0 deferral per DEC-047)
+
+Most architecturally uncertain: real model loading. Same protocol pattern as Phase 5a (real-subprocess + real-image + real-models test; surface bugs; mechanical fixes; CLOSE on non-error response with non-zero confidence values).
+
