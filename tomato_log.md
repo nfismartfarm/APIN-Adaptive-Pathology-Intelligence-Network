@@ -794,3 +794,55 @@ BLK-013 RESOLVED → Q4 hold lifted. Sandbox server on 8767 is genuinely operati
 | Real-image E2E | passing on real subprocess (8767, venv Python) |
 | Phase status | Phase 4 closed; Phase 5a closed; Phase 5b unblocked |
 
+
+
+## [2026-05-03 close] Phase 5b CLOSED — BLK-014 + BLK-015 RESOLVED via T-AUDIT-5b-fix; SPEC-INT-003 logged
+
+### Dispatch outcome
+T-AUDIT-5b-fix (`implementer` subagent, single combined dispatch) returned with **CLOSE** status. Both pre-allocated DECs logged: DEC-049 (BLK-014) + DEC-050 (BLK-015). 5 files modified, 25 new unit tests added (14 BLK-014 + 11 BLK-015), 0 sibling bugs surfaced.
+
+### Fixes applied
+- **DEC-049 / BLK-014:** `tomato_sandbox/response/response_builder.py` — emits 8 missing `explanation.structured` fields per spec S16.4:5754-5778. Helper `_get_structured_thresholds(rule_id_fired)` returns Rule 7/8 thresholds; null for non-threshold-using rules. `signal_extra` parameter pattern carries `chilli_leakage_actual` + `psv_reliability_actual` from orchestrator without fattening `TierAssignment` (preserves 3-field shape that 135 Section 15 tests rely on). `sub_rule_id_fired` now distinct from `rule_id_fired` per spec example: rule_id for 7a/7b/7c/8a/8b/8c sub-rule firings; "default" otherwise.
+- **DEC-050 / BLK-015:** `tomato_sandbox/severity/grader.py` — extended `compute_severity` with `multi_class_set: Optional[list] = None` parameter (option A: extend, not new function). When set contains ≥2 disease class indices, iterates per-class and populates `grade_per_class` with shared `coverage_pct` per SPEC-INT-003. Healthy/OOD excluded per S17.6.
+- **Orchestrator wiring:** `tomato_sandbox/orchestrator/pipeline.py` — passes `signal_extra` to `build_response()`; passes `multi_class_set=list(conformal_result.prediction_set)` only for Tier 3A/3B (None otherwise).
+
+### Independent verification (main thread)
+- ✓ Disk: 5 expected files modified with appropriate byte counts; no upstream module mutations beyond the 5 files
+- ✓ DEC-049 (line 1338) + DEC-050 (line 1369) logged in `tomato_decisions.md`
+- ✓ Sacred 10/10 PASS (in-sandbox `verify_manifest()`)
+- ✓ Section 15 LF-normalized SHA256 hashes match DEC-032 baseline (no Section 15 mutation)
+- ✓ Section 15 regression: 135/135 PASS in 0.30s
+- ✓ DEC-038 compliance: `git log dd41794..HEAD` empty before main-thread commit (no implementer commits)
+- ✓ Smoke test (real chilli anthracnose image): HTTP 200 response includes `explanation.structured` with all 8 new fields populated (Rule 1 fired in pre-F.0; thresholds null where Rule 1 doesn't use them; `tier_sub_rule_checks` block present with both checks `false`; `sub_rule_id_fired = "default"` distinct from `rule_id_fired = "1"`)
+- ✓ TierAssignment dataclass unchanged (3 fields preserved per DEC-041)
+- ✓ Pipeline `multi_class_set` only set for Tier 3A/3B; None for all other tiers (verified by grep on pipeline.py:1153-1160)
+
+### Anti-cheat scan: PASS clean (0 HIGH, 1 MEDIUM accounting, 2 LOW cosmetic)
+- 15 of 16 substantive checks PASS clean
+- **MEDIUM-1: test count accounting discrepancy** — main-thread dispatch baseline cited "986 unit + 135 integration = 1121"; actual grand total under venv is **1150** (986 unit + 135 integration + 29 e2e). The 29 e2e tests at `tomato_sandbox/tests/e2e/test_endpoints.py` were missing from the dispatch's cumulative number. All 1150 tests PASS; no test was suppressed or fabricated. Going-forward rule: checkpoint reports must specify "unit + integration" vs "all tests including e2e" explicitly.
+- LOW-1: Section 15 SHA256 baseline not stored as verifiable record (DEC-032 is policy entry, not hash registry); deferred to T-EARLY-MP
+- LOW-2: spec citation granularity — region cite `5759-5775` instead of per-field individual line cites; documentation gap only
+
+### SPEC-INT-003 logged
+S17.5 example shows different `coverage_pct` per class (11.2 vs 4.8); contradicts normative S17.2:5964 ("severity is a PSV-only computation"). Resolution: same PSV `coverage_pct` shared across all classes per SPEC-INT-003; only per-disease threshold lookup varies. Implementation conforms; spec body example update queued for T-EARLY-MP. Third SPEC-INT entry in the project's recurring "examples drift from normative text" pattern.
+
+### M4 family extension
+F-07 auditor paraphrase typed `grade_per_class` as `Dict[str, SeverityGrade]`; actual spec example shape and implementation are list-of-dicts. Implementation followed spec body, not auditor paraphrase. Trust-but-verify caught the type-shape mismatch in main-thread verification. Adds to M4 record (auditor paraphrase loose; trust-but-verify against spec body remains mandatory).
+
+### Cumulative metrics post-Phase-5b
+| Metric | Value |
+|---|---|
+| Unit tests | 986 PASS |
+| Section 15 integration | 135/135 PASS |
+| E2e tests | 29 PASS |
+| **Grand total under venv** | **1150 PASS** |
+| Sacred | 10/10 PASS unchanged |
+| DECs logged | DEC-001..050 (DEC-049 + DEC-050 added) |
+| BLKs filed | 15 (BLK-014 + BLK-015 added; both RESOLVED) — 0 deferred |
+| SPEC-INT entries | 3 (SPEC-INT-003 added) |
+| Master-prompt defects | 60 (unchanged) |
+| Phase status | Phase 5a CLOSED; Phase 5b CLOSED; Phase 5c (anti-cheat final sweep) authorized |
+
+### Next: Phase 5c
+Single dispatch via `anti-cheat-inspector` subagent (read-only, returns text, main thread persists). Final anti-cheat sweep over the entire `tomato_sandbox/` codebase + final test run + Phase 5 consolidated report at `tomato_progress_reports/phase_5_audit.md`. After Phase 5c CLOSE → Phase 5 closed → Phase 6 (F.0 prep) authorized.
+

@@ -646,3 +646,220 @@ def test_class_label_string_accuracy(argmax, expected_class):
     """
     resp = _build("4A", argmax=argmax)
     assert resp["prediction"]["primary_class"] == expected_class
+
+
+# ---------------------------------------------------------------------------
+# BLK-014 fix — explanation.structured completeness
+# spec: section 16.4 lines 5752-5778
+# DEC-049: all 12 fields of explanation.structured must be present;
+# 8 were previously missing.
+# ---------------------------------------------------------------------------
+
+def _build_with_signal_extra(
+    tier_label: str = "1",
+    rule_id: str = "7c",
+    t5: bool = False,
+    argmax: int = 0,
+    max_prob: float = 0.91,
+    margin: float = 0.35,
+    ps: Optional[list] = None,
+    chilli_leakage_actual: float = 0.03,
+    psv_reliability_actual: float = 0.78,
+) -> dict:
+    """Build a response with signal_extra populated (BLK-014 coverage)."""
+    ta = _make_tier(tier_label, t5, rule_id)
+    cr = _make_classifier(argmax, max_prob, margin)
+    conf = _make_conformal(ps if ps is not None else [argmax])
+    iqa = _make_iqa()
+    return build_response(
+        ta, cr, conf, iqa,
+        request_metadata={"request_id": "blk014-test"},
+        signal_extra={
+            "chilli_leakage_actual": chilli_leakage_actual,
+            "psv_reliability_actual": psv_reliability_actual,
+        },
+    )
+
+
+def test_structured_block_has_all_top_level_keys():
+    """explanation.structured has all 4 required top-level keys.
+    spec: section 16.4 lines 5756-5778 — rule_id_fired, sub_rule_id_fired,
+    tier_main_conditions, tier_sub_rule_checks, tier5_evaluation
+    """
+    resp = _build_with_signal_extra()
+    s = resp["explanation"]["structured"]
+    for key in ("rule_id_fired", "sub_rule_id_fired",
+                "tier_main_conditions", "tier_sub_rule_checks", "tier5_evaluation"):
+        assert key in s, f"Missing key '{key}' in explanation.structured"
+
+
+def test_structured_tier_main_conditions_all_fields():
+    """tier_main_conditions has all 10 required fields per S16.4 spec example.
+    spec: section 16.4 lines 5759-5769
+    BLK-014 fix: 6 fields were previously missing.
+    """
+    resp = _build_with_signal_extra(rule_id="7c")
+    cond = resp["explanation"]["structured"]["tier_main_conditions"]
+    required_keys = [
+        "max_prob_threshold",
+        "max_prob_actual",
+        "margin_threshold",
+        "margin_actual",
+        "psv_reliability_threshold",
+        "psv_reliability_actual",
+        "chilli_leakage_threshold",
+        "chilli_leakage_actual",
+        "iqa_decision",
+        "set_size",
+    ]
+    for key in required_keys:
+        assert key in cond, f"Missing field '{key}' in tier_main_conditions"
+
+
+def test_structured_tier_sub_rule_checks_present():
+    """tier_sub_rule_checks sub-object is present with required keys.
+    spec: section 16.4 lines 5770-5773
+    BLK-014 fix: entire sub-object was previously missing.
+    """
+    resp = _build_with_signal_extra()
+    checks = resp["explanation"]["structured"]["tier_sub_rule_checks"]
+    assert "iqa_degraded_check" in checks
+    assert "underpowered_class_check" in checks
+
+
+def test_sub_rule_id_fired_is_default_for_non_sub_rule():
+    """sub_rule_id_fired = 'default' for rules without sub-rules (e.g. rule '1').
+    spec: section 16.4 line 5758 — spec example shows 'default' for the 7c path
+    (7c is the default sub-rule of Rule 7; non-sub-rule rules use 'default' too).
+    BLK-014 fix: was incorrectly echoing rule_id_fired.
+    """
+    resp = _build_with_signal_extra(tier_label="4A", rule_id="catch_all_low_confidence")
+    s = resp["explanation"]["structured"]
+    assert s["sub_rule_id_fired"] == "default"
+    assert s["rule_id_fired"] == "catch_all_low_confidence"
+
+
+def test_sub_rule_id_fired_matches_actual_sub_rule_7a():
+    """sub_rule_id_fired = '7a' when rule_id_fired = '7a' (IQA degraded sub-rule).
+    spec: section 16.4 line 5758 — sub_rule_id_fired carries the sub-rule id.
+    """
+    resp = _build_with_signal_extra(tier_label="3D", rule_id="7a")
+    s = resp["explanation"]["structured"]
+    assert s["rule_id_fired"] == "7a"
+    assert s["sub_rule_id_fired"] == "7a"
+
+
+def test_sub_rule_id_fired_matches_actual_sub_rule_8b():
+    """sub_rule_id_fired = '8b' when rule_id_fired = '8b'."""
+    resp = _build_with_signal_extra(tier_label="3A", rule_id="8b")
+    s = resp["explanation"]["structured"]
+    assert s["rule_id_fired"] == "8b"
+    assert s["sub_rule_id_fired"] == "8b"
+
+
+def test_rule7_thresholds_in_tier_main_conditions():
+    """Rule 7 thresholds appear correctly in tier_main_conditions.
+    spec: section 16.4 lines 5759-5768; threshold values from spec S14.5.
+    BLK-014 fix: previously all threshold fields were missing.
+    """
+    from tomato_sandbox.tier.tier_assignment import (
+        _RULE7_MAX_AT_LEAST,
+        _RULE7_MARGIN_AT_LEAST,
+        _RULE7_PSV_RELIABILITY_AT_LEAST,
+        _RULE7_CHILLI_STRICT_BELOW,
+    )
+    resp = _build_with_signal_extra(rule_id="7c", max_prob=0.91, margin=0.86,
+                                     psv_reliability_actual=0.78,
+                                     chilli_leakage_actual=0.03)
+    cond = resp["explanation"]["structured"]["tier_main_conditions"]
+    assert cond["max_prob_threshold"] == _RULE7_MAX_AT_LEAST
+    assert cond["margin_threshold"] == _RULE7_MARGIN_AT_LEAST
+    assert cond["psv_reliability_threshold"] == _RULE7_PSV_RELIABILITY_AT_LEAST
+    assert cond["chilli_leakage_threshold"] == _RULE7_CHILLI_STRICT_BELOW
+
+
+def test_rule8_thresholds_in_tier_main_conditions():
+    """Rule 8 thresholds appear correctly in tier_main_conditions.
+    spec: section 16.4 lines 5759-5768; threshold values from spec S14.5.
+    """
+    from tomato_sandbox.tier.tier_assignment import (
+        _RULE8_MAX_AT_LEAST,
+        _RULE8_MARGIN_AT_LEAST,
+        _RULE8_PSV_RELIABILITY_AT_LEAST,
+        _RULE8_CHILLI_STRICT_BELOW,
+    )
+    resp = _build_with_signal_extra(rule_id="8c", max_prob=0.70, margin=0.25,
+                                     psv_reliability_actual=0.60,
+                                     chilli_leakage_actual=0.05)
+    cond = resp["explanation"]["structured"]["tier_main_conditions"]
+    assert cond["max_prob_threshold"] == _RULE8_MAX_AT_LEAST
+    assert cond["margin_threshold"] == _RULE8_MARGIN_AT_LEAST
+    assert cond["psv_reliability_threshold"] == _RULE8_PSV_RELIABILITY_AT_LEAST
+    assert cond["chilli_leakage_threshold"] == _RULE8_CHILLI_STRICT_BELOW
+
+
+def test_non_rule7_8_has_none_thresholds():
+    """Rules other than 7/8 have None for max_prob_threshold etc.
+    spec: section 16.4 — thresholds only applicable to rules that use them.
+    """
+    resp = _build_with_signal_extra(tier_label="4B", rule_id="1")
+    cond = resp["explanation"]["structured"]["tier_main_conditions"]
+    assert cond["max_prob_threshold"] is None
+    assert cond["margin_threshold"] is None
+    assert cond["psv_reliability_threshold"] is None
+    assert cond["chilli_leakage_threshold"] is None
+
+
+def test_signal_extra_values_propagated_to_structured():
+    """chilli_leakage_actual and psv_reliability_actual from signal_extra appear in
+    tier_main_conditions.
+    BLK-014 fix (DEC-049): spec 16.4 lines 5765-5766.
+    """
+    resp = _build_with_signal_extra(
+        chilli_leakage_actual=0.07,
+        psv_reliability_actual=0.65,
+    )
+    cond = resp["explanation"]["structured"]["tier_main_conditions"]
+    assert cond["chilli_leakage_actual"] == pytest.approx(0.07, abs=1e-4)
+    assert cond["psv_reliability_actual"] == pytest.approx(0.65, abs=1e-4)
+
+
+def test_signal_extra_none_gives_null_actual_values():
+    """When signal_extra is not provided, chilli_leakage_actual and
+    psv_reliability_actual are None (not an error).
+    BLK-014 fix (DEC-049): backward-compat when orchestrator does not pass extras.
+    """
+    resp = _build("1")  # no signal_extra
+    cond = resp["explanation"]["structured"]["tier_main_conditions"]
+    assert cond["chilli_leakage_actual"] is None
+    assert cond["psv_reliability_actual"] is None
+
+
+def test_iqa_degraded_check_true_for_7a():
+    """iqa_degraded_check=True when sub-rule 7a fires (IQA DEGRADED path).
+    spec: section 16.4 line 5771 — iqa_degraded_check
+    """
+    resp = _build_with_signal_extra(rule_id="7a")
+    checks = resp["explanation"]["structured"]["tier_sub_rule_checks"]
+    assert checks["iqa_degraded_check"] is True
+    assert checks["underpowered_class_check"] is False
+
+
+def test_underpowered_class_check_true_for_7b():
+    """underpowered_class_check=True when sub-rule 7b fires.
+    spec: section 16.4 line 5772 — underpowered_class_check
+    """
+    resp = _build_with_signal_extra(rule_id="7b")
+    checks = resp["explanation"]["structured"]["tier_sub_rule_checks"]
+    assert checks["iqa_degraded_check"] is False
+    assert checks["underpowered_class_check"] is True
+
+
+def test_tier_sub_rule_checks_both_false_for_7c():
+    """Both checks False for sub-rule 7c (definitive single-class path).
+    spec: section 16.4 lines 5770-5773 — spec example shows both False
+    """
+    resp = _build_with_signal_extra(rule_id="7c")
+    checks = resp["explanation"]["structured"]["tier_sub_rule_checks"]
+    assert checks["iqa_degraded_check"] is False
+    assert checks["underpowered_class_check"] is False

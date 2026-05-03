@@ -1332,3 +1332,61 @@ No sacred files modified. No Section 15 tests modified.
 - **Test evidence:** Pre-fix: every real-image POST returned `{"error": "IQA_REJECTED", "status": 422, ...}`. Post-fix: IQA gate passes for normal leaf images and the pipeline continues to signals A/B/C.
 - **Impact:** blocking integration bug fixed — real-image path now progresses past IQA gate.
 - **User approval:** pre-allocated as DEC-048 in the Phase 5a dispatch instructions.
+
+---
+
+## DEC-049 [2026-05-03] BLK-014 fix — explanation.structured missing 8 fields per S16.4
+
+- **Spec section:** 16.4 lines 5754-5778 (verbatim structured block schema)
+- **Bug (BLK-014):** `response_builder.py` emitted only 4 of 12 fields in `explanation.structured`. Missing:
+  - `tier_main_conditions`: `max_prob_threshold`, `margin_threshold`, `psv_reliability_threshold`, `psv_reliability_actual`, `chilli_leakage_threshold`, `chilli_leakage_actual` (6 fields)
+  - `tier_sub_rule_checks` entire sub-object: `iqa_degraded_check`, `underpowered_class_check` (2 fields)
+  - `sub_rule_id_fired` was echoing `rule_id_fired` instead of using a distinct value
+
+- **Decision 1 — Where to read threshold constants:**
+  - `tier_assignment.py` already defines all threshold constants as module-level values (`_RULE7_MAX_AT_LEAST`, `_RULE7_MARGIN_AT_LEAST`, etc.). These are the authoritative values.
+  - Rather than extend `TierAssignment` with new fields (which would change the import contract), we import the threshold constants directly from `tier_assignment` into `response_builder`. This avoids contract churn and keeps `TierAssignment` at its 3 required attributes.
+  - The rule-vs-threshold mapping in `response_builder` is a static lookup: based on `rule_id_fired`, we know which threshold set applies.
+
+- **Decision 2 — `sub_rule_id_fired` logic:**
+  - Spec example shows `"default"` for non-sub-rule cases. `rule_id_fired` can be `"7c"`, `"7a"`, `"8c"`, `"8a"`, etc.
+  - Sub-rules are: `"7a"` (IQA degraded), `"7b"` (underpowered, Rule 7), `"8a"` (IQA degraded, Rule 8), `"8b"` (underpowered, Rule 8). For rule_ids that are themselves sub-rules (contain letter suffixes), we use them as the sub_rule_id. For non-sub-rule ids ("1", "3", "4", "5", "6", catch_all), we use `"default"`.
+
+- **Decision 3 — `tier_sub_rule_checks`:**
+  - `iqa_degraded_check`: True iff `iqa_result.decision == "DEGRADED"`.
+  - `underpowered_class_check`: True iff rule_id_fired is `"7b"` or `"8b"` (the sub-rules that fire for underpowered class). We cannot inspect the underpowered_classes set from `response_builder` (it's not passed), but the rule_id_fired encodes whether the underpowered sub-rule fired.
+
+- **Decision 4 — `chilli_leakage_actual`:**
+  - Spec S16.4 shows `chilli_leakage_actual: 0.03`. This comes from Signal A's chilli_leak value. `response_builder` does not receive Signal A — it receives `tier_assignment`, `classifier_result`, `conformal_result`, `iqa_result`.
+  - The chilli_leak must be passed via `build_response()` as an optional extra parameter, or read from an attribute on one of the existing args. Inspect `TierAssignment`: has no chilli_leak field. `ClassifierResult`: no chilli_leak field. 
+  - Resolution: add `signal_extra: Optional[dict] = None` parameter to `build_response()`. The orchestrator's `_build_pipeline_result` passes `{"chilli_leakage_actual": float(signal_a.chilli_leakage), "psv_reliability_actual": float(signal_c.psv_reliability)}`. When absent (test or missing), defaults to 0.0.
+
+- **Impact:** 8 missing fields added to `explanation.structured`; `build_response()` gains an optional `signal_extra` parameter (backward-compatible default).
+- **User approval:** pre-allocated DEC-049 per T-AUDIT-5b-fix dispatch.
+
+---
+
+## DEC-050 [2026-05-03] BLK-015 fix — SeverityResult.grade_per_class never populated for Tier 3A/3B
+
+- **Spec section:** 17.5 lines 6015-6032
+- **Bug (BLK-015):** `compute_severity` only computed severity for a single `predicted_class`. `grade_per_class` was initialized but never populated. For Tier 3A/3B (multi-class conformal sets), the spec requires severity per class in the prediction set.
+
+- **Decision 1 — Extend `compute_severity` with `multi_class_set` parameter (Option A):**
+  - Signature change: `compute_severity(..., multi_class_set: Optional[list[int]] = None) -> SeverityResult`
+  - When `multi_class_set` is provided and `len > 1`: iterate each class in the set, classify against per-disease thresholds (same `coverage_pct`, `lesion_count` — SPEC-INT-003: same PSV inputs, only threshold lookup varies), append entry to `grade_per_class`.
+  - Single-class path unchanged when `multi_class_set` is None or has 1 element.
+  - SPEC-INT-003 interpretation: spec S17.5 example shows different `coverage_pct` per class (11.2 vs 4.8) but normative S17.2 says "PSV-only computation" (singular). The example is drafting noise. Implementation uses SAME `coverage_pct` for all classes.
+
+- **Decision 2 — Healthy/OOD in `grade_per_class`:**
+  - Healthy (5) and OOD (6) are excluded from `grade_per_class` (not included in the list, same as their treatment in single-class severity: `grade=None` with specific human_readable).
+  - If the conformal set contains ONLY healthy/OOD, `grade_per_class` is empty list [].
+
+- **Decision 3 — Uncertainty gate for multi-class:**
+  - Same gate applies: if `psv_reliability < 0.50` or `coverage_pct < 1.0`, the outer severity is omitted. In that case `grade_per_class` remains `None` (whole block omitted, consistent with single-class behavior).
+
+- **Decision 4 — Orchestrator call site:**
+  - In `_build_pipeline_result`, when `tier_result.tier_label in ("3A", "3B")`, pass `multi_class_set=list(conformal_result.prediction_set)` to `compute_severity`.
+  - For other tiers, `multi_class_set=None` (single-class path, unchanged).
+
+- **Impact:** `grade_per_class` populated for Tier 3A/3B; single-class behavior unchanged.
+- **User approval:** pre-allocated DEC-050 per T-AUDIT-5b-fix dispatch.

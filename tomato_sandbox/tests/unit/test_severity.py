@@ -565,3 +565,186 @@ class TestBoundaryConditions:
             tier_label="1",
         )
         assert result_above.grade == "severe"
+
+
+# ---------------------------------------------------------------------------
+# BLK-015 fix — grade_per_class for Tier 3A/3B multi-class sets
+# spec: 17.5 lines 6015-6032
+# DEC-050: multi_class_set parameter populates grade_per_class.
+# ---------------------------------------------------------------------------
+
+class TestGradePerClass:
+    """Tests for the multi-class severity path (Tier 3A/3B).
+
+    spec: section 17.5 lines 6015-6032
+    BLK-015 fix (DEC-050): grade_per_class must be populated for Tier 3A/3B.
+    """
+
+    def test_grade_per_class_populated_for_two_disease_classes(self):
+        """grade_per_class is a list with one entry per disease class when
+        multi_class_set has 2 disease classes.
+        spec: 17.5 lines 6015-6025 — list with class/grade/coverage_pct entries
+        """
+        result = compute_severity(
+            predicted_class=0,
+            raw_features=_make_features(disease_coverage_pct=10.0, lesion_count=5.0),
+            psv_reliability=0.80,
+            tier_label="3A",
+            multi_class_set=[0, 1],   # foliar and septoria
+        )
+        assert result.grade_per_class is not None
+        assert len(result.grade_per_class) == 2
+
+    def test_grade_per_class_entry_has_required_fields(self):
+        """Each grade_per_class entry has class, grade, coverage_pct.
+        spec: 17.5 lines 6022-6025 — schema per entry
+        """
+        result = compute_severity(
+            predicted_class=0,
+            raw_features=_make_features(disease_coverage_pct=10.0, lesion_count=5.0),
+            psv_reliability=0.80,
+            tier_label="3A",
+            multi_class_set=[0, 1],
+        )
+        for entry in result.grade_per_class:
+            assert "class" in entry
+            assert "grade" in entry
+            assert "coverage_pct" in entry
+
+    def test_grade_per_class_class_names_are_canonical_short_names(self):
+        """class field in each entry uses canonical short names.
+        spec: 17.5 line 6023 — 'class': 'foliar'
+        """
+        result = compute_severity(
+            predicted_class=0,
+            raw_features=_make_features(disease_coverage_pct=10.0, lesion_count=5.0),
+            psv_reliability=0.80,
+            tier_label="3A",
+            multi_class_set=[0, 1],   # foliar=0, septoria=1
+        )
+        class_names = {e["class"] for e in result.grade_per_class}
+        assert "foliar" in class_names
+        assert "septoria" in class_names
+
+    def test_grade_per_class_healthy_excluded(self):
+        """Healthy class (idx=5) excluded from grade_per_class entries.
+        spec: 17.6 lines 6036-6049 — healthy has no severity
+        """
+        result = compute_severity(
+            predicted_class=0,
+            raw_features=_make_features(disease_coverage_pct=10.0, lesion_count=5.0),
+            psv_reliability=0.80,
+            tier_label="3A",
+            multi_class_set=[0, 1, 5],   # foliar, septoria, healthy
+        )
+        assert result.grade_per_class is not None
+        class_names = {e["class"] for e in result.grade_per_class}
+        assert "healthy" not in class_names
+        # Only disease classes remain
+        assert len(result.grade_per_class) == 2
+
+    def test_grade_per_class_ood_excluded(self):
+        """OOD class (idx=6) excluded from grade_per_class entries.
+        spec: 17.6 lines 6044-6049 — OOD has no severity
+        """
+        result = compute_severity(
+            predicted_class=0,
+            raw_features=_make_features(disease_coverage_pct=10.0, lesion_count=5.0),
+            psv_reliability=0.80,
+            tier_label="3B",
+            multi_class_set=[0, 2, 6],   # foliar, late_blight, OOD
+        )
+        class_names = {e["class"] for e in result.grade_per_class}
+        assert "OOD" not in class_names
+        assert len(result.grade_per_class) == 2
+
+    def test_grade_per_class_none_for_single_class_set(self):
+        """grade_per_class remains None when multi_class_set has only 1 disease class.
+        spec: 17.5 — only meaningful for ≥ 2 disease classes.
+        """
+        result = compute_severity(
+            predicted_class=0,
+            raw_features=_make_features(disease_coverage_pct=10.0, lesion_count=5.0),
+            psv_reliability=0.80,
+            tier_label="3A",
+            multi_class_set=[0],   # only one disease class
+        )
+        assert result.grade_per_class is None
+
+    def test_grade_per_class_same_coverage_pct_for_all_classes(self):
+        """All entries in grade_per_class share the same coverage_pct value.
+        SPEC-INT-003 (DEC-050): PSV computes one coverage value per image;
+        same value reported for all classes in the prediction set.
+        """
+        feats = _make_features(disease_coverage_pct=10.0, lesion_count=5.0)
+        result = compute_severity(
+            predicted_class=0,
+            raw_features=feats,
+            psv_reliability=0.80,
+            tier_label="3A",
+            multi_class_set=[0, 1, 2],   # foliar, septoria, late_blight
+        )
+        coverages = {e["coverage_pct"] for e in result.grade_per_class}
+        # All entries must share the same coverage_pct
+        assert len(coverages) == 1
+
+    def test_grade_per_class_grades_differ_by_disease_threshold(self):
+        """Different diseases can have different grades for the same coverage.
+        spec: 17.3 — foliar mild_max=5%, late_blight mild_max=2%
+        At 3% coverage: foliar → mild, late_blight → moderate.
+        """
+        result = compute_severity(
+            predicted_class=0,
+            raw_features=_make_features(disease_coverage_pct=3.0, lesion_count=2.0),
+            psv_reliability=0.80,
+            tier_label="3A",
+            multi_class_set=[0, 2],   # foliar (mild_max=5%) and late_blight (mild_max=2%)
+        )
+        grades = {e["class"]: e["grade"] for e in result.grade_per_class}
+        assert grades["foliar"] == "mild"       # 3.0 < 5.0 → mild
+        assert grades["late_blight"] == "moderate"  # 3.0 >= 2.0 → moderate
+
+    def test_grade_per_class_not_none_when_no_multi_class_set(self):
+        """grade_per_class remains None when multi_class_set not provided.
+        Existing behavior must not break (test_grade_per_class_default_none).
+        spec: 17.5 — multi_class_set is optional.
+        """
+        result = compute_severity(
+            predicted_class=0,
+            raw_features=_make_features(disease_coverage_pct=10.0, lesion_count=5.0),
+            psv_reliability=0.80,
+            tier_label="3A",
+            # multi_class_set not passed
+        )
+        assert result.grade_per_class is None
+
+    def test_grade_per_class_3b_with_three_disease_classes(self):
+        """Tier 3B grade_per_class includes all 3 disease classes.
+        spec: 17.5 — applies to both 3A (2 classes) and 3B (3+ classes).
+        """
+        result = compute_severity(
+            predicted_class=4,   # mosaic argmax
+            raw_features=_make_features(disease_coverage_pct=20.0, lesion_count=3.0),
+            psv_reliability=0.80,
+            tier_label="3B",
+            multi_class_set=[1, 3, 4],   # septoria, ylcv, mosaic
+        )
+        assert result.grade_per_class is not None
+        assert len(result.grade_per_class) == 3
+        class_names = {e["class"] for e in result.grade_per_class}
+        assert class_names == {"septoria", "ylcv", "mosaic"}
+
+    def test_grade_per_class_grade_field_values_valid(self):
+        """Each grade entry has a value in {mild, moderate, severe}.
+        spec: 17.3 — valid grade values
+        """
+        result = compute_severity(
+            predicted_class=0,
+            raw_features=_make_features(disease_coverage_pct=10.0, lesion_count=5.0),
+            psv_reliability=0.80,
+            tier_label="3A",
+            multi_class_set=[0, 1],
+        )
+        valid_grades = {"mild", "moderate", "severe"}
+        for entry in result.grade_per_class:
+            assert entry["grade"] in valid_grades

@@ -398,3 +398,22 @@ Plausible candidates for "next bug surfaces when IQA wiring is fixed":
 
 These are speculation, not confirmed findings. Phase 5 audit will produce ground truth.
 
+
+
+## BLK-014 [2026-05-02] Response builder explanation.structured incomplete — 8 fields missing per S16.4
+
+- **Surfaced by:** Phase 5b spec contract audit (T-AUDIT-5b, finding F-06).
+- **Spec section:** S16.4 (Per-tier structured reasons), lines 5754-5778.
+- **Symptom:** `tomato_sandbox/response/response_builder.py` `_build_explanation_structured()` exposed 4 of the 12 fields required by S16.4. Missing under `tier_main_conditions`: `max_prob_threshold`, `margin_threshold`, `psv_reliability_threshold`, `psv_reliability_actual`, `chilli_leakage_threshold`, `chilli_leakage_actual` (6 fields). Missing entirely: `tier_sub_rule_checks` sub-object (`iqa_degraded_check`, `underpowered_class_check`). Additionally `sub_rule_id_fired` was echoing `rule_id_fired` rather than the spec's distinct `"default"` value for non-sub-rule cases.
+- **Risk:** dashboards / agronomist tooling cannot display the threshold values that explain *why* a tier was assigned.
+- **Status:** **RESOLVED 2026-05-03 by T-AUDIT-5b-fix (DEC-049).** Implementation imports threshold constants from `tier_assignment.py`, adds `_get_structured_thresholds(rule_id_fired)` helper that returns the threshold bundle for the rule that fired (Rule 7/8 thresholds populated; null for non-threshold-using rules like Rule 1). `signal_extra` parameter pattern carries `chilli_leakage_actual` + `psv_reliability_actual` from orchestrator without fattening `TierAssignment`. `sub_rule_id_fired` now distinct from `rule_id_fired` (= rule_id for 7a/7b/7c/8a/8b/8c; = "default" for non-sub-rule firings). 14 new unit tests in `test_response_builder.py` cover the new fields. Smoke-test verified live: `rule_id_fired="1"` response includes `tier_sub_rule_checks` block with both checks `false` and all 6 threshold fields present (null where Rule 1 doesn't use them).
+
+
+## BLK-015 [2026-05-02] Severity grade_per_class never populated for Tier 3A/3B
+
+- **Surfaced by:** Phase 5b spec contract audit (T-AUDIT-5b, finding F-07).
+- **Spec section:** S17.5 (Severity for multi-class sets), lines 6015-6032.
+- **Symptom:** `SeverityResult.grade_per_class` field exists in dataclass but is never populated. `compute_severity` in `tomato_sandbox/severity/grader.py` only handles single `predicted_class` parameter. For Tier 3A/3B (multi-class conformal sets), the spec contract at S17.5:6017 (*"severity is computed for each class in the set and reported as a list"*) was unmet.
+- **Risk:** for ambiguous multi-class diagnoses (Tier 3A/3B), agronomist sees only the argmax-class severity grade with no per-class breakdown for the alternative diagnoses in the conformal prediction set.
+- **Spec resolution:** SPEC-INT-003 (separate entry in `spec_changelog.md`) resolves the S17.5 example's drafting inconsistency: same PSV `coverage_pct` shared across all classes; only per-disease threshold lookup varies. PSV is a single computation per S17.2:5964.
+- **Status:** **RESOLVED 2026-05-03 by T-AUDIT-5b-fix (DEC-050).** Implementation extends `compute_severity` with `multi_class_set: Optional[list] = None` parameter (option A: extend, not new function). When `multi_class_set` contains ≥2 disease class indices (healthy/OOD excluded per S17.6), iterates per-class and populates `grade_per_class` with `[{"class", "grade", "coverage_pct"}, ...]` entries. Same `coverage_pct` echoed in every entry per SPEC-INT-003. Orchestrator (`pipeline.py`) passes `multi_class_set=list(conformal_result.prediction_set)` only when `tier_label in ("3A", "3B")`; None otherwise. 11 new unit tests in `test_severity.py` cover multi-class path including healthy/OOD exclusion, single-class set returns None, same-coverage invariant, grades-differ-by-disease-threshold.

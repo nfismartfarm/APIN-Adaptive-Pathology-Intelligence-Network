@@ -271,11 +271,14 @@ def compute_severity(
     raw_features: object,          # np.ndarray of shape (26,) from SignalCResult.raw_features
     psv_reliability: float,
     tier_label: str,
+    multi_class_set: Optional[list] = None,
 ) -> SeverityResult:
-    """Compute severity grade for a single predicted class.
+    """Compute severity grade for a single predicted class, or per-class for a set.
 
     spec: 17 (lines 5941-6083)
     DEC-044: primary grading rule, omit conditions, healthy/OOD handling.
+    BLK-015 fix (DEC-050): multi_class_set parameter populates grade_per_class
+        for Tier 3A/3B prediction sets per spec 17.5 lines 6015-6032.
 
     Args:
         predicted_class: Class index (0-6). 0-4 = disease, 5 = healthy, 6 = OOD.
@@ -284,9 +287,20 @@ def compute_severity(
         psv_reliability: SignalCResult.psv_reliability ∈ [0, 1].
         tier_label: TierAssignment.tier_label. Severity omitted for "4A" / "4B".
                     spec: 17.7 lines 6053-6056.
+        multi_class_set: Optional list of class indices for Tier 3A/3B.  When
+                         provided and contains > 1 disease class (excluding healthy
+                         and OOD), grade_per_class is populated on the returned
+                         SeverityResult with one entry per disease class.
+                         spec: 17.5 lines 6015-6032.
+                         BLK-015 fix (DEC-050): SPEC-INT-003 — the same
+                         coverage_pct is used for all classes (PSV computes a
+                         single coverage value for the image); only the threshold
+                         lookup varies per class.
 
     Returns:
         SeverityResult dataclass. grade=None when severity is omitted.
+        grade_per_class populated when multi_class_set has ≥ 2 disease classes
+        and severity is not globally omitted.
     """
     import numpy as np
     from tomato_sandbox.utils.nan_guards import guard_array
@@ -419,6 +433,48 @@ def compute_severity(
         thresholds_used=thresholds_dict,
         recommended_action=recommended_action,
     )
+
+    # ------------------------------------------------------------------
+    # BLK-015 fix (DEC-050): populate grade_per_class for Tier 3A/3B
+    # spec: 17.5 lines 6015-6032
+    # When multi_class_set is provided and has ≥ 2 disease class members
+    # (healthy idx=5 and OOD idx=6 are excluded per spec 17.6), compute
+    # the grade for each disease class using the SAME coverage_pct (SPEC-INT-003:
+    # PSV computes one coverage value per image) but per-disease thresholds.
+    # ------------------------------------------------------------------
+    if multi_class_set is not None:
+        # Filter to disease classes only (exclude healthy and OOD)
+        disease_indices = [
+            idx for idx in multi_class_set
+            if idx not in (_CLASS_HEALTHY, _CLASS_OOD)
+        ]
+        if len(disease_indices) >= 2:
+            grade_per_class = []
+            for cls_idx in disease_indices:
+                cls_thresholds = _get_thresholds(cls_idx)
+                if cls_thresholds is None:
+                    # Should not happen for disease indices 0-4, but guard anyway
+                    continue
+                # SPEC-INT-003: same coverage_pct for all classes in the set
+                # (PSV computes one coverage value for the image, not per-class)
+                per_cls_grade = _grade_from_thresholds(
+                    coverage_pct, lesion_count, cls_thresholds
+                )
+                # Use _CLASS_IDX_TO_DISEASE_KEY which already maps 0-4 to short names
+                # spec: class index conventions per import_contract.md
+                cls_name = _CLASS_IDX_TO_DISEASE_KEY.get(cls_idx, f"class_{cls_idx}")
+                grade_per_class.append({
+                    "class": cls_name,
+                    "grade": per_cls_grade,
+                    "coverage_pct": round(coverage_pct, 2),
+                })
+            if grade_per_class:
+                result.grade_per_class = grade_per_class
+                _log.debug(
+                    "severity_grade_per_class_computed",
+                    multi_class_set=disease_indices,
+                    grade_per_class=grade_per_class,
+                )
 
     _log.debug(
         "severity_computed",

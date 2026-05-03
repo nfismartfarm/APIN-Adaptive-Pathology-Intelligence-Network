@@ -1111,6 +1111,15 @@ def _build_pipeline_result(
 
     # Build spec-compliant 14-key response using response builder
     # spec: section 16.2 (full schema); DEC-045 Decision 5
+    # BLK-014 fix (DEC-049): pass signal_extra so explanation.structured can
+    # report chilli_leakage_actual and psv_reliability_actual.
+    # spec: section 16.4 lines 5765-5766
+    _chilli_leakage_val = float(
+        signal_a.chilli_leakage if hasattr(signal_a, "chilli_leakage") else 0.0
+    )
+    _psv_reliability_val = float(
+        signal_c.psv_reliability if hasattr(signal_c, "psv_reliability") else 0.0
+    )
     from tomato_sandbox.response.response_builder import build_response
     response = build_response(
         tier_result,
@@ -1119,6 +1128,10 @@ def _build_pipeline_result(
         iqa_result,
         request_metadata=request_metadata,
         model_version="tomato-sandbox-v1.0.0",
+        signal_extra={
+            "chilli_leakage_actual": _chilli_leakage_val,
+            "psv_reliability_actual": _psv_reliability_val,
+        },
     )
 
     # Merge severity into response dict's 'severity' block
@@ -1137,24 +1150,38 @@ def _build_pipeline_result(
             if hasattr(signal_c, "raw_features")
             else None
         )
+        # BLK-015 fix (DEC-050): pass multi_class_set for Tier 3A/3B so that
+        # grade_per_class is populated per spec 17.5 lines 6015-6032.
+        # spec: section 17.5 — multi-class severity for conformal prediction sets
+        _multi_cls = (
+            list(conformal_result.prediction_set)
+            if tier_result.tier_label in ("3A", "3B")
+            else None
+        )
         sev_result = compute_severity(
             predicted_class=classifier_result.combined_argmax,
             raw_features=raw_features,
             psv_reliability=float(psv_reliability),
             tier_label=tier_result.tier_label,
+            multi_class_set=_multi_cls,
         )
         # Merge computed severity into the spec severity block
         if sev_result.grade is not None:
+            sev_details: dict = {
+                "disease_coverage_pct": sev_result.disease_coverage_pct,
+                "lesion_count": sev_result.lesion_count,
+                "psv_confidence_in_severity": sev_result.psv_confidence_in_severity,
+                "thresholds_used": sev_result.thresholds_used,
+            }
             response["severity"] = {
                 "grade": sev_result.grade,
                 "human_readable": sev_result.human_readable,
-                "details": {
-                    "disease_coverage_pct": sev_result.disease_coverage_pct,
-                    "lesion_count": sev_result.lesion_count,
-                    "psv_confidence_in_severity": sev_result.psv_confidence_in_severity,
-                    "thresholds_used": sev_result.thresholds_used,
-                },
+                "details": sev_details,
             }
+            # BLK-015: include grade_per_class when populated (Tier 3A/3B)
+            # spec: 17.5 lines 6015-6032
+            if sev_result.grade_per_class is not None:
+                response["severity"]["grade_per_class"] = sev_result.grade_per_class
         else:
             # grade=None means severity omitted; keep null block from builder
             response["severity"] = {

@@ -81,3 +81,21 @@ The two path corrections in spec Section 2.6 (`model2_production.pt` actual loca
 - **User approval (verbatim, 2026-05-01 message Q4):** *"Body-wins decisions: single SPEC-INT-002 entry covering all 7 cases. Same root cause, same resolution rule, batch documentation. Format: header explaining the pattern + table listing scenario, subsection, body tier, rule fired, spec lines. Reference Fix-16 / BLK-004 Defect-15.3. Each case has its inline comment in the test file already; SPEC-INT-002 is the audit-trail anchor."*
 - **Author subagent:** main-thread scribe per DEC-011 (encoder applied the rule autonomously; this entry is the audit-trail anchor).
 - **Status:** RESOLVED via interpretation. Spec text unchanged. Encoder output is the binding artifact; this entry is the audit-trail anchor for the 7-case batch. Future spec author may correct subsection headings or add explicit per-scenario "exception" markers; if so, that becomes a SPEC-CHG-NNN entry.
+
+
+## SPEC-INT-003 [2026-05-03] S17.5 example coverage_pct drafting inconsistency
+
+- **Spec section:** S17.5 (Severity for multi-class sets), lines 6015-6032.
+- **Inconsistency:** Spec example at lines 6022-6025 shows different `coverage_pct` per class:
+  ```json
+  "grade_per_class": [
+    { "class": "foliar", "grade": "moderate", "coverage_pct": 11.2 },
+    { "class": "septoria", "grade": "mild", "coverage_pct": 4.8 }
+  ]
+  ```
+  This contradicts the normative text at S17.2:5964 — *"severity is a PSV-only computation"* — which mandates a single PSV computation with shared inputs (singular `disease_coverage_pct`).
+- **Resolution per main-thread spec read (Phase 5b):** **(α) interpretation confirmed:** the same `coverage_pct` value is reused across all classes in `grade_per_class`. Only the per-disease threshold lookup (S17.3 tabular thresholds) varies per class. The S17.5 example's different per-class values (11.2 vs 4.8) are **drafting noise**, not a contract — the author wrote two visually-distinct numbers for example readability without realizing it implied per-class PSV recomputation (which contradicts S17.2/S17.3/S17.4 normative text).
+- **Implementation conformance:** T-AUDIT-5b-fix per DEC-050 implements the per-class loop with shared `coverage_pct`. Each entry in `grade_per_class` echoes the same PSV-computed value; only the `grade` differs per class via threshold lookup. Verified by anti-cheat Check 9C (`test_grade_per_class_same_coverage_pct_for_all_classes`).
+- **Spec body update target (deferred to T-EARLY-MP):** the S17.5 example should be amended to show consistent `coverage_pct` across classes (e.g. both 11.2) with grade differing only by threshold table. This eliminates the documentation/example inconsistency.
+- **Pattern:** this is the third SPEC-INT entry; the project's recurring-cause pattern is "spec examples drift from spec normative text." SPEC-INT-001 was a v3 priors vector intra-spec conflict; SPEC-INT-002 was Section 15 scenario-body-vs-subsection conflicts. SPEC-INT-003 follows the same pattern: examples were authored to be illustrative, not normative.
+- **No implementation pause required.** No further action needed beyond eventual spec body cleanup.

@@ -34,6 +34,21 @@ from typing import TYPE_CHECKING, Optional
 
 from tomato_sandbox.utils.logging import get_logger
 
+# BLK-014 fix (DEC-049): import threshold constants from tier_assignment so that
+# explanation.structured.tier_main_conditions reports the exact thresholds the
+# rule engine evaluated against, rather than hard-coded duplicates.
+# spec: section 16.4 lines 5759-5775
+from tomato_sandbox.tier.tier_assignment import (
+    _RULE7_MAX_AT_LEAST,
+    _RULE7_MARGIN_AT_LEAST,
+    _RULE7_PSV_RELIABILITY_AT_LEAST,
+    _RULE7_CHILLI_STRICT_BELOW,
+    _RULE8_MAX_AT_LEAST,
+    _RULE8_MARGIN_AT_LEAST,
+    _RULE8_PSV_RELIABILITY_AT_LEAST,
+    _RULE8_CHILLI_STRICT_BELOW,
+)
+
 if TYPE_CHECKING:
     from tomato_sandbox.tier.tier_assignment import TierAssignment
     from tomato_sandbox.classifier.hierarchical_classifier import ClassifierResult
@@ -76,6 +91,64 @@ _CLASS_HUMAN_NAMES: dict[int, str] = {
 # Dangerous disease indices — those that can trigger Tier 5 argmax bullet
 # spec: section 14.3 lines 3788-3791 — "late_blight, mosaic, ylcv"
 _DANGEROUS_CLASS_INDICES: frozenset[int] = frozenset({2, 3, 4})
+
+# ---------------------------------------------------------------------------
+# Structured-block threshold lookup
+# BLK-014 fix (DEC-049): per spec 16.4 lines 5759-5768, tier_main_conditions
+# must report the thresholds used by the rule that fired.  Rules 7 and 8 have
+# distinct threshold bundles; other rules use sentinel None for thresholds they
+# don't evaluate.
+# spec: section 16.4 lines 5758-5778
+# ---------------------------------------------------------------------------
+
+# Sub-rule ids that belong to Rule 7 and Rule 8 families.
+# The rule_id_fired for these rules is the sub-rule id itself (e.g. "7a", "8b").
+_RULE7_SUB_RULES: frozenset[str] = frozenset({"7a", "7b", "7c"})
+_RULE8_SUB_RULES: frozenset[str] = frozenset({"8a", "8b", "8c"})
+
+# Rules that have sub-rules (i.e. rule_id_fired IS the sub-rule id)
+_RULES_WITH_SUB_IDS: frozenset[str] = _RULE7_SUB_RULES | _RULE8_SUB_RULES
+
+
+def _get_structured_thresholds(rule_id_fired: str) -> dict:
+    """Return the threshold bundle for explanation.structured.tier_main_conditions.
+
+    BLK-014 fix (DEC-049): threshold values come from tier_assignment constants,
+    not hard-coded literals.  spec: section 16.4 lines 5759-5775.
+
+    Returns a dict with:
+        max_prob_threshold          — None if rule does not use this
+        margin_threshold            — None if rule does not use this
+        psv_reliability_threshold   — None if rule does not use this
+        chilli_leakage_threshold    — None if rule does not use this
+    """
+    # Rule 7 family: all four thresholds apply
+    if rule_id_fired in _RULE7_SUB_RULES:
+        return {
+            "max_prob_threshold": _RULE7_MAX_AT_LEAST,
+            "margin_threshold": _RULE7_MARGIN_AT_LEAST,
+            "psv_reliability_threshold": _RULE7_PSV_RELIABILITY_AT_LEAST,
+            "chilli_leakage_threshold": _RULE7_CHILLI_STRICT_BELOW,
+        }
+    # Rule 8 family: all four thresholds apply (relaxed values)
+    if rule_id_fired in _RULE8_SUB_RULES:
+        return {
+            "max_prob_threshold": _RULE8_MAX_AT_LEAST,
+            "margin_threshold": _RULE8_MARGIN_AT_LEAST,
+            "psv_reliability_threshold": _RULE8_PSV_RELIABILITY_AT_LEAST,
+            "chilli_leakage_threshold": _RULE8_CHILLI_STRICT_BELOW,
+        }
+    # Rules 1, 3, 4, 5, 6, catch_all_low_confidence: no max/margin thresholds
+    # (Rule 4 uses max_prob < 0.45 but that threshold belongs to tier_assignment;
+    #  Rule 3 uses psv_reliability and chilli_leakage; reported as None here
+    #  because these rules don't produce a Tier 1/2 classification via this path)
+    return {
+        "max_prob_threshold": None,
+        "margin_threshold": None,
+        "psv_reliability_threshold": None,
+        "chilli_leakage_threshold": None,
+    }
+
 
 # ---------------------------------------------------------------------------
 # Tier label → human-readable string mapping
@@ -435,6 +508,7 @@ def build_response(
     request_metadata: Optional[dict] = None,
     route_ambiguous_to_queue: bool = _DEFAULT_ROUTE_AMBIGUOUS,
     model_version: str = "tomato-sandbox-v1.0.0",
+    signal_extra: Optional[dict] = None,
 ) -> dict:
     """Build the JSON-serializable response dict.
 
@@ -460,6 +534,12 @@ def build_response(
                                   spec: section 16.8 line 5855 — default False
         model_version: Model version string.
                        spec: section 16.2 line 5704
+        signal_extra: Optional dict carrying signal-layer values that are not
+                      present on the classifier/conformal/iqa result objects but
+                      are required by explanation.structured.  Expected keys:
+                        "chilli_leakage_actual"   (float) — Signal A chilli leak
+                        "psv_reliability_actual"  (float) — Signal C PSV reliability
+                      BLK-014 fix (DEC-049): spec 16.4 lines 5765-5766.
 
     Returns:
         JSON-serializable dict matching Section 16.2 schema.
@@ -549,15 +629,67 @@ def build_response(
     )
 
     # spec: section 16.4 lines 5752-5778 — structured reasons for machine tools
+    # BLK-014 fix (DEC-049): add all 8 missing fields to match spec S16.4 example.
+
+    # Resolve signal_extra values (chilli_leakage_actual, psv_reliability_actual)
+    # These come from Signal A and Signal C respectively and are passed in via
+    # signal_extra by the orchestrator (pipeline.py).
+    # spec: section 16.4 lines 5765-5766
+    _sig_extra = signal_extra or {}
+    chilli_leakage_actual: Optional[float] = _sig_extra.get("chilli_leakage_actual")
+    psv_reliability_actual: Optional[float] = _sig_extra.get("psv_reliability_actual")
+
+    # Determine sub_rule_id_fired:
+    # - For rules with sub-rule ids (7a, 7b, 7c, 8a, 8b, 8c): sub_rule_id_fired
+    #   is the sub-rule id itself (same as rule_id_fired, since rule_id_fired IS
+    #   the sub-rule id for these rules per tier_assignment implementation).
+    # - For all other rules (1, 3, 4, 5, 6, catch_all_low_confidence): use "default"
+    #   because they have no sub-rule branching.
+    # spec: section 16.4 line 5758 — "sub_rule_id_fired": "default" in spec example
+    #   (spec example shows Rule 7c→Tier1, which is the "default" sub-rule)
+    if rule_id_fired in _RULES_WITH_SUB_IDS:
+        sub_rule_id_fired: str = rule_id_fired   # e.g. "7a", "7b", "8c"
+    else:
+        sub_rule_id_fired = "default"
+
+    # Threshold bundle for the rule that fired
+    # BLK-014: previously missing from structured_block
+    _thresholds = _get_structured_thresholds(rule_id_fired)
+
+    # Sub-rule checks: iqa_degraded_check fires for sub-rules 7a and 8a;
+    # underpowered_class_check fires for sub-rules 7b and 8b.
+    # spec: section 16.4 lines 5770-5773 — tier_sub_rule_checks sub-object
+    iqa_degraded_check: bool = rule_id_fired in {"7a", "8a"}
+    underpowered_class_check: bool = rule_id_fired in {"7b", "8b"}
+
     structured_block = {
-        "rule_id_fired": rule_id_fired,                     # spec: 16.4 line 5757
-        "sub_rule_id_fired": rule_id_fired,                 # spec: 16.4 line 5758
+        "rule_id_fired": rule_id_fired,                          # spec: 16.4 line 5757
+        "sub_rule_id_fired": sub_rule_id_fired,                  # spec: 16.4 line 5758
         "tier_main_conditions": {
-            # spec: section 16.4 lines 5759-5775
+            # spec: section 16.4 lines 5759-5775 — ALL fields per S16.4 example
+            "max_prob_threshold": _thresholds["max_prob_threshold"],          # BLK-014
             "max_prob_actual": round(float(combined_max_prob), 4),
+            "margin_threshold": _thresholds["margin_threshold"],              # BLK-014
             "margin_actual": round(float(combined_margin), 4),
+            "psv_reliability_threshold": _thresholds["psv_reliability_threshold"],  # BLK-014
+            "psv_reliability_actual": (                                       # BLK-014
+                round(float(psv_reliability_actual), 4)
+                if psv_reliability_actual is not None
+                else None
+            ),
+            "chilli_leakage_threshold": _thresholds["chilli_leakage_threshold"],    # BLK-014
+            "chilli_leakage_actual": (                                        # BLK-014
+                round(float(chilli_leakage_actual), 4)
+                if chilli_leakage_actual is not None
+                else None
+            ),
             "iqa_decision": iqa_result.decision,
             "set_size": prediction_set_size,
+        },
+        "tier_sub_rule_checks": {                                             # BLK-014
+            # spec: section 16.4 lines 5770-5773
+            "iqa_degraded_check": iqa_degraded_check,
+            "underpowered_class_check": underpowered_class_check,
         },
         "tier5_evaluation": {
             # spec: section 16.4 lines 5774-5777
