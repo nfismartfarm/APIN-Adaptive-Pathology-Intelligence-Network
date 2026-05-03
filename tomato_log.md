@@ -936,3 +936,54 @@ All 15 checks CLEAR including 7 component-specific checks:
 - ⏳ Tomato smoke retest at Phase 6 close
 - ⏳ BLK-006/007/008 disposition notes during Phase 6 close
 
+
+
+## [2026-05-04] Phase 6 Component A CLOSED — F.0 validation script
+
+### Dispatch outcome
+T-PHASE6-A (`implementer` subagent) returned with **CLOSE** status. DEC-053 logged at line 1472. 3 files (1 new, 1 updated, 1 new test). 42 unit tests pass. Cumulative 1239+1 skip.
+
+### Files
+| File | Bytes | Purpose |
+|---|---|---|
+| `tomato_sandbox/validation/run_f0.py` | 31,625 | Validation script: `run_f0_validation()` drives held-out set through `predict_single`, computes confusion matrix + conformal coverage (Wilson CI) + severity validation + Tier 4B disposition; writes JSON report |
+| `tomato_sandbox/validation/__init__.py` | 1,160 | UPDATED to add `run_f0_validation` to re-exports alongside Component B's exports |
+| `tomato_sandbox/tests/unit/test_run_f0.py` | 30,247 | 42 unit tests covering CSV loading, response parsers, schema, Tier 4B disposition, conformal coverage, severity skip, confusion matrix, calibration read-back, error handling, Wilson CI |
+
+### Verification (main-thread independent)
+- ✓ Section 15: 135/135 PRESERVED
+- ✓ Sacred: 10/10 PASS
+- ✓ Cumulative venv: 1197 → **1239 pass + 1 skip** (+42 from Component A; 1 carry-forward conditional skip from B)
+- ✓ DEC-038: zero implementer commits since `7e5e2f5`
+- ✓ DEC-053 logged at line 1472 of tomato_decisions.md
+- ✓ No torch/checkpoint imports in run_f0.py (β interpretation respected)
+
+### Anti-cheat: 0 HIGH, 0 MEDIUM, 0 LOW (second consecutive clean Phase 6 dispatch)
+All 16 checks CLEAR including 8 component-specific:
+- No model checkpoint loading (β preserved)
+- labeled_data_path parameter (no hardcoding)
+- Tests use tmp_path (zero writes to production calibration dir)
+- predict_single module-level import wrapped in try/except ImportError; mock-patchable
+- Tier 4B disposition logic distinguishes degraded vs real-failure; `is_pre_f0_mode` flag tracks transition
+- Conformal formula `n_covered / n_total` verbatim S13.6; unknown classes explicitly skipped
+- Severity skip semantics explicit (`status: "skipped"`, `reason: "skipped_no_ground_truth"`)
+- Calibration read-back surfaces placeholder values in `metadata.calibration_artifacts`
+
+### Architectural choices logged in DEC-053
+1. CSV manifest format compatible with Component B's expected layout
+2. `predict_single` imported at module level via try/except (different from B's deferred-in-function pattern; chosen to enable mock.patch)
+3. Wilson CI added as informational alongside empirical coverage rate (spec doesn't mandate but doesn't forbid; documented choice)
+4. Tier 4B disposition tracking: 4 counters + `is_pre_f0_mode` flag
+5. Severity validation skips when no ground-truth grades; explicit reason in report
+6. Output dir defaults to `phase_f0_calibration/`; overridable
+7. Calibration_dir read-back captures placeholder values for Phase F.0 distinguishability
+8. (β) interpretation honored: zero model loading
+9. Per-image error rows logged when `predict_single` raises
+
+### Phase 6 progress
+- ✅ Component B (calibration) CLOSED with DEC-052
+- ✅ Component A (validation script) CLOSED with DEC-053
+- ⏳ Component C (real model loading lift) → DEC-054 + DEC-055/056/... awaits user approval
+- ⏳ Tomato smoke retest at Phase 6 close
+- ⏳ BLK-006/007/008 disposition notes
+

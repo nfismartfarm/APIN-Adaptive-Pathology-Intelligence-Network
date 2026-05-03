@@ -1466,3 +1466,73 @@ No sacred files modified. No Section 15 tests modified.
 
 - **Impact:** 3 new files created: `tomato_sandbox/validation/__init__.py`, `tomato_sandbox/validation/fit_calibration.py`, `tomato_sandbox/tests/unit/test_fit_calibration.py`.
 - **User approval:** pre-allocated DEC-052 per T-PHASE6-B task dispatch.
+
+---
+
+## DEC-053 [2026-05-03] T-PHASE6-A: F.0 validation script — run_f0.py design decisions
+
+- **Spec sections:** 29 (F.0 validation suite), 13.6 (monthly re-fit policy / coverage target), 17.3 (per-disease severity thresholds), 17.5 (multi-class severity), 16.2 (response schema)
+- **Pre-allocated DEC:** DEC-053 (DEC-054+ reserved for T-PHASE6-C)
+- **Phase:** 6 Component A — (β) interpretation per DEC-047
+
+### Decision 1 — Module placement: validation/run_f0.py (not flat run_f0.py)
+
+- Task card says: "If S29 specifies a flat path (e.g. tomato_sandbox/run_f0.py), create both: canonical at the spec path + re-export shim at the sub-package path."
+- Spec S29 does NOT specify a flat module path; it specifies a conceptual validation procedure. The file name `run_f0.py` is a task-card construct.
+- Resolution: canonical placement at `tomato_sandbox/validation/run_f0.py` (in the validation sub-package alongside fit_calibration.py). No flat alias shim needed because spec imposes no flat-path import contract.
+- `validation/__init__.py` is updated to re-export `run_f0_validation` alongside the fit_calibration exports.
+
+### Decision 2 — Labeled data CSV layout: same as DEC-052 Decision 6
+
+- `run_f0_validation` reads the same CSV schema as `run_full_calibration`:
+  columns: `image_path`, `true_class`, `split`, (optional) `true_severity`, (optional) `is_confirmed_tomato`.
+- Rows with `split == "test"` are used for the F.0 test-set evaluation (spec S29.3 Step 3).
+- Rows with `split == "calibration"` are skipped by the validation pass (they're calibration-set rows, consumed by Component B's `run_full_calibration`). If caller wants to validate on calibration rows, they can set split="test" in their manifest.
+- The manifest is labeled_data_path (CSV file). No directory-layout format; CSV is the canonical format per DEC-052 Decision 6.
+
+### Decision 3 — Orchestrator import path: use orchestrator.orchestrator shim
+
+- `run_full_calibration` already uses `from tomato_sandbox.orchestrator.orchestrator import predict_single`.
+- `run_f0.py` uses the same import path for consistency: `from tomato_sandbox.orchestrator.orchestrator import predict_single`.
+- `PipelineContext` is imported from `tomato_sandbox.orchestrator.pipeline` (the canonical module per DEC-042), same as Component B.
+
+### Decision 4 — Tier 4B disposition tracking (beta-mode vs real-failure)
+
+- In pre-F.0 mode (all signals in degraded mode), predict_single returns a Tier 4B response where:
+  - `tier.label == "4B"` (string)
+  - `explanation.structured.rule_id_fired == "pipeline_failure"` (or equivalent sentinel Rule 1)
+  - All three signal `forward_succeeded` flags are False (per pipeline.py: `_make_sentinel_classifier_result` when all signals fail)
+- Detection logic: check `response.get("tier", {}).get("label") == "4B"` AND `response.get("explanation", {}).get("structured", {}).get("rule_id_fired") in {"pipeline_failure", "1"}`.
+- `tier_4b_count_degraded`: Tier 4B where signals inspection (if available in response) shows all forward_succeeded=False, OR where pipeline produces the "all_signals_failed" sentinel.
+- Since the response dict (S16.2) does not expose raw signal forward_succeeded flags directly, we detect degraded-mode Tier 4B by inspecting the `rule_id_fired` field: "pipeline_failure" → Rule 1 → degraded-mode 4B per spec S14.5.
+
+### Decision 5 — Conformal coverage computation: empirical fraction (no Wilson CI in spec S29)
+
+- Spec S13.6 and S29.4 specify empirical conformal coverage as a metric. Spec does NOT mandate Wilson confidence intervals for the validation report (unlike task card suggestion). Task card says "Wilson interval is standard; honor whatever S29 mandates."
+- S29 says: "Conformal empirical coverage | 88-92% | 85-95%" — it is a quality bar, not a CI specification. S13.3 mentions the binomial SE for the 40-sample calibration set but does not mandate CI in the F.0 report.
+- Resolution: report both `coverage_rate` (empirical) AND `coverage_ci_95_wilson` (Wilson 95% CI) in the JSON report. The Wilson CI is informational per the spec's S13.3 note about finite-sample variation. This is additive (no spec contradiction).
+- Wilson interval formula: p±z*sqrt(p*(1-p)/n) adjusted per Wilson scoring, where z=1.96 for 95% CI.
+
+### Decision 6 — Severity validation: skip when no ground-truth severity in manifest
+
+- If the CSV has no rows with a non-empty `true_severity` column, the `severity_validation` block in the report is `{"status": "skipped", "reason": "skipped_no_ground_truth"}`.
+- If rows have `true_severity` but no disease rows (only healthy/OOD), same skip.
+- Per-disease severity validation: compare the `severity.grade` from the pipeline response against `true_severity` from the CSV. Report per-disease accuracy.
+
+### Decision 7 — Calibration artifacts surfaced in report metadata
+
+- The report `metadata.calibration_artifacts` block reads conformal_tau.json and psv_standardization.json from `calibration_dir` (or the default phase_f0_calibration/) and includes their contents verbatim (or "not_found" sentinel if files don't exist).
+- This allows the validation report to document which calibration state was in force during the validation run.
+
+### Decision 8 — Output: validation_report_<ISO>.json to output_dir
+
+- Default output_dir = phase_f0_calibration/ (same as Component B, spec S29.5 mentions reports/).
+- Timestamp format: `datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")` for filesystem-safe ISO-ish names.
+- Tests use tmp_path; never write to production calibration dir from tests.
+
+### Decision 9 — No torch imports, no model checkpoint loading
+
+- Per DEC-047 (β) interpretation: run_f0.py imports predict_single from the orchestrator only. Zero references to torch.load, model3_production_v3.pt, or sp_lora_epoch13_f10.9113_PRESERVED.pt.
+
+- **Impact:** 3 files created/modified: `tomato_sandbox/validation/run_f0.py` (new), `tomato_sandbox/tests/unit/test_run_f0.py` (new), `tomato_sandbox/validation/__init__.py` (updated).
+- **User approval:** pre-allocated DEC-053 per T-PHASE6-A task dispatch.
