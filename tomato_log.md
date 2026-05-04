@@ -987,3 +987,80 @@ All 16 checks CLEAR including 8 component-specific:
 - ⏳ Tomato smoke retest at Phase 6 close
 - ⏳ BLK-006/007/008 disposition notes
 
+
+
+## [2026-05-04] M5 meta-finding logged: spec body authoritative for semantics; sacred + DEC ledger authoritative for paths
+
+**Trigger:** Phase 6 Component C dispatch surfaced two spec literal filename drifts (S20.5 step 4 says `model2_production.pt`; sacred + DEC say `model3_production_v3.pt` — see SPEC-INT-004). Loading the spec literal would have catastrophically misclassified every tomato input as brassica disease.
+
+**M5 rule:** when spec literals (filenames, paths, magic constants) drift from project artifact ground truth (sacred manifest, DEC ledger entries), the project artifact wins. Spec body remains authoritative for SEMANTICS (load order, fail-fast, warmup, contract shape, threshold values where they're not in sacred/DEC). Implementer dispatch prompts for any path-touching work must:
+1. Read the spec body for semantics
+2. Read the sacred manifest + DEC ledger for paths
+3. When they disagree, use sacred/DEC and document the drift via SPEC-INT entry
+4. Inline-cite the override (e.g., `# corrected path per M5; spec literal was X but sacred manifest says Y`)
+
+**Pattern context:** complements existing meta-findings:
+- M1: Real-subprocess testing surfaces what TestClient mocks hide
+- M2: Mocking integration boundaries hides integration bugs
+- M3: Fix-cycle has unbounded depth when integration was previously hidden
+- M4: Auditor false positives from spec-quote comments + type-shape paraphrase
+
+M5 is structurally important because it codifies a precedence rule that all future implementer dispatches must honor: SACRED + DEC > spec literal for paths.
+
+**Where it landed:** DEC-054 Decision 2-4 (Component C primary architectural choice); SPEC-INT-004 (spec_changelog.md); this entry (tomato_log.md). Anti-cheat Check 10A (Component C) verified the override was applied correctly.
+
+
+
+## [2026-05-04 close] Phase 6 CLOSED — real model loading lift complete; Phase F.0 dry-run authorized
+
+### Phase 6 outcome
+All three Phase 6 components delivered cleanly:
+- ✅ Component B (DEC-052): F.0 calibration script — anti-cheat 0/0/0 (cleanest dispatch yet)
+- ✅ Component A (DEC-053): F.0 validation script — anti-cheat 0/0/0 (second consecutive clean)
+- ✅ Component C (DEC-054 + DEC-055/056/057/058): Real model loading lift — anti-cheat 0 HIGH, 0 MEDIUM, 1 LOW (DEC-058 covers 2 sub-bugs; main thread accepted)
+
+### Empirical lift gate: PASSED
+- Real model versions in `/info`: `v3_version="full_v3_soup"`, `lora_version="sp_lora_epoch13_f10.9113"`, `psv_version="psv_function_based_v1"`, `classifier_version="sentinel_pre_f0"` (Phase F.0 territory)
+- Real-image POST `/predict` (late_blight tomato): HTTP 200, `tier.label="4A"` (NOT "4B-degraded"), `rule_id_fired="4"`
+- Component A integration: `is_pre_f0_mode = False` (real signals running; sentinel classifier consumes their outputs)
+- Sacred 10/10 PASS unchanged; 9 sacred-file SHA256 hashes match manifest byte-for-byte (verified in Component C anti-cheat Check 4)
+
+### BLK-006/007/008 RESOLVED
+All three Phase 2 planning-phase OPEN BLKs closed with disposition notes:
+- BLK-006 (Section 12 Platt parameter list): RESOLVED — Phase 4 T-IMPL-4b read spec body (DEC-052 + classifier hierarchical_classifier.py); Phase 5b spec-citation density audit confirmed; Phase 6 Component C verified empirically
+- BLK-007 (Section 10 PSV 26-feature list): RESOLVED — Phase 4 T-IMPL-3c (DEC-036) implemented all 26 features in canonical order; Phase 6 verified empirically (46 lesions detected on real_late_blight)
+- BLK-008 (Section 9 prototype_blend coefficients): RESOLVED — Phase 4 T-IMPL-3b (DEC-035) implemented per spec body; Phase 6 verified (LoRA max_prob 0.9867 on real image)
+
+### SPEC-INT-004 logged
+S20.5 startup-step filename drifts:
+- Drift 1 (HIGH-risk): step 4 says `model2_production.pt` (brassica weights would catastrophically misclassify); sacred manifest correctly identifies `model3_production_v3.pt` as the v3 tomato model
+- Drift 2 (LOW): step 8 says `tomato_calibration.json`; implementation uses per-artifact JSON layout (`conformal_tau.json` etc.) per DEC-045
+- Resolution: M5 rule applied — sacred + DEC paths win over spec literals
+
+### M5 meta-finding logged
+Spec body authoritative for semantics; sacred + DEC ledger authoritative for paths. Codifies precedence rule for all future implementer dispatches that touch paths.
+
+### Cumulative metrics post-Phase-6
+| Metric | Value |
+|---|---|
+| Unit tests under venv | 999 PASS (986 prev + 13 from test_model_loaders.py) |
+| Section 15 integration | 135/135 PASS |
+| E2e tests | 29 PASS |
+| Net-new from Phase 6 | +102 tests across components B, A, C |
+| **Grand total under venv** | **1252 PASS + 1 skip** |
+| DECs logged | DEC-001..058 (+8 from Phase 6) |
+| BLKs filed | 15 (all RESOLVED — 0 deferred, 0 OPEN) |
+| SPEC-INT entries | 4 (+SPEC-INT-004) |
+| M-series meta-findings | M1-M5 (+M5) |
+| Phase status | Phase 6 CLOSED; Phase F.0 dry-run authorized |
+
+### Phase F.0 dry-run forward outlook
+Run `run_full_calibration` from Component B against real labeled held-out data. Produces calibrated artifacts to replace placeholders:
+- `conformal_tau.json` real τ
+- `classifier_stage1.pkl`, `classifier_stage2.pkl` Stage 1/2 weights
+- `classifier_platt.json` per-disease Platt parameters
+- `severity_thresholds.json` per-disease calibrated against agronomist labels
+- `chilli_leakage_tau.json` OOD threshold
+
+After Phase F.0 dry-run, classifier produces non-uniform output → Tiers 1/2/3A/3B/3C/3D become reachable. Real prediction quality measurable.
+

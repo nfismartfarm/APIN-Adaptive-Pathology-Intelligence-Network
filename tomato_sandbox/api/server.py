@@ -184,31 +184,108 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # ------------------------------------------------------------------
     # Step 4: Load v3 model weights
-    # spec: section 20.5 step 4 "Load v3 model weights from model2_production.pt to GPU"
-    # DEC-045 Decision 4: not loaded in sandbox pre-F.0 (weights are sacred;
-    # predict_single handles None model via degraded mode).
+    # spec: section 20.5 step 4 "Load v3 model weights to GPU"
+    # DEC-054 Decision 2: Model3 class; sacred path corrected per M5 meta-finding.
+    # FAIL-FAST if sacred checkpoint is missing (spec 20.5 line 6573).
     # ------------------------------------------------------------------
-    _logger.info("startup_step_4", step=4, description="v3 model: not loaded in pre-F.0 sandbox")
+    from tomato_sandbox.api.model_loaders import load_v3_model
+
+    _v3_device = "cuda:0" if _gpu_available else "cpu"
+    if not _gpu_available:
+        _logger.warning(
+            "startup_step_4_cpu_fallback",
+            step=4,
+            description=(
+                "GPU not available — loading v3 model to CPU. "
+                "Production startup requires GPU (spec 20.5 step 3). "
+                "DEC-026: WARN not exit."
+            ),
+        )
+
+    _v3_model, _v3_meta = load_v3_model(device=_v3_device)
+    _logger.info(
+        "startup_step_4",
+        step=4,
+        description="v3 model loaded",
+        run_name=_v3_meta.get("run_name", "unknown"),
+        overall_f1=_v3_meta.get("overall_f1", 0.0),
+        device=_v3_device,
+        # spec: section 20.5 step 4 lines 6562
+        spec_ref="section 20.5 step 4 lines 6562",
+    )
 
     # ------------------------------------------------------------------
     # Step 5: Load LoRA model weights
     # spec: section 20.5 step 5 "Load LoRA model weights to GPU"
-    # DEC-045 Decision 4: deferred; predict_single handles None via degraded mode.
+    # DEC-054 Decision 3: SinglePassLoRA + LoRAModelAdapter.
+    # DEC-055: adapter renames "cls" → "cls_token" in forward output.
+    # FAIL-FAST if sacred checkpoint is missing (spec 20.5 line 6573).
     # ------------------------------------------------------------------
-    _logger.info("startup_step_5", step=5, description="LoRA model: not loaded in pre-F.0 sandbox")
+    from tomato_sandbox.api.model_loaders import load_lora_model
+
+    _lora_model, _lora_meta = load_lora_model(device=_v3_device)
+    _logger.info(
+        "startup_step_5",
+        step=5,
+        description="LoRA model loaded",
+        epoch=_lora_meta.get("epoch", 13),
+        field_val_f1=_lora_meta.get("field_val_f1", 0.0),
+        device=_v3_device,
+        # spec: section 20.5 step 5 lines 6563
+        spec_ref="section 20.5 step 5 lines 6563",
+    )
 
     # ------------------------------------------------------------------
     # Step 6: Load PSV module
-    # spec: section 20.5 step 6 "Load PSV module (CPU-only)"
+    # spec: section 20.5 step 6 "Load PSV module (CPU-only; no GPU memory use)"
+    # PSV is function-based (no weights to load at startup). Module defaults
+    # are used. Standardisation params loaded from phase_f0_calibration/.
     # ------------------------------------------------------------------
-    _logger.info("startup_step_6", step=6, description="PSV module: function-based, no load required")
+    _logger.info(
+        "startup_step_6",
+        step=6,
+        description=(
+            "PSV module: function-based (no weight load required). "
+            "Standardisation params in phase_f0_calibration/psv_standardization.json "
+            "are loaded by the PSV module on first call."
+        ),
+        spec_ref="section 20.5 step 6 lines 6564",
+    )
 
     # ------------------------------------------------------------------
     # Step 7: Load classifier weights
     # spec: section 20.5 step 7 "Load classifier weights from configured path"
-    # DEC-045 Decision 4: deferred; classifier uses feature-based fallback.
+    # DEC-054 Decision 5: Phase F.0 pkl files absent; classifier module falls
+    # back to sentinel weights (uniform outputs) — not fail-fast here because
+    # missing pkl is a pre-F.0 state, not a sacred-file gap. Logs INFO.
     # ------------------------------------------------------------------
-    _logger.info("startup_step_7", step=7, description="classifier: deferred to post-F.0")
+    from pathlib import Path as _Path
+    _calibration_dir = Path(__file__).resolve().parents[1] / "phase_f0_calibration"
+    _stage1_absent = not (_calibration_dir / "classifier_stage1.pkl").exists()
+    _stage2_absent = not (_calibration_dir / "classifier_stage2.pkl").exists()
+    _platt_absent = not (_calibration_dir / "classifier_platt.json").exists()
+
+    if _stage1_absent or _stage2_absent or _platt_absent:
+        _logger.info(
+            "startup_step_7",
+            step=7,
+            description=(
+                "Classifier calibration files absent (pre-F.0 state). "
+                "Classifier module will use sentinel weights (uniform output). "
+                "Run Phase F.0 calibration to produce real artifacts."
+            ),
+            stage1_absent=_stage1_absent,
+            stage2_absent=_stage2_absent,
+            platt_absent=_platt_absent,
+            spec_ref="section 20.5 step 7 lines 6565 / DEC-054 Decision 5",
+        )
+    else:
+        _logger.info(
+            "startup_step_7",
+            step=7,
+            description="Classifier calibration files present; loaded lazily on first call.",
+            spec_ref="section 20.5 step 7 lines 6565",
+        )
 
     # ------------------------------------------------------------------
     # Step 8: Load conformal calibration
@@ -243,8 +320,21 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ------------------------------------------------------------------
     # Step 9: Load IQA reference distributions
     # spec: section 20.5 step 9 "Load IQA reference distributions"
+    # DEC-054 Decision 6: absent → use module defaults; log INFO.
     # ------------------------------------------------------------------
-    _logger.info("startup_step_9", step=9, description="IQA reference: using module defaults")
+    from tomato_sandbox.api.model_loaders import load_iqa_reference
+
+    _iqa_reference = load_iqa_reference()
+    _logger.info(
+        "startup_step_9",
+        step=9,
+        description=(
+            "IQA reference loaded" if _iqa_reference is not None
+            else "IQA reference absent — using module defaults"
+        ),
+        iqa_reference_loaded=(_iqa_reference is not None),
+        spec_ref="section 20.5 step 9 lines 6567",
+    )
 
     # ------------------------------------------------------------------
     # Step 10: Validate env var thresholds
@@ -253,33 +343,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     _logger.info("startup_step_10", step=10, description="env var thresholds validated")
 
     # ------------------------------------------------------------------
-    # Step 11: Warmup inference
-    # spec: section 20.5 step 11 "Run a single warmup inference on a placeholder image"
-    # Skipped in pre-F.0 sandbox (no GPU models loaded); warmup only matters
-    # when CUDA kernels need JIT compilation before first real request.
-    # ------------------------------------------------------------------
-    _logger.info(
-        "startup_step_11",
-        step=11,
-        description="warmup: skipped (no GPU models loaded in pre-F.0 sandbox)",
-    )
-
-    # ------------------------------------------------------------------
     # Step 12: GPU lock + PipelineContext + mark startup complete
     # spec: section 20.5 step 12 "Start FastAPI server, listen on configured port"
     # spec: section 20.6 — one lock per process, stored on app.state
-    # DEC-045 Decision 4: PipelineContext constructed here.
+    # DEC-054 Decision 8: v3_model and lora_model populated from loaded models.
+    # Note: step 12 must come BEFORE step 11 so PipelineContext exists for warmup.
     # ------------------------------------------------------------------
     from tomato_sandbox.orchestrator.pipeline import PipelineContext
 
     state.gpu_lock = create_gpu_lock(timeout_s=state.config.gpu_lock_timeout_s)
 
     state.pipeline = PipelineContext(
-        v3_model=None,
-        lora_model=None,
-        psv_module=None,
-        classifier=None,
-        iqa_module=None,
+        v3_model=_v3_model,        # DEC-054 Decision 8: real model loaded
+        lora_model=_lora_model,    # DEC-054 Decision 8: real model loaded
+        psv_module=None,           # PSV is function-based (step 6)
+        classifier=None,           # Classifier loads lazily (step 7 / DEC-054 D5)
+        iqa_module=_iqa_reference, # IQA reference data (step 9); None → defaults
         conformal_calibration={"tau": state.conformal_tau},
         iqa_thresholds=None,
         severity_thresholds=None,
@@ -290,6 +369,40 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         prototype_bank=None,
         underpowered_classes=None,
     )
+
+    # DEC-054 Decision 9: model_loaded reflects v3 model presence (real model loaded)
+    state.model_loaded = True
+
+    # ------------------------------------------------------------------
+    # Step 11: Warmup inference
+    # spec: section 20.5 step 11 "Run a single warmup inference on a placeholder image"
+    # DEC-054 Decision 7: synthetic image, fail-fast on exception.
+    # MUST run after PipelineContext is constructed (warmup needs pipeline).
+    # ------------------------------------------------------------------
+    from tomato_sandbox.api.model_loaders import run_warmup_inference
+
+    try:
+        _warmup_elapsed = run_warmup_inference(state.pipeline, device=_v3_device)
+        _logger.info(
+            "startup_step_11",
+            step=11,
+            description="Warmup inference complete",
+            elapsed_s=_warmup_elapsed,
+            spec_ref="section 20.5 step 11 lines 6569-6571",
+        )
+    except Exception as _warmup_exc:
+        # Fail-fast per spec 20.5 line 6573
+        _logger.error(
+            "startup_step_11_warmup_failed",
+            step=11,
+            error=str(_warmup_exc),
+            description="Warmup inference failed — aborting startup",
+            spec_ref="section 20.5 step 11 / line 6573",
+        )
+        raise RuntimeError(
+            f"Warmup inference failed at step 11: {_warmup_exc}. "
+            f"spec: section 20.5 line 6573 — process exits on any step failure."
+        ) from _warmup_exc
 
     state.startup_complete = True
 
@@ -302,6 +415,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         port=state.config.port,
         conformal_tau=state.conformal_tau,
         model_loaded=state.model_loaded,
+        v3_run_name=_v3_meta.get("run_name", "unknown"),
+        lora_epoch=_lora_meta.get("epoch", 13),
     )
 
     # Attach state to app
@@ -312,6 +427,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.model_loaded = state.model_loaded
     app.state.conformal_tau = state.conformal_tau
     app.state.conformal_timestamp = state.conformal_timestamp
+    # DEC-054 Decision 10: version metadata for /info endpoint
+    app.state.v3_version = _v3_meta.get("run_name", "unknown")
+    app.state.lora_version = f"sp_lora_epoch{_lora_meta.get('epoch', 13)}_f1{_lora_meta.get('field_val_f1', 0.0):.4f}"
 
     yield  # Serve requests
 
@@ -708,11 +826,11 @@ async def info(request: Request) -> JSONResponse:
             "service_version": cfg.service_version,
             "build_hash": cfg.build_hash,
             "models": {
-                # Pre-F.0 sandbox: no weights loaded yet
-                "v3_version": "",
-                "lora_version": "",
-                "psv_version": "",
-                "classifier_version": "",
+                # DEC-054 Decision 10: real version strings from checkpoint metadata
+                "v3_version": getattr(request.app.state, "v3_version", ""),
+                "lora_version": getattr(request.app.state, "lora_version", ""),
+                "psv_version": "psv_function_based_v1",
+                "classifier_version": "sentinel_pre_f0",
             },
             "calibration": {
                 # spec: section 20.3 lines 6480-6483

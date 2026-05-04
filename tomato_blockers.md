@@ -148,7 +148,7 @@ When the master-prompt update batch runs (post Phase 1), Defect-15.1 and Defect-
 - **Options:**
   - A. **Recommended.** T-IMPL-4b implementer reads full Section 12 body (lines 3145–3507) before coding. Implementer-derived parameter list goes into `tomato_sandbox/classifier/calibration.py` with `# spec: 12.N` traceability comments. No Phase 2 action needed.
   - B. Re-fire spec-cartographer for Section 12 to expand the summary. Cost: 1 subagent invocation; benefit: cleaner reference material.
-- **Status:** OPEN. Phase 2 (planning) not blocked. Phase 4 T-IMPL-4b honors option A by default. Recommendation: option A.
+- **Status:** **RESOLVED 2026-05-04 by Phase 6 close (option A applied).** Phase 4 T-IMPL-4b implementation read Section 12 spec body directly per Fix-42; implemented Platt calibration via `_fit_logistic_one_class` in `tomato_sandbox/validation/fit_calibration.py` (DEC-052); pre-F.0 placeholder `classifier_platt.json` consumed via identity Platt fallback per Phase 5b anti-cheat verification (LOW-INFO check). Phase 5b spec-citation density audit confirmed `classifier/hierarchical_classifier.py` has 10.5 spec citations per 100 LOC. Phase 6 Component C verified empirically: real `model3_production_v3.pt` loads and runs (Signal A produces argmax=2 with max_prob=0.5976 on real tomato leaf). No further action needed.
 
 ---
 
@@ -161,7 +161,7 @@ When the master-prompt update batch runs (post Phase 1), Defect-15.1 and Defect-
 - **Options:**
   - A. **Recommended.** T-IMPL-3c implementer reads full Section 10 body before coding. Derived 26-feature list goes into `tomato_sandbox/signals/psv_features.py` docstring with `# spec: 10.N paragraph M` traceability comments. Spec author may later supply Appendix C as confirmation.
   - B. Block T-IMPL-3c on spec author supplying Appendix C content first.
-- **Status:** OPEN. Phase 2 (planning) not blocked. Phase 4 T-IMPL-3c honors option A. Recommendation: option A.
+- **Status:** **RESOLVED 2026-05-04 by Phase 6 close (option A applied).** Phase 4 T-IMPL-3c (DEC-036) implemented all 26 PSV features in canonical order at `tomato_sandbox/signals/psv/features.py` with `FEATURE_NAMES` constant and inline `# spec: section 10.X.Y` traceability per group. Phase 5b spec-citation density audit confirmed `signals/psv/psv.py` and `features.py` have full spec coverage. Phase 6 Component C verified empirically: PSV runs on real tomato leaf (46 lesions detected, reliability=0.34 on real_late_blight image). BLK-012 was a sub-finding of S17.2 wrong group-number citations (SPEC-INT-class drafting noise; resolved separately by DEC-044 Decision 2). No further action needed.
 
 ---
 
@@ -174,7 +174,7 @@ When the master-prompt update batch runs (post Phase 1), Defect-15.1 and Defect-
 - **Options:**
   - A. **Recommended.** T-IMPL-3b implementer reads Section 9 body (lines 1793–2003) before coding. Coefficients go into `tomato_sandbox/signals/signal_b.py` with `# spec: 9.N` traceability comments.
   - B. Re-fire spec-cartographer for Section 9 to expand the summary.
-- **Status:** OPEN. Phase 2 (planning) not blocked. Phase 4 T-IMPL-3b honors option A. Recommendation: option A.
+- **Status:** **RESOLVED 2026-05-04 by Phase 6 close (option A applied).** Phase 4 T-IMPL-3b (DEC-035) implemented `prototype_blend()` per Section 9 body with `BLEND_WEIGHT=0.35`, `T_PROTO=0.3`, blend trigger at `lora_max_prob < 0.60` — all spec-cited inline. Phase 5b spec-citation density audit confirmed `signals/lora_signal.py` has full spec coverage. Phase 6 Component C verified empirically: real LoRA model loads and runs (Signal B max_prob=0.9867 on real_late_blight image; LoRAModelAdapter wraps `cls`→`cls_token` per DEC-055). No further action needed.
 
 ---
 

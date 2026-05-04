@@ -583,6 +583,15 @@ def predict_single(
         t_a = time.perf_counter()
         try:
             v3_tensor = preprocess_for_v3(pil_image)
+            # Move tensor to the same device as the v3 model.
+            # preprocess_for_v3 returns a CPU tensor; the model is on CUDA.
+            # signal_a_forward doc: "[B, 3, 224, 224] tensor on the correct device"
+            try:
+                import torch as _torch_dev
+                _v3_device = next(context.v3_model.parameters()).device
+                v3_tensor = v3_tensor.to(_v3_device)
+            except Exception:
+                pass  # best-effort; signal_a_forward will raise on mismatch
             signal_a: SignalAResult = compute_signal_a(context.v3_model, v3_tensor)
         except Exception as exc:
             _logger.error(
@@ -622,6 +631,10 @@ def predict_single(
             try:
                 import torch as _torch
                 lora_tensor_batched = lora_tensor.unsqueeze(0)  # [1,3,392,392]
+                # Move tensor to same device as the LoRA model.
+                # preprocess_for_lora returns a CPU tensor; model is on CUDA.
+                _lora_device = next(context.lora_model.parameters()).device
+                lora_tensor_batched = lora_tensor_batched.to(_lora_device)
             except Exception:
                 lora_tensor_batched = lora_tensor
             signal_b: SignalBResult = compute_signal_b(

@@ -277,7 +277,7 @@ def _g4_yellow_marginality_ratio(
         return 0.0
 
     # Margin = pixels with distance-to-boundary < 15% of longer bbox dimension
-    x_bb, y_bb, bbox_w, bbox_h, _ = cv2.boundingRect(leaf_mask.astype(np.uint8))
+    x_bb, y_bb, bbox_w, bbox_h = cv2.boundingRect(leaf_mask.astype(np.uint8))
     margin_dist_threshold = 0.15 * max(bbox_w, bbox_h)
 
     leaf_uint8 = leaf_mask.astype(np.uint8)

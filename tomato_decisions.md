@@ -1536,3 +1536,73 @@ No sacred files modified. No Section 15 tests modified.
 
 - **Impact:** 3 files created/modified: `tomato_sandbox/validation/run_f0.py` (new), `tomato_sandbox/tests/unit/test_run_f0.py` (new), `tomato_sandbox/validation/__init__.py` (updated).
 - **User approval:** pre-allocated DEC-053 per T-PHASE6-A task dispatch.
+
+---
+
+## DEC-054 [2026-05-03 00:00] Phase 6C — Real model loading lift: architecture choices
+
+- **Spec section:** 20.5 (Startup sequence) lines 6556-6575
+- **Pre-allocated:** T-PHASE6-C task card
+- **Decisions:**
+  1. **Separate module:** helpers extracted to `tomato_sandbox/api/model_loaders.py`. Rationale: server.py stays focused on FastAPI wiring; loaders are independently testable; unit tests can mock loaders without importing the full FastAPI app.
+  2. **v3 model class:** `scripts.model3_training.architecture.model3_full.Model3` with `(n_classes=10, pretrained=False, use_lora=True, lora_rank=4)`. `pretrained=False` avoids re-downloading DINOv2 weights during startup (checkpoint provides weights). Sacred path: `scripts/model3_training/checkpoints/model3_production_v3.pt`. Verified: load_state_dict strict=True passes with zero missing/unexpected keys.
+  3. **LoRA model class:** `scripts.ladi_net.single_pass_lora_train.SinglePassLoRA`. SinglePassLoRA.forward() returns `{"logits": ..., "cls": ..., "proj": ...}` but `signal_b_forward` expects `{"logits": ..., "cls_token": ...}`. Resolution: wrap in a thin adapter class `LoRAModelAdapter` inside model_loaders.py that renames `cls` → `cls_token` in the output dict (DEC-055 wiring fix).
+  4. **Device handling:** GPU available → load to "cuda:0"; GPU absent (DEC-026 preserved) → load to "cpu" with warning. Models always loaded to the device determined in step 3.
+  5. **Classifier handling:** Phase F.0 placeholder files absent (`classifier_stage1.pkl`, `classifier_stage2.pkl`, `classifier_platt.json`). The hierarchical_classifier module already handles missing pkl files with sentinel weights (zero-weight classifier → uniform outputs). Step 7 logs INFO that calibration files are absent and uses classifier sentinel mode; does NOT fail-fast. Rationale: spec step 7 says "load classifier weights from configured path"; the classifier module's own fallback-to-sentinel behaviour satisfies the intent when real F.0 artifacts are not yet produced. This is a pre-F.0 placeholder gap, not a sacred file gap.
+  6. **IQA reference (step 9):** `tomato_sandbox/phase_f0_calibration/iqa_reference.json` absent → use module defaults. Logs INFO.
+  7. **Warmup (step 11):** Creates a deterministic synthetic image (ones tensor × 0.5, matching expected dtype/shape), calls `predict_single` once, logs elapsed time. Fail-fast if warmup raises (spec line 6573).
+  8. **PipelineContext population:** `v3_model` and `lora_model` fields populated from loaded models; `classifier` field set to `None` (classifier module loads lazily from pkl paths on first call); `iqa_module` set to `None` (uses defaults). Fields match existing PipelineContext dataclass — no new fields added.
+  9. **`model_loaded` flag (app.state):** Changed from "conformal loaded = model_loaded=True" to "v3_model loaded = model_loaded=True" since /health now reflects real model state.
+  10. **/info endpoint:** `v3_version` and `lora_version` populated from checkpoint metadata fields (`run_name` for v3; `epoch` for LoRA).
+- **Impact:** major (real model weights in memory; predict_single now produces non-degraded responses).
+- **User approval:** pre-allocated DEC-054 per T-PHASE6-C task dispatch.
+
+---
+
+## DEC-055 [2026-05-03 00:00] LoRA adapter key mismatch fix: SinglePassLoRA forward returns "cls" not "cls_token"
+
+- **Spec section:** 9.2 lines 1842-1843 "uniform forward dict contract ... keys: logits, cls_token"
+- **Bug:** `scripts.ladi_net.single_pass_lora_train.SinglePassLoRA.forward()` returns dict with key `"cls"` (line 168 of single_pass_lora_train.py). `signal_b_forward()` at line 251 reads `out["cls_token"]` → KeyError.
+- **Fix:** `LoRAModelAdapter` wrapper in `model_loaders.py` intercepts the forward call and renames the key: `out["cls_token"] = out.pop("cls")`. This is a mechanical rename-only adapter; no weight changes.
+- **Why not modify signal_b_forward:** signal_b_forward is the spec-authoritative interface; the adapter makes the model conform to it rather than bending the spec module.
+- **Impact:** minor mechanical fix; no spec contract changes.
+- **User approval:** pre-allocated DEC-055 per T-PHASE6-C task card bug protocol.
+
+---
+
+## DEC-056 [2026-05-03 00:00] Module-level predict_single import for test patchability
+
+- **Spec section:** N/A (testing infrastructure)
+- **Bug:** `run_warmup_inference` imported `predict_single` inside the function body; `unittest.mock.patch("tomato_sandbox.api.model_loaders.predict_single")` raised `AttributeError` because the name was not in module scope.
+- **Fix:** Import `predict_single` at module level in `model_loaders.py` so `patch()` can find and replace it during tests.
+- **Why mechanical:** import order change only; no logic changes.
+- **Impact:** minor.
+- **User approval:** pre-allocated DEC-056 per T-PHASE6-C task card bug protocol.
+
+---
+
+## DEC-057 [2026-05-03 00:00] _PROJECT_ROOT path depth correction in model_loaders.py
+
+- **Spec section:** 20.5 step 4 (sacred path for v3 checkpoint)
+- **Bug:** `_PROJECT_ROOT = Path(__file__).resolve().parents[3]` used index 3 (wrong). File lives at `tomato_sandbox/api/model_loaders.py`. Correct: `.parents[0]` = `api/`, `.parents[1]` = `tomato_sandbox/`, `.parents[2]` = project root. Index 3 went one level too high, resolving to the parent of the project directory.
+- **Fix:** Changed to `.parents[2]`.
+- **Impact:** minor (build failure at startup; fixed by correcting index).
+- **User approval:** pre-allocated DEC-057 per T-PHASE6-C task card bug protocol.
+
+---
+
+## DEC-058 [2026-05-04 07:15] TTA path device placement fix in tta.py; PSV cv2.boundingRect arity fix
+
+### Bug 1 — PSV cv2.boundingRect 5-tuple unpack
+- **Location:** `tomato_sandbox/signals/psv/features.py` line 280, function `_g4_yellow_marginality_ratio`
+- **Bug:** `cv2.boundingRect` returns 4-tuple `(x, y, w, h)` but code unpacked 5 values (`x_bb, y_bb, bbox_w, bbox_h, _ = ...`), a copy-paste error from `cv2.connectedComponentsWithStats` (which does return 5). This caused `ValueError: not enough values to unpack` on every PSV call.
+- **Fix:** Changed to `x_bb, y_bb, bbox_w, bbox_h = cv2.boundingRect(...)`.
+- **Impact:** Signal C PSV now returns `forward_succeeded=True`, reliability 0.44–0.58 on real images.
+
+### Bug 2 — TTA path missing `.to(device)` for tensors
+- **Location:** `tomato_sandbox/signals/tta.py`, function `apply_tta`, per-view loop
+- **Bug:** `preprocess_for_v3()` and `preprocess_for_lora()` always return CPU tensors. In the main pipeline path (orchestrator/pipeline.py Steps 6 and 7), `.to(device)` was added in a previous session. However, the TTA path in `tta.py` called these same preprocess functions for each augmented view without moving the tensors to the model's device (CUDA). This caused `RuntimeError: Input type (torch.FloatTensor) and weight type (torch.cuda.FloatTensor) should be the same` for every TTA view (5×2=10 failures for 5-view TTA), driving `n_v3_ok=0, n_lora_ok=0`, which triggered Rule 1 → Tier 4B.
+- **Fix:** Added device detection before the per-view loop using `next(iter(model.parameters())).device`. Inside the loop, added `.to(_v3_device)` for v3 tensors and `.to(_lora_device)` for LoRA tensors before calling `compute_signal_a` / `compute_signal_b`.
+- **Result:** `n_v3_ok=5, n_lora_ok=5` on 5-view TTA. Tier 4A (not 4B) returned. Acceptance gate met.
+- **Impact:** major (was blocking acceptance gate). Tier 4B degraded eliminated; `is_pre_f0_mode` flips to False.
+- **User approval:** continuation of T-PHASE6-C task; same pre-allocated approval.

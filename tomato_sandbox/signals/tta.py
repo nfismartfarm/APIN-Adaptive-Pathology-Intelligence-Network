@@ -394,12 +394,32 @@ def apply_tta(
     _last_a_result: Optional[SignalAResult] = None
     _last_b_result: Optional[SignalBResult] = None
 
+    # Detect model devices once before the view loop so we can move tensors
+    # to the correct device on each view.  preprocess_for_v3 and preprocess_for_lora
+    # always return CPU tensors; the models may be on CUDA.
+    # Per DEC-055 / pipeline.py fix: use next(model.parameters()).device.
+    _v3_device = None
+    _lora_device = None
+    if _TORCH_AVAILABLE:
+        try:
+            _v3_device = next(iter(v3_model.parameters())).device
+        except (StopIteration, TypeError, AttributeError):
+            _v3_device = None
+        try:
+            _lora_device = next(iter(lora_model.parameters())).device
+        except (StopIteration, TypeError, AttributeError):
+            _lora_device = None
+
     for view_idx, view_pil in enumerate(all_pils):
         # --- Signal A (v3) -------------------------------------------------
         # spec: section 11.3 lines 3004 — "preprocess_for_v3 and preprocess_for_lora
         #   re-run for each view because the augmented pixel content differs"
         try:
             v3_tensor = preprocess_for_v3(view_pil)
+            # Move tensor to the same device as the v3 model.
+            # preprocess_for_v3 returns a CPU tensor; model may be on CUDA.
+            if _TORCH_AVAILABLE and _v3_device is not None:
+                v3_tensor = v3_tensor.to(_v3_device)
             sig_a: SignalAResult = compute_signal_a(v3_model, v3_tensor)
         except Exception as exc:
             _logger.warning(
@@ -426,6 +446,10 @@ def apply_tta(
             lora_tensor = preprocess_for_lora(view_pil)
             if _TORCH_AVAILABLE:
                 lora_tensor_batched = lora_tensor.unsqueeze(0)  # [1, 3, 392, 392]
+                # Move tensor to the same device as the LoRA model.
+                # preprocess_for_lora returns a CPU tensor; model may be on CUDA.
+                if _lora_device is not None:
+                    lora_tensor_batched = lora_tensor_batched.to(_lora_device)
             else:
                 lora_tensor_batched = lora_tensor  # type: ignore[assignment]
             sig_b: SignalBResult = compute_signal_b(
