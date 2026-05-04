@@ -1606,3 +1606,13 @@ No sacred files modified. No Section 15 tests modified.
 - **Result:** `n_v3_ok=5, n_lora_ok=5` on 5-view TTA. Tier 4A (not 4B) returned. Acceptance gate met.
 - **Impact:** major (was blocking acceptance gate). Tier 4B degraded eliminated; `is_pre_f0_mode` flips to False.
 - **User approval:** continuation of T-PHASE6-C task; same pre-allocated approval.
+
+## DEC-059 [2026-05-04 09:50] Phase F.0 dry-run Path 5 + SPEC-INT-005 reconciliation
+
+- **Decision:** Phase F.0 dry-run executed under Path 5 (sacred-split-derived 307-image manifest: 203 calibration + 104 test) rather than spec's nominal ~3000-image dataset (S29.2). Per-class Platt scaling fit by Component B `fit_platt_scaling` is the correct S12.8 implementation (lines 3375-3407, NOT S12.10 as S29.3 Step 2 parenthetically cites — see SPEC-INT-005).
+- **Rationale:** Schema-incompatible legacy artifacts (`phase3_calibration_v3_tomato.json` is single-T scalar, not per-class Platt; `final_val_predictions.json` is 104-row skewed subset). Real ~3000-image F.0 dataset doesn't exist on disk. Path 5 honors (β) interpretation — real signals exercised end-to-end — while transparently documenting that classifier-weight-dependent S29.4 bars are pending external training (BLK-016).
+- **Outcome:** 4 calibration JSONs produced and installed: τ=0.857 (was placeholder 0.42), per-class Platt α/β (n=203), severity defaults, chilli τ=0.0. System transitioned from `is_pre_f0_mode=True` (sentinel) to `is_pre_f0_mode=False` (real-calibration-loaded). Tier 3A (38) + Tier 3C (18) reachable for first time on test set.
+- **Spec interpretation:** SPEC-INT-005 disposes of the S29.3 Step 2 → S12.10 cross-reference error; Component B's per-class Platt is the correct calibration step.
+- **Impact:** F.0 calibration bootstrap validated end-to-end. Pilot go/no-go = NOT YET pending BLK-016 resolution.
+- **User approval:** Path 5 dispatch parameters approved 2026-05-04 (8-step orchestrated dispatch with pre-allocated DEC-059 / BLK-016 / SPEC-INT-005 / M6 slots).
+

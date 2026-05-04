@@ -1,0 +1,34 @@
+{
+  "foliar": {
+    "mild_max": 5.0,
+    "moderate_max": 15.0,
+    "n": 0,
+    "default_used": true
+  },
+  "septoria": {
+    "mild_max": 8.0,
+    "moderate_max": 25.0,
+    "n": 0,
+    "default_used": true
+  },
+  "late_blight": {
+    "mild_max": 2.0,
+    "moderate_max": 8.0,
+    "n": 0,
+    "default_used": true
+  },
+  "ylcv": {
+    "mild_max": 10.0,
+    "moderate_max": 30.0,
+    "n": 0,
+    "default_used": true
+  },
+  "mosaic": {
+    "mild_max": 15.0,
+    "moderate_max": 40.0,
+    "n": 0,
+    "default_used": true
+  },
+  "method": "spec_S17.3_calibration",
+  "computed_at": "2026-05-04T09:38:13.846271+00:00"
+}

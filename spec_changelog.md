@@ -111,3 +111,13 @@ The two path corrections in spec Section 2.6 (`model2_production.pt` actual loca
 - **Spec body update target (deferred to T-EARLY-MP):** S20.5 step 4 should be amended to read `model3_production_v3.pt`; step 8 should be amended to reference the per-artifact JSON layout. This eliminates the documentation/example inconsistency.
 - **Pattern:** fourth SPEC-INT entry. SPEC-INT-001 was v3 priors vector intra-spec conflict; SPEC-INT-002 was Section 15 scenario-body-vs-subsection conflicts; SPEC-INT-003 was S17.5 example coverage_pct drafting noise. SPEC-INT-004 follows the same pattern: spec literals drifted from project artifact ground truth.
 - **No implementation pause required.** No further action needed beyond eventual spec body cleanup.
+
+## SPEC-INT-005 [2026-05-04] S29.3 Step 2 cross-reference error: "(Section 12.10)" should be "(Section 12.8)"
+
+- **Spec location:** Section 29.3 Step 2 (calibration fitting procedure)
+- **Issue:** The parenthetical reference "(Section 12.10)" attached to the calibration fit procedure points to the wrong section. S12.10 is the `ClassifierResult` dataclass definition, not a calibration procedure. The calibration procedure (per-class Platt scaling on classifier output) is specified in S12.8, lines 3375-3407.
+- **Implementation impact:** None. Component B's `fit_platt_scaling` (in `tomato_sandbox/validation/fit_calibration.py`) implements S12.8 per-class Platt correctly, returning α/β arrays of length 7 (six tomato classes + OOD identity). The cross-reference error was caught at Phase F.0 pre-dispatch verification by reading S12.10 verbatim — it turned out to be the `ClassifierResult` dataclass, not a procedure.
+- **Spec body update target (deferred to T-EARLY-MP):** Amend S29.3 Step 2 parenthetical from "(Section 12.10)" to "(Section 12.8)".
+- **Pattern:** fifth SPEC-INT entry. Continues the pattern of intra-spec drift between procedure references and section locations. Reinforces M6 lesson: every parenthetical cross-reference is a candidate for verbatim re-read at dispatch boundaries.
+- **No implementation pause required.** Component B is correct; only the spec parenthetical needs amendment.
+

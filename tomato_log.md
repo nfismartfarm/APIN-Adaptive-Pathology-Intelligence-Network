@@ -1064,3 +1064,21 @@ Run `run_full_calibration` from Component B against real labeled held-out data. 
 
 After Phase F.0 dry-run, classifier produces non-uniform output → Tiers 1/2/3A/3B/3C/3D become reachable. Real prediction quality measurable.
 
+
+## M6 [2026-05-04] Paraphrase drift compounds across indirect handoffs
+
+Two 2-hop drift findings caught at the Phase F.0 pre-dispatch verification gate, both before they corrupted dispatch parameters:
+
+1. **Dataset scale drift (75× error):** Spec S29.2 mandates ~3000 images for F.0 (1800 calibration + 600 test + 600 holdout). The "40-image held-out subset" reference from S13.3 (which is conformal-τ-specific, not the overall F.0 dataset) was carried through Phases 5-6 progress reports and almost into the F.0 dispatch parameters as if it were the overall F.0 dataset size. Caught when the user re-read S29.2 verbatim during pre-dispatch verification.
+
+2. **S12.10 vs S12.8 cross-reference drift:** Spec S29.3 Step 2 cites "(Section 12.10)" as the calibration procedure section. S12.10 is the `ClassifierResult` dataclass definition. The actual calibration procedure (per-class Platt) is in S12.8. Caught when the user requested a verbatim S12.10 read before authorizing dispatch.
+
+**Root pattern:** Both drifts originated as paraphrase summaries of spec content (Phase 5/6 reports → F.0 dispatch parameters). Each individual paraphrase was small; the drift compounded across the 2-hop relay (spec → progress report → dispatch parameters).
+
+**Lesson — operationalized:**
+- Verbatim spec reads at every dispatch boundary, not summary-of-summary handoffs.
+- Every parenthetical cross-reference in the spec is a candidate for SPEC-INT investigation.
+- "Re-read the spec section verbatim" is a valid pre-dispatch verification step, not a delay.
+
+**Mitigation in the dispatch protocol:** Before any phase-boundary dispatch, the main thread (not a delegate) re-reads the spec sections cited in the dispatch parameters. This caught two real defects in F.0 alone.
+

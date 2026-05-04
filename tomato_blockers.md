@@ -417,3 +417,16 @@ These are speculation, not confirmed findings. Phase 5 audit will produce ground
 - **Risk:** for ambiguous multi-class diagnoses (Tier 3A/3B), agronomist sees only the argmax-class severity grade with no per-class breakdown for the alternative diagnoses in the conformal prediction set.
 - **Spec resolution:** SPEC-INT-003 (separate entry in `spec_changelog.md`) resolves the S17.5 example's drafting inconsistency: same PSV `coverage_pct` shared across all classes; only per-disease threshold lookup varies. PSV is a single computation per S17.2:5964.
 - **Status:** **RESOLVED 2026-05-03 by T-AUDIT-5b-fix (DEC-050).** Implementation extends `compute_severity` with `multi_class_set: Optional[list] = None` parameter (option A: extend, not new function). When `multi_class_set` contains ≥2 disease class indices (healthy/OOD excluded per S17.6), iterates per-class and populates `grade_per_class` with `[{"class", "grade", "coverage_pct"}, ...]` entries. Same `coverage_pct` echoed in every entry per SPEC-INT-003. Orchestrator (`pipeline.py`) passes `multi_class_set=list(conformal_result.prediction_set)` only when `tier_label in ("3A", "3B")`; None otherwise. 11 new unit tests in `test_severity.py` cover multi-class path including healthy/OOD exclusion, single-class set returns None, same-coverage invariant, grades-differ-by-disease-threshold.
+
+## BLK-016 [2026-05-04] Classifier Stage 1/2 weights pending external training — out of F.0 scope
+
+- **Symptom:** Post-F.0 conformal coverage 45.2% on 104-image test set (S29.4 target 85-95%); all argmax → "healthy"; classifier_stage1.pkl and classifier_stage2.pkl remain absent (pre-F.0 sentinel weights producing uniform 0.3333 across 3 stage-1 classes).
+- **Root cause:** F.0 calibration JSONs (τ, per-class Platt, severity, chilli) are produced and installed correctly by Component B `run_full_calibration`. However, S29.4 quality bars dependent on real classifier outputs (overall accuracy 80%/70%, per-class F1, T5 precision 70%/50% / recall 90%/80%, overall ECE <5%/<10%) require Stage 1 (3-class healthy/diseased/OOD) and Stage 2 (5-class disease) classifier weights trained on the 31,929-row sacred train split. F.0 spec scope does not include classifier training.
+- **What still works:** Tier 4B rate 0/104 (MET), Section 15 135/135 (MET), real-signal lift (Tier 3A/3C reachable, is_pre_f0_mode flips False — MET).
+- **Resolution paths:**
+  1. **External training (preferred):** Train Stage 1/2 on sacred train split using v3 + LoRA + PSV features; install pkls; re-run Step 6 validation.
+  2. **Sentinel acceptance for restricted pilot:** Document that pilot runs with sentinel classifier; restrict scope to Tier 3A/3C/4A informational outputs only (no T5 OOD claims, no per-class accuracy claims).
+  3. **Defer pilot:** Hold pilot go/no-go; F.0 dry-run is bootstrap-validated and pilot-blocked until path 1 or 2.
+- **Impact:** Pilot go/no-go = NOT YET. F.0 calibration pipeline itself is validated; system is ready to receive real classifier weights without re-running calibration.
+- **Owner:** Project lead (external classifier training decision) + main thread (pilot scope decision).
+
