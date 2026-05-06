@@ -121,3 +121,14 @@ The two path corrections in spec Section 2.6 (`model2_production.pt` actual loca
 - **Pattern:** fifth SPEC-INT entry. Continues the pattern of intra-spec drift between procedure references and section locations. Reinforces M6 lesson: every parenthetical cross-reference is a candidate for verbatim re-read at dispatch boundaries.
 - **No implementation pause required.** Component B is correct; only the spec parenthetical needs amendment.
 
+
+## SPEC-INT-008 [2026-05-06] S12.9 5-fold source-stratification structurally impossible with disk reality
+
+- **Spec location:** Section 12.9 line 3413 ("5 splits of 160/5 = 32 images each") and line 3433 ("each fold has roughly the same source distribution, preventing one fold from being dominated by a single source")
+- **Issue:** train_subset (160 images) contains only 3 distinct source groups on disk: `original_pool`, `bangladesh_field`, `tomato_taiwan` (verified via `model3_unified_source_map.csv` join on `field_val=203` rows). 5-fold cross-validation with strict source-stratification (`StratifiedGroupKFold`) is structurally impossible — only 3 source-isolated folds can be formed; folds 4 and 5 would be empty. v1 implementer used StratifiedGroupKFold with n_splits=5 and produced 2 empty val sets (folds 2 and 4 had S1 F1 = 0 because no held-out images existed).
+- **Resolution per Path (a) v2 dispatch:** Drop to `n_splits=3` with **plain `StratifiedKFold`** (NOT `StratifiedGroupKFold`). Spec S12.9 line 3433 normatively specifies "balanced source distribution per fold," not source isolation. Plain StratifiedKFold with `shuffle=True, random_state=42` stratifies by class label and naturally distributes the 3 sources approximately uniformly across folds (no group isolation forced). bangladesh_field (100% healthy) being held entirely out as fold 0 in v1 caused Stage 2 metrics to collapse (no diseased samples in val); plain StratifiedKFold avoids this by spreading bangladesh's 95 healthy across all folds.
+- **Implementation impact:** v2 + v3 train_classifier.py both use `StratifiedKFold(n_splits=3, shuffle=True, random_state=42)`. Fix-1 in v2 dispatch parameters; preserved in v3.
+- **Spec body update target (T-EARLY-MP):** amend S12.9 to either (a) reduce required fold count when source group count < n_splits, OR (b) explicitly specify StratifiedKFold (not StratifiedGroupKFold) as the intended algorithm for fold formation. Either keeps spec aligned with disk reality.
+- **Pattern:** eighth SPEC-INT entry. SPEC-INT-001..004 were spec-internal drafting drift. SPEC-INT-005..006 were spec-vs-disk path drift. SPEC-INT-007 was a spec gap (training-time IQA policy not addressed; logged as DEC-060 sub-decision). SPEC-INT-008 is the second spec-vs-disk-reality structural mismatch (after SPEC-INT-006 model3/okra_brassica/ vs model2/cleaned/).
+- **No implementation pause required** at this point; implementation already corrected in v2/v3.
+

@@ -1616,3 +1616,131 @@ No sacred files modified. No Section 15 tests modified.
 - **Impact:** F.0 calibration bootstrap validated end-to-end. Pilot go/no-go = NOT YET pending BLK-016 resolution.
 - **User approval:** Path 5 dispatch parameters approved 2026-05-04 (8-step orchestrated dispatch with pre-allocated DEC-059 / BLK-016 / SPEC-INT-005 / M6 slots).
 
+
+## DEC-060 [2026-05-04 15:30] T-PHASE-F0-CLASSIFIER Step 3 — feature extraction protocol
+
+- **Decision (parent):** Path (a) — train real Stage 1/2 classifier weights to resolve BLK-016. Step 3 produces a 259-row feature matrix consumed by Step 4 training script.
+- **Sub-decision: dispatch scale.** Classifier training set is 160-image train_subset of field_val (per spec S12.9), NOT the 31,929-row sacred train pool (which is v3's training data). Caught at pre-dispatch verification (M6 paraphrase-drift class).
+- **Sub-decision: field_val=203 partition policy.** `data/specialist/model3/split_indices.json` records flat 203 with no internal partition; spec S12.9 normative split is 160 train_subset + 40 held_out_subset. Resolution: source-stratified split via `numpy.random.default_rng(seed=42)` over (class_name, source_dataset) joint key from `model3_unified_source_map.csv`; rounded to 160 + 43 (3-image surplus absorbed into held-out). All 203 field_val rows matched in the source map (verified).
+- **Sub-decision: OOD source path substitution (SPEC-INT-006 already logged Phase F.0).** Spec S12.9 line 3438 cites `data/specialist/model3/okra_brassica/`; this directory does not exist on disk. Substantive okra+brassica image pool is at `data/specialist/model2/cleaned/`. Path-substitution justified by purpose-equivalence; 36 images = 4 per class × 9 folders selected via `numpy.random.default_rng(seed=43)`. Documented in metadata as `source_dataset = "model2_cleaned_<class>"` per row.
+- **Sub-decision: synthetic noise generation.** 20 images via 7 Gaussian RGB + 7 solid color + 6 scrambled-block patterns at 224×224, deterministic via `numpy.random.default_rng(seed=44)`. Documented in metadata as `source_dataset = "synthetic_noise_<pattern>"`.
+- **Sub-decision: three-seed RNG protocol.** Three independent `default_rng` instances (split=42, ood=43, noise=44) rather than a single threaded RNG, to decouple reproducibility across the three tasks.
+- **Sub-decision: extract_features_no_iqa sibling helper added to extract_features.py (main-thread inline edit, not sub-implementer dispatch).** ~140-line addition composing preprocess → compute_signal_a/b/c → build_classifier_input WITHOUT the IQA gate. Same composition pattern as `extract_features_for_training`; mechanically auditable, no architectural decisions.
+- **Sub-decision (Option A — post-STOP):** **Uniform training-time IQA bypass policy.** First Step-3 execution rejected 113 of 259 images (44%) via IQA gate (low-resolution + wet-leaf gates). Sanity-check STOP fired correctly. Resolution: route ALL 259 training-time extractions through `extract_features_no_iqa`. Rationale per user-reframed direction: IQA gate is calibrated for inference-time user-photo quality protection; rejecting ~44% of training data including images the classifier needs to learn marginal-quality decision boundaries from defeats spec S12.7 degraded-mode robustness. Training-vs-inference asymmetry: training classifier learns from broader image distribution than inference will face; mild distribution shift is acceptable trade-off vs. losing ylcv (n=3) and mosaic (n=8) classes that would become statistically unfit under 44% IQA-induced rejection. Spec S12.9 noise-OOD bypass is precedent for IQA bypass on synthetic data; this generalizes that precedent to real training data with explicit rationale.
+- **Sub-decision: Refinement-2 OOD bypass cap (max 7 of 36) retired** under uniform bypass. The cap was a safeguard for the partial-bypass design; uniform bypass makes it dimensionless. Documented in `metadata.refinement_2_status`. Bypass cap field retained in code as audit trail of the retired safeguard.
+- **NOT logged as SPEC-INT.** This is a spec gap (training-time IQA policy not addressed), not a spec inconsistency. SPEC-INT entries reserved for spec-internal drift (drafting errors, stale references). Future spec body update target: add a S12.7 sub-section explicitly addressing training-time IQA policy.
+- **Outcome:** 259 feature vectors produced cleanly. 0 NaN, 0 zero rows, per-feature std range [0.060, 0.485], 0 identical row-pairs in 50-row spot-check window. Distribution exactly matches projections: y_stage1 = 118/85/56 (healthy/diseased/OOD); y_stage2 = 40/16/18/3/8 (foliar/septoria/late_blight/ylcv/mosaic); partition = 160/43/56 (train/held/ood). Wall time 209.9s on 4060.
+- **Underpowered-class flag for Step 4:** ylcv (n=3 train) and mosaic (n=8 train) below `_MIN_SEVERITY_SAMPLES=10` threshold. Per spec S29.4 these classes have lower F1 floors (>0.55 vs >0.65 typical). Component B Platt fitting will likely fall back to identity for these classes per its degenerate-label safeguard. Flag forward to DEC-061 honest gap analysis.
+- **Carry-forward (housekeeping):** Anti-cheat audit identified bare `except Exception: continue` in `_run_step3_extract.py` OOD-fallback loop (line ~371). Under uniform bypass this code path is unreachable (the loop's entry condition `err.startswith("iqa_reject")` cannot fire). Dead code, harmless. Cleanup deferred to T-EARLY-MP since the script is a one-shot already executed successfully.
+- **Spec citations:** S12.2:3169-3244 (build_classifier_input), S12.7:3348-3373 (degraded-mode handling), S12.9:3408-3442 (training procedure + OOD construction), S4.5 (model3_unified_source_map.csv authority).
+- **User approval:** Path (a) authorized; pre-dispatch reads + reframed rationale on uniform bypass approved 2026-05-04.
+
+## DEC-061 [2026-05-05 00:00] T-PHASE-F0-CLASSIFIER Step 4 — Classifier training protocol choices
+
+- **Spec section:** S12.3-S12.9
+
+### Decision 1 — Degraded-mode augmentation: zero AFTER standardization
+
+- **Spec S12.7 line 3350:** "zeroed before standardization." However, zeroing raw values before standardization is equivalent to zeroing standardized values after standardization ONLY IF we zero the raw value to 0.0 before computing (x - mean) / std. If we zero post-standardization, the resulting value is -(mean/std), which is NOT zero. Therefore we must zero BEFORE standardization per spec. We compute standardization on clean training rows, then augment (zero blocks) on raw features before applying standardization. Standardization params are computed on CLEAN (non-augmented) features to avoid augmentation bleeding into the statistics.
+- **Impact:** minor (matches spec intent exactly).
+
+### Decision 2 — Standardization: computed on clean train rows, then augmentation applied
+
+- **Spec S12.9 line 3419:** "Standardize features using train_k statistics." Does not specify augmented or clean. Decision: compute mean/std on clean train_k rows. Apply augmentation on the clean raw values, then standardize. This avoids the circularity of computing statistics on data that includes zeroed blocks (which would deflate the mean for zeroed features).
+- **Impact:** minor. In practice with P_DEGRADE=0.20, the difference is small but principled.
+
+### Decision 3 — OOD rows included in Stage 1 fold training (not in Stage 2)
+
+- **Spec S12.9 lines 3414-3420:** OOD construction adds 56 images all with y_stage1=2. Stage 1 must learn the OOD class. Stage 2 trains only on diseased rows (y_stage1==1). OOD rows have y_stage2=-1 (N/A) so they cannot be used for Stage 2 training.
+- **Impact:** Stage 1 trains on (128 + 56 OOD = 184 per fold); Stage 2 trains on ~53 diseased rows per fold.
+
+### Decision 4 — Feature standardization JSON: Stage 1 stats from full train_subset (160 rows)
+
+- **Spec S12.3 line 3273:** "feature_mean: [19] for standardization input (also separately in classifier_feature_standardization.json for redundancy)." The JSON at inference-time is loaded by build_classifier_input via load_feature_standardization(). Stage 1 includes OOD rows in its training; Stage 2 does not. For the JSON (used at inference before any stage), we use Stage 1's stats since Stage 1's training population is a superset of Stage 2's. This matches the pipeline: standardization is applied once at the feature-builder level before Stage 1 forward.
+- **Impact:** minor. Stage 2 inherits Stage 1's standardization at inference time, consistent with design.
+
+### Decision 5 — MLP variant: run informational comparison; adopt only if rule met per S12.6
+
+- **Spec S12.6 line 3342:** "MLP adopted only if macro-F1 improves >= 2 pp AND ECE < 0.10."
+- Training size is 160 images; with 160 samples and 776 MLP parameters vs 160 logistic parameters, overfitting risk is real. Default is logistic per spec. MLP comparison is run and documented in training_report.json.
+
+### Decision 6 — Platt fit uses OOF predictions from train_subset only (160 rows)
+
+- **Spec S12.8 line 3382:** "P_final_oof of shape [N_train, 7]." OOD rows have no disease label and are not part of train_subset; they do not generate OOF predictions. OOD contributes to Stage 1 training within each fold but is not in the held-out validation set.
+- OOF predictions cover 160 rows with labels in {5=healthy, 0-4=disease, 6=OOD}. OOD partition images do NOT appear in OOF prediction set.
+- **Impact:** n=160 for Platt fit. OOD class (label=6) has 0 samples in OOF set; Platt fitting will hit the identity-fallback (y_c.sum()==0) for class 6. This is expected and documented.
+
+### Decision 7 — JSD sentinel value: default 0.35 (jsd_sentinel.json absent)
+
+- `jsd_sentinel.json` not present on disk. `feature_builder.py` default = 0.35. Using 0.35 per spec S12.2 code comment "reasonable prior; overridden by F.0."
+
+- **User approval:** pre-allocated DEC-061 per T-PHASE-F0-CLASSIFIER dispatch.
+
+
+## DEC-062 [2026-05-06] T-PHASE-F0-CLASSIFIER v1/v2/v3 trajectory + BLK-017 adjudication + sacred manifest refresh policy
+
+(Companion to DEC-061 [2026-05-05] which covers v2-era training-protocol architecture decisions. DEC-062 covers the multi-iteration trajectory + BLK-017 + sacred policy that emerged across v1→v2→v3.)
+
+- **Decision (parent):** Path (a) — train Stage 1 + Stage 2 hierarchical classifier on 19-dim features per spec S12, then deploy as v3 production artifact. Three iterations of training; v1 quarantined for silent STOP-softening, v2 quarantined post-Step-8 S12.7 misses, v3 deployed per spec-prescribed remediation + BLK-017 adjudicated documented limitation.
+
+### Sub-decisions accumulated through Steps 4 v1/v2/v3
+
+**v1 quarantine (DEC-NEW-A/B/C/D from v1 superseded):** v1 implementer converted two STOP conditions to WARNINGs without authorization (Stage 2 OOF F1 < 0.40 → "WARNING"; Platt β=-10.135 silently clipped to -10.0). Quarantined to `tomato_sandbox/phase_f0_calibration/_quarantined_step4_first_dispatch/` (7 files, forensic). Three architectural fixes identified:
+- Fix 1: `StratifiedKFold(n_splits=3)` not `StratifiedGroupKFold(n_splits=5)` (per SPEC-INT-008; 3-source-group disk reality)
+- Fix 2: honest Platt; threshold β ∈ [-50, 50] for genuine numeric explosion only; Component B's soft-trigger handles borderline; no clipping
+- Fix 3: OOD partition distributed across folds + held-out (14 ood_heldout + 42 ood_oof via seed=46) so OOD F1 IS measurable in OOF and held-out evaluation (was 0.000 in v1; became 0.659/0.857 OOF/held-out in v2; 0.659/0.857 in v3)
+
+**v2 architecture (the clean dispatch):**
+- 3-fold StratifiedKFold (seed=42) stratified by y_stage1
+- Stage 1: sklearn LogisticRegression (l2, class_weight='balanced', lbfgs, max_iter=1000); 3-class
+- Stage 2: same; 5-class on diseased subset (~67 train_subset rows)
+- S12.7 augmentation: P_DEGRADE=0.20 (P_no=0.80, P_v3=0.07, P_lora=0.07, P_psv=0.06); seed=45; applied during fold-training and FINAL-model training; NOT during OOF prediction (clean Platt fitting target)
+- OOF predictions (n=202) → Component B's `fit_platt_scaling` (post-softmax probs in 7-class joint matrix; logit applied internally with ε=1e-12; identity hard-trigger if y_c.sum()==0 or ==N; soft-trigger if NLL worse than identity)
+- Result: 0 identity fallbacks, 0 soft-trigger; held-out 57 macro-F1=0.867; OOD F1=0.759; ECE post-Platt=0.060
+
+**v2 quarantine post-Step-8:** v2 closed Step 4 cleanly but Step 8 S12.7 verification revealed lora_off F1=0.519 < 0.55; psv_off F1=0.421 < 0.65. Per spec S12.7:3373 explicit remediation, retrain with higher P_DEGRADE.
+
+**v3 architecture (the deployed artifact):**
+- All v2 architecture preserved; SINGLE delta = P_DEGRADE 0.20 → 0.35 with proportional per-block scaling (P_no=0.65, P_v3=0.12, P_lora=0.12, P_psv=0.11)
+- v3 first dispatch STOPped on Step 8 lora_off=0.528 < 0.55 (M7 plateau evidence: +0.9pp from 71% rate increase) and psv_off=0.536 < 0.65; main-thread adjudicated BLK-017 (bounded iteration; spec-prescribed-once honored; plateau evidence triggers cap)
+- v3 second dispatch (BLK-017 bypass-with-audit-fields): saved artifacts to production paths with explicit `pass: false` + `bypassed_per_blk_017: true` audit annotations; v3_off STOP remained non-negotiable; all OTHER STOPs unconditional
+- Result: held-out 57 macro-F1=0.937 (+7.0pp); OOD F1=0.857 (+9.8pp); ECE post-Platt=0.052 (within target); ylcv OOF F1 0.500→0.667 (BELOW FLOOR → MET TARGET; resolves Step-7 v2 hard-floor miss)
+
+**Sacred manifest training-output policy (DEC-061 sub-decision):**
+- Classifier Stage 1/2 .pkl files + classifier_feature_standardization.json: training outputs; sacred-listed (immutable post-Path-(a))
+- classifier_platt.json + conformal_tau.json: calibration outputs; NOT sacred-listed (refreshable per future F.0 runs / spec S29.6 quarterly re-calibration)
+- Manifest refresh via `rebaseline_history` field with previous SHA256 + reason + timestamp (per S2.6 policy)
+
+**v3 hashes added to manifest (12/12 verifies post-refresh):**
+- classifier_stage1.pkl: `e8d8a950d4645b57...` (was `9b57438a1b2f6c0e...` in v2)
+- classifier_stage2.pkl: `db3ab372873f649f...` (was `50aac46c89b42635...` in v2)
+- classifier_feature_standardization.json: `239b118910cf77c0...` (was `4de85ee623512cdf...` in v2)
+
+### Hard-floor miss composition shift v2 → v3
+
+| | v2 misses | v3 misses |
+|---|---|---|
+| Per-class F1 ylcv | 0.500 (BELOW FLOOR by 5pp) | **resolved → 0.667 (MET TARGET)** |
+| Conformal coverage 104-row valid | 0.857 (AT FLOOR) | **0.839 (BELOW FLOOR by 1.1pp; Wilson CI overlapping)** |
+| S12.7 lora_off F1 | 0.519 (BELOW FLOOR by 3.1pp) | 0.528 (BELOW FLOOR by 2.2pp; BLK-017) |
+| S12.7 psv_off F1 | 0.421 (BELOW FLOOR by 22.9pp) | 0.536 (BELOW FLOOR by 11.4pp; BLK-017; +11.5pp improvement) |
+
+Same count (3) of hard-floor misses; composition shifted. v3 is empirically the better classifier across 6+ measures (ylcv, ECE, held-out macro-F1, OOD F1, foliar held-out F1, degraded-mode psv_off).
+
+### Standing rules honored
+
+- **DEC-038**: zero implementer git operations across v1/v2/v3 dispatches; main-thread commit at Step 10 only
+- **Rule 6**: Section 15 byte-locked through entire Path (a); 135/135 PASS preserved
+- **Fix-42**: spec sections S12.3-S12.11 + S29.4 + S13.5 read verbatim at every dispatch boundary; line citations in all training_report*.json metadata
+- **Defect-60**: venv Python authoritative for all training runs
+- **STOP discipline (governance language)**: v1 violated → quarantined; v2 + v3 honored throughout; main-thread adjudication is the only path past a STOP
+
+### User approval trail
+
+- v2 dispatch authorized 2026-05-04 (refined Path (a) scope after pre-dispatch reads)
+- v3 retrain authorized 2026-05-04 (Option A: P_DEGRADE 0.35 per spec S12.7:3373)
+- v3 BLK-017 adjudication authorized 2026-05-06 (Option C with refinements: accept v3 architecturally; bounded iteration; document plateau)
+- v3 artifact-save dispatch authorized 2026-05-06 (production paths populated with audit fields per BLK-017)
+
+**Outcome:** v3 = operational classifier; sacred 12/12; Section 15 135/135; engineering protocol substantively complete. Pilot go/no-go deferred to Step 10 user adjudication.
+

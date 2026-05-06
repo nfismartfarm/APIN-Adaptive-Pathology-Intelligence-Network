@@ -1,0 +1,22 @@
+{
+  "stop_reason": "S12.7 degraded-mode threshold miss: lora_off",
+  "scenario": "lora_off",
+  "observed_f1": 0.527619,
+  "threshold": 0.55,
+  "all_scenarios": {
+    "all_on": {
+      "macro_f1": 0.97192
+    },
+    "v3_off": {
+      "macro_f1": 0.68254
+    },
+    "lora_off": {
+      "macro_f1": 0.527619
+    },
+    "psv_off": {
+      "macro_f1": 0.535611
+    }
+  },
+  "dispatch": "DEC-061 V3",
+  "spec_citation": "S12.7:3368-3373"
+}

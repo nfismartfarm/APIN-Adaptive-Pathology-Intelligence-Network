@@ -1082,3 +1082,30 @@ Two 2-hop drift findings caught at the Phase F.0 pre-dispatch verification gate,
 
 **Mitigation in the dispatch protocol:** Before any phase-boundary dispatch, the main thread (not a delegate) re-reads the spec sections cited in the dispatch parameters. This caught two real defects in F.0 alone.
 
+
+## M7 [2026-05-06] Spec-prescribed remediation paths can plateau; bounded iteration with empirical evidence is the right protocol response
+
+Same family as M5 (spec-vs-disk drift) and M6 (paraphrase drift across indirect handoffs); new pattern: **spec-prescribed iteration with diminishing returns**.
+
+**Triggering observation:** Path (a) Step 8 surfaced two S12.7 degraded-mode threshold misses on the v2 classifier (lora_off F1=0.519 vs 0.55; psv_off F1=0.421 vs 0.65). Spec S12.7:3373 explicitly prescribes "increase P_DEGRADE and retrain" as remediation. v2 → v3 retraining with P_DEGRADE 0.20 → 0.35 (per S12.9 ratios scaled proportionally per spec S12.7:3358) yielded:
+
+- lora_off: 0.519 → 0.528 (+0.9pp from 71% rate increase)
+- psv_off: 0.421 → 0.536 (+11.5pp; substantial improvement; still below floor)
+
+**Plateau evidence:** lora_off response to substantial rate increase is disproportionately small. Linear extrapolation to v4 with another +50% rate increase predicts lora_off ≈ 0.534, still below 0.55 threshold. Iteration plateau empirically demonstrated.
+
+**Diagnosis:** the failure mode is *structural*, not *exposure*. Feature redundancy (v3 carries strong disease signal alone) + 67-image diseased train_subset means optimizer satisfices on v3 features without learning LoRA-substitution behavior. P_DEGRADE iteration cannot drill substitution behavior into a classifier that doesn't need LoRA features for typical disease separation. Resolution path per spec line 8195 is "gather more samples" — pilot Stage 0.
+
+**Lesson — operationalized:**
+- Spec-prescribed remediation paths are iterative *forms*, not unbounded loops. Spec authority means "honor the form" (try the prescribed remediation), not "iterate forever until passing."
+- Empirical plateau evidence (small gains from large parameter changes) is the protocol's stopping signal for spec-prescribed iteration.
+- Engineering toward the metric chases passing thresholds at the cost of system-level quality. Engineering toward the system honors documented limitations and forwards them to the appropriate next phase (here: pilot Stage 0 + more samples per S29.4 line 8195).
+- Spec-prescribed-once is the protocol's default cap when plateau is demonstrable. v2 → v3 honored this; v4 declined per plateau evidence; result documented as BLK-017.
+
+**Mitigation in the dispatch protocol:**
+- After each spec-prescribed remediation iteration, compute the gain magnitude and direction. If the gain is far below proportional expectation (e.g., 71% rate increase → 5% F1 improvement), surface plateau hypothesis to user adjudication before authorizing another iteration.
+- Document the iteration trajectory + plateau evidence as a dedicated BLK entry (not absorbed into a parent DEC).
+- Frame the closure verdict honestly: "spec-prescribed remediation tried once; plateau observed; documented as forward-monitoring work" rather than "system met all bars."
+
+**Sister patterns:** M5 (spec assumes paths that don't exist on disk → use disk reality), M6 (paraphrase drift compounds across handoffs → re-read spec verbatim at dispatch boundaries), M7 (spec-prescribed iteration plateaus → bound iteration via empirical gain magnitude, not target satisfaction).
+

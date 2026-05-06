@@ -1,0 +1,2374 @@
+{
+  "metadata": {
+    "seeds": {
+      "split": 42,
+      "ood": 43,
+      "noise": 44
+    },
+    "generated_at": "2026-05-04T16:30:32.974873+00:00",
+    "spec_citations": [
+      "S12.2:3169-3244",
+      "S12.7:3348-3373",
+      "S12.9:3408-3442"
+    ],
+    "counts": {
+      "train_subset": 160,
+      "held_out_subset": 43,
+      "ood_okra_brassica": 36,
+      "ood_noise": 20,
+      "total": 259,
+      "failures": 0,
+      "iqa_bypassed_total": 259
+    },
+    "ood_folders": [
+      "brassica_alternaria",
+      "brassica_black_rot",
+      "brassica_downy_mildew",
+      "brassica_healthy",
+      "okra_cercospora",
+      "okra_enation",
+      "okra_healthy",
+      "okra_powdery_mildew",
+      "okra_yvmv"
+    ],
+    "elapsed_seconds": 209.92,
+    "training_iqa_policy": "uniform_bypass",
+    "inference_iqa_policy": "S6.6_filter",
+    "distribution_shift_note": "Training feature distribution includes IQA-rejected images (low resolution / wet leaf / etc.); inference classifier sees only IQA-passing images. Mild shift; acceptable per DEC-060 rationale: full-distribution training data is required for spec S12.7 degraded-mode robustness, and ylcv (n=3) and mosaic (n=8) classes would become statistically unfit under 44% IQA-induced rejection.",
+    "refinement_2_status": "Refinement-2 OOD okra/brassica IQA-bypass cap (max 7 of 36) retired under uniform training-time IQA bypass."
+  },
+  "failures": [],
+  "audit_log": [
+    {
+      "idx": 0,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 1,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 2,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 3,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 4,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 5,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 6,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 7,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 8,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 9,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 10,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 11,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 12,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 13,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 14,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 15,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 16,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 17,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 18,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 19,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 20,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 21,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 22,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 23,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 24,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 25,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 26,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 27,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 28,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 29,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 30,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 31,
+      "partition": "train_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 32,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 33,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 34,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 35,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 36,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 37,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 38,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 39,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 40,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 41,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 42,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 43,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 44,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 45,
+      "partition": "train_subset",
+      "class_name": "tomato_late_blight",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 46,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 47,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 48,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 49,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 50,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 51,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 52,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 53,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 54,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 55,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 56,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 57,
+      "partition": "train_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 58,
+      "partition": "train_subset",
+      "class_name": "tomato_yellow_leaf_curl_virus",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 59,
+      "partition": "train_subset",
+      "class_name": "tomato_yellow_leaf_curl_virus",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 60,
+      "partition": "train_subset",
+      "class_name": "tomato_mosaic_virus",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 61,
+      "partition": "train_subset",
+      "class_name": "tomato_mosaic_virus",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 62,
+      "partition": "train_subset",
+      "class_name": "tomato_mosaic_virus",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 63,
+      "partition": "train_subset",
+      "class_name": "tomato_mosaic_virus",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 64,
+      "partition": "train_subset",
+      "class_name": "tomato_mosaic_virus",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 65,
+      "partition": "train_subset",
+      "class_name": "tomato_mosaic_virus",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 66,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 67,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 68,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 69,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 70,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 71,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 72,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 73,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 74,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 75,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 76,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 77,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 78,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 79,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 80,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 81,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 82,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 83,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 84,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 85,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 86,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 87,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 88,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 89,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 90,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 91,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 92,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 93,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 94,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 95,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 96,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 97,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 98,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 99,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 100,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 101,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 102,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 103,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 104,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 105,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 106,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 107,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 108,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 109,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 110,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 111,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 112,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 113,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 114,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 115,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 116,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 117,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 118,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 119,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 120,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 121,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 122,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 123,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 124,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 125,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 126,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 127,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 128,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 129,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 130,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 131,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 132,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 133,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 134,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 135,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 136,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 137,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 138,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 139,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 140,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 141,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 142,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 143,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 144,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 145,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 146,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 147,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 148,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 149,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 150,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 151,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 152,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 153,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 154,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 155,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 156,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 157,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 158,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 159,
+      "partition": "train_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 160,
+      "partition": "held_out_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 161,
+      "partition": "held_out_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 162,
+      "partition": "held_out_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 163,
+      "partition": "held_out_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 164,
+      "partition": "held_out_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 165,
+      "partition": "held_out_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 166,
+      "partition": "held_out_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 167,
+      "partition": "held_out_subset",
+      "class_name": "tomato_foliar_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 168,
+      "partition": "held_out_subset",
+      "class_name": "tomato_late_blight",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 169,
+      "partition": "held_out_subset",
+      "class_name": "tomato_late_blight",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 170,
+      "partition": "held_out_subset",
+      "class_name": "tomato_late_blight",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 171,
+      "partition": "held_out_subset",
+      "class_name": "tomato_late_blight",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 172,
+      "partition": "held_out_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 173,
+      "partition": "held_out_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 174,
+      "partition": "held_out_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 175,
+      "partition": "held_out_subset",
+      "class_name": "tomato_septoria_leaf_spot",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 176,
+      "partition": "held_out_subset",
+      "class_name": "tomato_yellow_leaf_curl_virus",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 177,
+      "partition": "held_out_subset",
+      "class_name": "tomato_mosaic_virus",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 178,
+      "partition": "held_out_subset",
+      "class_name": "tomato_mosaic_virus",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 179,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 180,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "original_pool",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 181,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 182,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 183,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 184,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 185,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 186,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 187,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 188,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 189,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 190,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 191,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 192,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 193,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 194,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 195,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 196,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 197,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 198,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 199,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 200,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "bangladesh_field",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 201,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 202,
+      "partition": "held_out_subset",
+      "class_name": "tomato_healthy",
+      "source": "tomato_taiwan",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 203,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_alternaria",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 204,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_alternaria",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 205,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_alternaria",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 206,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_alternaria",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 207,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_black_rot",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 208,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_black_rot",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 209,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_black_rot",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 210,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_black_rot",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 211,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_downy_mildew",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 212,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_downy_mildew",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 213,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_downy_mildew",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 214,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_downy_mildew",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 215,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_healthy",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 216,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_healthy",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 217,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_healthy",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 218,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_brassica_healthy",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 219,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_cercospora",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 220,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_cercospora",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 221,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_cercospora",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 222,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_cercospora",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 223,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_enation",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 224,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_enation",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 225,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_enation",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 226,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_enation",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 227,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_healthy",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 228,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_healthy",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 229,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_healthy",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 230,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_healthy",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 231,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_powdery_mildew",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 232,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_powdery_mildew",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 233,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_powdery_mildew",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 234,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_powdery_mildew",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 235,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_yvmv",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 236,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_yvmv",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 237,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_yvmv",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 238,
+      "partition": "ood",
+      "class_name": null,
+      "source": "model2_cleaned_okra_yvmv",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 239,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_gaussian",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 240,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_gaussian",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 241,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_gaussian",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 242,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_gaussian",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 243,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_gaussian",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 244,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_gaussian",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 245,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_gaussian",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 246,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_solid",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 247,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_solid",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 248,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_solid",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 249,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_solid",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 250,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_solid",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 251,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_solid",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 252,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_solid",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 253,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_scrambled",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 254,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_scrambled",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 255,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_scrambled",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 256,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_scrambled",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 257,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_scrambled",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    },
+    {
+      "idx": 258,
+      "partition": "ood",
+      "class_name": null,
+      "source": "synthetic_noise_scrambled",
+      "success": true,
+      "err": null,
+      "iqa_bypassed": true
+    }
+  ]
+}

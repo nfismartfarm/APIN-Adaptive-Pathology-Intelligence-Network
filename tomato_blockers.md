@@ -430,3 +430,71 @@ These are speculation, not confirmed findings. Phase 5 audit will produce ground
 - **Impact:** Pilot go/no-go = NOT YET. F.0 calibration pipeline itself is validated; system is ready to receive real classifier weights without re-running calibration.
 - **Owner:** Project lead (external classifier training decision) + main thread (pilot scope decision).
 
+
+## BLK-017 [2026-05-06] S12.7 degraded-mode thresholds: lora_off + psv_off below floor after spec-prescribed iteration
+
+**Status:** RESOLVED with documented limitation (same closure pattern as BLK-016 + ylcv F1<floor)
+
+**Spec section:** S12.7 lines 3358-3373 (degraded-mode quality verification)
+
+**Finding:** S12.7 simulated single-signal failure on held_out_subset (n=43 valid):
+- v3_off F1=0.683 (≥ 0.55 ✓)
+- lora_off F1=0.528 (< 0.55 by 2.2pp; within Wilson CI for n=43 with thin classes)
+- psv_off F1=0.536 (< 0.65 by 11.4pp; structural)
+
+**Iteration trajectory:**
+- v1 (P_DEGRADE=0.20, silent softening — quarantined): lora_off=0.519, psv_off=0.421
+- v2 (P_DEGRADE=0.20, STOP discipline): lora_off=0.519, psv_off=0.421
+- v3 (P_DEGRADE=0.35, spec-prescribed remediation per S12.7:3373): lora_off=0.528, psv_off=0.536
+
+**Plateau evidence:** lora_off response to 71% P_DEGRADE_LORA increase = +0.9pp. Linear extrapolation v4 at +50% more rate predicts lora_off ≈ 0.534, still below 0.55 threshold. Iteration plateau empirically demonstrated.
+
+**Diagnosis (data-imposed, not architectural):** feature redundancy + 67-image diseased train_subset means optimizer satisfices on v3 features without learning LoRA-substitution behavior. P_DEGRADE iteration cannot drill substitution behavior into a classifier that doesn't need LoRA features for typical disease separation. Resolution requires more diverse training samples per spec line 8195.
+
+**Resolution path per spec line 8195 + S29.7:** gather more samples → pilot Stage 0 produces real labeled data; retrain classifier with expanded training set; degraded-mode behavior emerges naturally as classifier sees more cases where v3 is wrong and LoRA disambiguates.
+
+**Production-context mitigation:**
+- Signal failures in production fire Rule 1 → Tier 4B → retake-prompt
+- PSV is CPU-only function-based; failure rate <<6% expected in production
+- The S12.7 thresholds matter most for synthetic stress-tests; real-world impact of marginal degraded-mode performance is reduced via retake-prompt routing
+
+**Iteration cap rationale:** spec S12.7:3373 prescribes "increase P_DEGRADE and retrain" as remediation form, not unbounded iteration. v2 → v3 honors spec authority once. Plateau evidence suggests v4 has predicted-failure outcomes. Iterating beyond spec-prescribed-once with diminishing-return evidence is engineering-toward-the-metric, not engineering toward the system.
+
+**Forward to:**
+- T-EARLY-MP: pilot Stage 0 monitoring of real-world degraded-mode incidence
+- Spec S29.6 quarterly re-calibration: classifier retraining with expanded labeled data; degraded-mode quality re-verified
+
+**Bypass scope (per user adjudication 2026-05-06):** lora_off + psv_off scenarios in v3 training script's S12.7 verification block. v3_off STOP remains non-negotiable; all OTHER STOP conditions (Stage 1 fold F1 < 0.50, Stage 2 OOF F1 < 0.30, Platt NaN, β outside [-50, 50], weight variance failure, runaway α) remain unconditional.
+
+**User approval (verbatim from 2026-05-06 dispatch authorization):**
+> "Decision: Option C with refinements. Accept v3 architecturally; log BLK-017 with explicit plateau-evidence + data-imposed diagnosis; restore v3 to production paths; proceed to Step 9.
+> Reasoning (to document in DEC-061 sub-decision):
+> 1. Spec S12.7:3373 prescribes 'increase P_DEGRADE and retrains' as remediation form, not unbounded iteration. v2 → v3 (P_DEGRADE 0.20 → 0.35) is one remediation iteration. Spec authority honored.
+> 2. Plateau evidence empirically strong. lora_off: v1=0.519 → v2=0.519 → v3=0.528. Across 71% P_DEGRADE_LORA increase, gain was +0.9pp. Linear extrapolation: v4 at +50% more rate predicts +0.6pp → 0.534, still below 0.55 threshold.
+> 3. Diagnosis is data-imposed. ... Resolution path per spec line 8195: gather more samples → pilot Stage 0.
+> 4. v3 is genuinely the best classifier produced. Every populated metric improved vs v2.
+> 5. Production-context mitigation. ... S12.7 thresholds matter most for cases where signals run successfully but produce degraded-equivalent feature vectors (rare in practice).
+> 6. lora_off=0.528 is within sampling variance of 0.55 threshold at n=43 with thin classes (Wilson 95% CI on macro-F1 ≈ ±3-5pp).
+> 7. psv_off=0.536 vs 0.65 (-11.4pp) is structural but PSV is CPU-only function-based; production failure rate is rare."
+
+**Owner:** Main thread (closure decision) + pilot Stage 0 lead (forward-monitoring).
+
+
+## BLK-016 — RESOLVED [2026-05-06]
+
+**Status update:** RESOLVED via Path (a) — classifier weight training.
+
+**Resolution:** Stage 1/2 hierarchical classifier weights trained on field_val=203 train_subset (160 images) + 56 OOD samples (36 model2_cleaned + 20 synthetic noise) per spec S12.3-S12.9. Three iterations (v1 quarantined for silent softening; v2 quarantined post-Step-8 STOP per S12.7:3373; v3 deployed per main-thread BLK-017 adjudication).
+
+Production artifacts at sacred-listed paths:
+- `tomato_sandbox/phase_f0_calibration/classifier_stage1.pkl` (sha256 `e8d8a950...`, 750 B)
+- `tomato_sandbox/phase_f0_calibration/classifier_stage2.pkl` (sha256 `db3ab372...`, 936 B)
+- `tomato_sandbox/phase_f0_calibration/classifier_feature_standardization.json` (sha256 `239b1189...`, 1129 B)
+- `tomato_sandbox/phase_f0_calibration/classifier_platt.json` (n=202; OOF-fit per S12.8)
+
+Sacred manifest 12/12 (refreshed for v3 with rebaseline_history per S2.6 policy).
+
+**v3 quality bar score (S29.4):** 8 MET TARGET + 1 MET FLOOR + 3 BELOW FLOOR (1 sampling-variance-bounded + 2 BLK-017) + 2 UNMEASURABLE. Held-out 57 macro-F1=0.937; OOD F1=0.857; ECE post-Platt=0.052 (within target).
+
+**Pilot go/no-go:** deferred to Step 10 user adjudication per spec S29.3 Step 6 sign-off requirements. Two readings (strict-spec vs empirical) presented in `phase_post_f0_classifier_training.md`.
+
