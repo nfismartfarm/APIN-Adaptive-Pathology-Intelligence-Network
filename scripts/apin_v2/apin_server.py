@@ -130,7 +130,12 @@ def _generate_gradcam_fixed(self, img_rgb, gate_weights_array,
         stages = getattr(getattr(bb, "model", bb), "stages", None)
         if stages is None:
             stages = bb.stages
-        target = stages[3].layers[-1]      # whole last ConvNeXt block
+        # Target the last stage module itself. Its forward output equals
+        # its last block's output (verified: identical CAM), and targeting
+        # the stage avoids navigating version-specific block-list
+        # attributes — transformers renamed the ConvNeXt stage internals
+        # (`.layers` exists on some versions, not on the Space's 5.5.x).
+        target = stages[-1]
 
         tensor = preprocess_branch_a(img_rgb, M2_IMG_SIZE).to(self.device)
         with GradCAMPlusPlus(model=model, target_layers=[target]) as cam:
