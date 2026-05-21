@@ -104,22 +104,29 @@ def _set_session_cookie(response: Response, token: str, *, request: Request):
     /auth/me (and creating console-log noise) on every page load."""
     host = request.url.hostname or ""
     is_local = host in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+    # The app is embedded in an iframe on huggingface.co/spaces/... — a
+    # cross-site context. A SameSite=Lax cookie is not sent there, so the
+    # session never sticks and auth loops. SameSite=None (which requires
+    # Secure) lets the cookie work inside the Space iframe. On localhost
+    # there is no iframe and no HTTPS, so keep Lax + non-secure.
+    samesite = "lax" if is_local else "none"
+    secure = not is_local
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         max_age=COOKIE_MAX_AGE,
-        httponly=True,        # secret — never readable from JS
-        samesite="lax",
-        secure=not is_local,
+        httponly=True,        # secret, never readable from JS
+        samesite=samesite,
+        secure=secure,
         path="/",
     )
     response.set_cookie(
         key=MARKER_COOKIE,
         value="1",
         max_age=COOKIE_MAX_AGE,
-        httponly=False,       # readable from JS — but holds no secret
-        samesite="lax",
-        secure=not is_local,
+        httponly=False,       # readable from JS, but holds no secret
+        samesite=samesite,
+        secure=secure,
         path="/",
     )
 
@@ -142,13 +149,17 @@ def _set_guest_cookie(response: Response, token: str, *, request: Request):
     session cookie so a guest upgrading to a real account is clean."""
     host = request.url.hostname or ""
     is_local = host in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+    # SameSite=None so the guest session also works inside the Space
+    # iframe (see _set_session_cookie for the full rationale).
+    samesite = "lax" if is_local else "none"
+    secure = not is_local
     response.set_cookie(
         key=GUEST_COOKIE,
         value=token,
         max_age=GUEST_COOKIE_MAX_AGE,
         httponly=True,
-        samesite="lax",
-        secure=not is_local,
+        samesite=samesite,
+        secure=secure,
         path="/",
     )
 
