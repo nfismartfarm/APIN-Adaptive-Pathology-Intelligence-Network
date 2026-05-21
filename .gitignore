@@ -82,6 +82,9 @@ pipeline_failures.log
 *.jpg
 *.jpeg
 *.gif
+# ...except the README assets (benchmark charts, screenshots).
+!/assets/*.png
+!/assets/*.jpg
 
 # ── Working notes & internal docs (keep only the README + deploy guide) ──
 *.md
