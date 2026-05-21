@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import sys
 from pathlib import Path
@@ -44,7 +45,68 @@ logging.basicConfig(level=logging.INFO,
                      format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("apin_v2.server")
 
+
+# ── Heatmap fix (monkeypatch over the read-only canonical pipeline) ────────
+# scripts/apin/inference.py builds the Grad-CAM target from
+# `model2.backbone.stages`, but the HuggingFace DINOv3ConvNextModel keeps its
+# conv stages one level deeper, under `.model` (verified backbone children:
+# model, layer_norm, pool). The mismatch made GradCAM++ raise AttributeError
+# on every Model-2-driven prediction, so confident okra / brassica diagnoses
+# returned no heatmap. scripts/apin/ is the shared canonical pipeline and is
+# not edited from here; instead, right after Model 2 loads, we alias
+# `backbone.stages` -> `backbone.model.stages` so the existing path resolves.
+from scripts.apin.inference import APINInference as _APINInference  # noqa: E402
+
+_orig_lazy_load_model2 = _APINInference._lazy_load_model2
+
+
+def _lazy_load_model2_with_gradcam_fix(self):
+    _orig_lazy_load_model2(self)
+    try:
+        bb = self._model2.backbone
+        if (not hasattr(bb, "stages")
+                and getattr(bb, "model", None) is not None
+                and hasattr(bb.model, "stages")):
+            # object.__setattr__ bypasses nn.Module.__setattr__, so the
+            # ModuleList is aliased without being re-registered as a
+            # duplicate child module.
+            object.__setattr__(bb, "stages", bb.model.stages)
+            logger.info("Grad-CAM fix applied: model2 backbone.stages "
+                        "aliased to backbone.model.stages")
+    except Exception as e:
+        logger.warning(f"Grad-CAM backbone alias skipped: {e}")
+
+
+_APINInference._lazy_load_model2 = _lazy_load_model2_with_gradcam_fix
+
 APIN_V2_DIR = PROJECT_ROOT / "scripts" / "apin_v2"
+
+
+# ── Public agronomy content for the share view ─────────────────────────────
+# diagnosis/diagnosis_lookup.json holds per-class full name, cause, symptoms,
+# treatment (by severity) and prevention. It is static, public reference
+# content, so the public /share view can safely surface it. Loaded once.
+_DIAG_LOOKUP_CACHE = None
+
+
+def _share_diagnosis_info(predicted_class):
+    """Return the public diagnosis-lookup entry for a class, or None."""
+    global _DIAG_LOOKUP_CACHE
+    if _DIAG_LOOKUP_CACHE is None:
+        try:
+            with open(PROJECT_ROOT / "diagnosis" / "diagnosis_lookup.json",
+                      encoding="utf-8") as f:
+                _DIAG_LOOKUP_CACHE = json.load(f)
+        except Exception as e:
+            logger.warning(f"diagnosis_lookup.json not loaded: {e}")
+            _DIAG_LOOKUP_CACHE = {}
+    return _DIAG_LOOKUP_CACHE.get(predicted_class or "")
+
+
+def _diag_lookup_all() -> dict:
+    """The full diagnosis lookup dict, lazily loaded and cached."""
+    _share_diagnosis_info("")          # primes _DIAG_LOOKUP_CACHE
+    return _DIAG_LOOKUP_CACHE or {}
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1118,15 +1180,32 @@ def _add_dashboard_routes(app):
         return HTMLResponse(share_html, headers=_NO_CACHE_HEADERS)
 
     @app.get("/share/{token}/data")
-    async def v2_share_data(token: str):
+    async def v2_share_data(token: str, request: Request):
         # Defensive — bound token length so a malicious caller can't pass GB
         token = (token or "")[:128]
-        pred = auth_db.resolve_share_token(token)
+        # Count a view at most once per browser per share: a refresh by the
+        # same viewer must not inflate the owner's view count. A per-token
+        # cookie marks "already counted"; it expires after 12 h so a genuine
+        # return visit later still registers as a new view.
+        import hashlib
+        seen_cookie = "apin_sv_" + hashlib.sha256(
+            token.encode("utf-8")).hexdigest()[:10]
+        already_seen = request.cookies.get(seen_cookie) is not None
+        pred = auth_db.resolve_share_token(token, count_view=not already_seen)
         if pred is None:
             return JSONResponse(status_code=404,
                                 content={"detail": "share link not found, "
                                                    "revoked, or expired"})
-        return JSONResponse(pred)
+        # Enrich with public agronomy content (full name, cause, symptoms,
+        # treatment, prevention) so the public view is informative.
+        info = _share_diagnosis_info(pred.get("predicted_class"))
+        if info:
+            pred["diagnosis_info"] = info
+        resp = JSONResponse(pred)
+        if not already_seen:
+            resp.set_cookie(seen_cookie, "1", max_age=43200,
+                            httponly=True, samesite="lax")
+        return resp
 
     # ── PUBLIC share image / heatmap (binary, owner-stripped) ──────────
     # These two routes serve the exact bytes for a shared specimen.  They
@@ -1218,46 +1297,141 @@ def _add_dashboard_routes(app):
         return Response(content=data, media_type="image/png",
                         headers={"Cache-Control": "private, max-age=300"})
 
-    # ── Weekly PDF report ──────────────────────────────────────────────
-    @app.get("/dashboard/report/weekly.pdf")
-    async def v2_weekly_pdf(request: Request):
+    # ── Weekly reports: list / generate / view / delete / restore ──────
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+    def _week_range(monday):
+        """For a Monday date return (start_date_iso, end_date_iso,
+        start_dt_iso, end_dt_iso). The dt bounds are [Mon 00:00, next
+        Mon 00:00), used for the created_at range query."""
+        sunday = monday + _td(days=6)
+        nxt = monday + _td(days=7)
+        return (monday.isoformat(), sunday.isoformat(),
+                monday.isoformat() + "T00:00:00+00:00",
+                nxt.isoformat() + "T00:00:00+00:00")
+
+    @app.get("/dashboard/reports/list")
+    async def v2_reports_list(request: Request):
         user, _ = _resolve_user(request)
-        if user is None: return _auth_required_response()
+        if user is None:
+            return _auth_required_response()
+        counts = auth_db.weekly_prediction_counts(user["id"])
+        existing = {r["week_start"]: r
+                    for r in auth_db.list_reports(user["id"])}
+        today = _dt.now(_tz.utc).date()
+        this_mon = today - _td(days=today.weekday())
+        weeks = []
+        for i in range(12):
+            mon = this_mon - _td(days=7 * i)
+            ws, we, _, _ = _week_range(mon)
+            rep = existing.get(ws)
+            weeks.append({
+                "week_start": ws, "week_end": we, "is_current": (i == 0),
+                "specimens": counts.get(ws, 0),
+                "report": ({"id": rep["id"],
+                            "generated_at": rep.get("generated_at"),
+                            "summary": rep.get("summary")}
+                           if rep else None),
+            })
+        return JSONResponse({"weeks": weeks})
+
+    @app.post("/dashboard/reports/generate")
+    async def v2_reports_generate(request: Request):
+        user, _ = _resolve_user(request)
+        if user is None:
+            return _auth_required_response()
         q = request.query_params
-        # Optional ?week_start=YYYY-MM-DD ; default = last 7 days ending today
-        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
         today = _dt.now(_tz.utc).date()
         try:
-            week_start_date = _dt.fromisoformat(q.get("week_start","")).date()
+            mon = _dt.fromisoformat(q.get("week_start", "")).date()
+            mon = mon - _td(days=mon.weekday())
         except (ValueError, TypeError):
-            week_start_date = today - _td(days=6)
-        week_end_date = week_start_date + _td(days=6)
-        ws = week_start_date.isoformat()
-        we = week_end_date.isoformat()
-        preds = auth_db.list_predictions(
-            user["id"], date_from=ws, date_to=we,
-            sort="newest", page=1, page_size=200, max_page_size=200,
-        )
-        pdf_bytes = _report_pdf.generate_weekly_pdf(
-            user=user, predictions=preds,
-            week_start=ws, week_end=we,
-        )
+            mon = today - _td(days=today.weekday())
+        ws, we, start_dt, end_dt = _week_range(mon)
+        _, _, p_start, p_end = _week_range(mon - _td(days=7))
+        uid = user["id"]
+        preds = auth_db.predictions_in_range(uid, start_dt, end_dt)
+        prev = auth_db.predictions_in_range(uid, p_start, p_end)
+        treatments = auth_db.list_treatments(uid, date_from=ws, date_to=we)
+
+        def _fi(pid):
+            try:
+                return auth_db.get_prediction_image(int(pid), user_id=uid)
+            except Exception:
+                return None
+
+        def _fh(pid):
+            try:
+                return auth_db.get_prediction_heatmap(int(pid), user_id=uid)
+            except Exception:
+                return None
+
+        try:
+            pdf_bytes, summary = _report_pdf.generate_weekly_pdf(
+                user=user, predictions=preds, prev_predictions=prev,
+                week_start=ws, week_end=we,
+                fetch_image=_fi, fetch_heatmap=_fh,
+                treatments=treatments, diagnosis_lookup=_diag_lookup_all())
+        except Exception as e:
+            logger.exception(f"weekly report render failed: {e}")
+            return JSONResponse(status_code=500,
+                                content={"detail": "report render failed"})
+        try:
+            rid = auth_db.save_report(uid, week_start=ws, week_end=we,
+                                      pdf_bytes=pdf_bytes, summary=summary)
+        except Exception as e:
+            logger.exception(f"weekly report save failed: {e}")
+            return JSONResponse(status_code=500,
+                                content={"detail": "report save failed"})
+        return JSONResponse({"id": rid, "week_start": ws, "week_end": we,
+                             "summary": summary})
+
+    @app.get("/dashboard/reports/{rid}/pdf")
+    async def v2_report_pdf(request: Request, rid: int):
         from fastapi.responses import Response
+        user, _ = _resolve_user(request)
+        if user is None:
+            return _auth_required_response()
+        data = auth_db.get_report_pdf(int(rid), user_id=user["id"])
+        if data is None:
+            return JSONResponse(status_code=404,
+                                content={"detail": "report not found"})
+        disp = ("attachment" if request.query_params.get("download")
+                else "inline")
         return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers={
-                **_NO_CACHE_HEADERS,
-                "Content-Disposition":
-                    f"inline; filename=\"weekly_report_{ws}.pdf\"",
-            },
-        )
+            content=data, media_type="application/pdf",
+            headers={**_NO_CACHE_HEADERS,
+                     "Content-Disposition":
+                         f'{disp}; filename="apin_weekly_report.pdf"'})
+
+    @app.post("/dashboard/reports/{rid}/delete")
+    async def v2_report_delete(request: Request, rid: int):
+        user, _ = _resolve_user(request)
+        if user is None:
+            return _auth_required_response()
+        ok = auth_db.soft_delete_report(int(rid), user_id=user["id"])
+        if not ok:
+            return JSONResponse(status_code=404,
+                                content={"detail": "report not found"})
+        return JSONResponse({"ok": True})
+
+    @app.post("/dashboard/reports/{rid}/restore")
+    async def v2_report_restore(request: Request, rid: int):
+        user, _ = _resolve_user(request)
+        if user is None:
+            return _auth_required_response()
+        ok = auth_db.restore_report(int(rid), user_id=user["id"])
+        if not ok:
+            return JSONResponse(status_code=409,
+                                content={"detail": "could not restore "
+                                                   "(it may no longer exist)"})
+        return JSONResponse({"ok": True})
 
     logger.info(
         "v2 dashboard routes registered — Phase 1 + 2 + 3 routes online. "
         "Phase 3: /dashboard/reports + /loupe + /gallery + /settings + "
         "/dashboard/treatments + /dashboard/treatments/export.csv + "
-        "/dashboard/shares + /share/{token} + /dashboard/report/weekly.pdf",
+        "/dashboard/shares + /share/{token} + /dashboard/reports/*",
     )
 
 

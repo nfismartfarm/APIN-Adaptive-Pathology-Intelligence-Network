@@ -26,6 +26,7 @@ import os
 import sqlite3
 import secrets
 import hashlib
+import json
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
@@ -386,6 +387,25 @@ CREATE TABLE IF NOT EXISTS share_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_shares_user      ON share_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_shares_token     ON share_tokens(token_hash);
+
+-- ── Weekly PDF reports ────────────────────────────────────────────────────
+-- One row per generated weekly report. The rendered PDF is stored as a BLOB
+-- so it is reused instead of re-rendered and survives a Space restart.
+-- Delete is soft (deleted_at) so the undo toast can restore it. The partial
+-- unique index keeps at most one ACTIVE report per user per week while
+-- allowing a deleted week to be generated again.
+CREATE TABLE IF NOT EXISTS reports (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    week_start    TEXT NOT NULL,
+    week_end      TEXT NOT NULL,
+    pdf_bytes     BLOB NOT NULL,
+    summary_json  TEXT,
+    generated_at  TEXT NOT NULL,
+    deleted_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_reports_user ON reports(user_id, week_start DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_active ON reports(user_id, week_start) WHERE deleted_at IS NULL;
 """
 
 
@@ -2270,11 +2290,16 @@ def revoke_share_token(token_id: int, *, user_id: int) -> bool:
         return cur.rowcount > 0
 
 
-def resolve_share_token(raw_token: str) -> Optional[dict]:
+def resolve_share_token(raw_token: str,
+                        count_view: bool = True) -> Optional[dict]:
     """Public-facing token lookup. Hashes the raw token, validates not
-    revoked / not expired, increments view_count + last_viewed_at, and
-    returns the full prediction record so the public view can render.
-    Returns None if the token is invalid, revoked, or expired."""
+    revoked / not expired, and returns the full prediction record so the
+    public view can render. Returns None if the token is invalid, revoked,
+    or expired.
+
+    view_count + last_viewed_at are bumped only when `count_view` is True.
+    The share-data route passes count_view=False on same-browser refreshes
+    so a viewer reloading the page does not inflate the owner's count."""
     if not raw_token:
         return None
     h = _hash_token(raw_token)
@@ -2291,12 +2316,13 @@ def resolve_share_token(raw_token: str) -> Optional[dict]:
         d = dict(row)
         if d["revoked_at"]:                          return None
         if d["expires_at"] and d["expires_at"] < now: return None
-        # Increment view counters (best-effort — no transactional concerns)
-        c.execute(
-            "UPDATE share_tokens SET view_count = view_count + 1, "
-            "       last_viewed_at = ? WHERE id = ?",
-            (now, d["id"]),
-        )
+        # Increment view counters only for counted views (best-effort).
+        if count_view:
+            c.execute(
+                "UPDATE share_tokens SET view_count = view_count + 1, "
+                "       last_viewed_at = ? WHERE id = ?",
+                (now, d["id"]),
+            )
     # Fetch the prediction WITHOUT signal parsing — the public share view
     # only renders class/crop/tier/confidence/date, never per-signal votes.
     # Using get_prediction_full + popping response_json keeps the wire
@@ -2310,7 +2336,7 @@ def resolve_share_token(raw_token: str) -> Optional[dict]:
     pred["share"] = {
         "label":      d["label"],
         "created_at": d["created_at"],
-        "view_count": (d["view_count"] or 0) + 1,
+        "view_count": (d["view_count"] or 0) + (1 if count_view else 0),
     }
     # Strip server-only fields before returning to the public viewer.
     # Round-2 PDA finding: a public share should expose ONLY agronomy facts.
@@ -2324,3 +2350,188 @@ def resolve_share_token(raw_token: str) -> Optional[dict]:
     pred.pop("id",             None)
     pred.pop("image_sha256",   None)
     return pred
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Weekly report persistence
+# A generated weekly PDF is stored once and reused. Delete is soft so the
+# undo toast can restore it. The partial unique index on (user_id,
+# week_start) WHERE deleted_at IS NULL keeps at most one ACTIVE report per
+# week while allowing a deleted week to be generated again.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def save_report(user_id: int, *, week_start: str, week_end: str,
+                pdf_bytes: bytes, summary: Optional[dict] = None) -> int:
+    """Persist a generated weekly PDF. Any existing ACTIVE report for the
+    same (user, week_start) is soft-deleted first, so a generate always
+    yields exactly one fresh active row. Returns the new report id."""
+    if not pdf_bytes:
+        raise ValueError("pdf_bytes cannot be empty")
+    week_start = (week_start or "").strip()[:10]
+    week_end = (week_end or "").strip()[:10]
+    if not week_start or not week_end:
+        raise ValueError("week_start and week_end are required")
+    blob = bytes(pdf_bytes)
+    summary_json = json.dumps(summary) if summary is not None else None
+    now = _now_iso()
+    with _write_lock, get_conn() as c:
+        c.execute(
+            "UPDATE reports SET deleted_at = ? "
+            "WHERE user_id = ? AND week_start = ? AND deleted_at IS NULL",
+            (now, int(user_id), week_start),
+        )
+        cur = c.execute(
+            "INSERT INTO reports (user_id, week_start, week_end, pdf_bytes, "
+            "                     summary_json, generated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (int(user_id), week_start, week_end, blob, summary_json, now),
+        )
+        return int(cur.lastrowid)
+
+
+def list_reports(user_id: int) -> list[dict]:
+    """Active (non-deleted) reports for a user, newest week first.
+    Excludes the heavy pdf_bytes BLOB; parses summary_json into `summary`."""
+    with get_conn() as c:
+        rows = c.execute(
+            "SELECT id, week_start, week_end, summary_json, generated_at "
+            "FROM reports WHERE user_id = ? AND deleted_at IS NULL "
+            "ORDER BY week_start DESC, id DESC",
+            (int(user_id),),
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        raw = d.pop("summary_json", None)
+        try:
+            d["summary"] = json.loads(raw) if raw else None
+        except Exception:
+            d["summary"] = None
+        out.append(d)
+    return out
+
+
+def get_report_meta(report_id: int, *, user_id: int) -> Optional[dict]:
+    """Lightweight metadata for one ACTIVE report (no BLOB). Ownership-gated."""
+    with get_conn() as c:
+        row = c.execute(
+            "SELECT id, week_start, week_end, generated_at FROM reports "
+            "WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            (int(report_id), int(user_id)),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_report_pdf(report_id: int, *, user_id: int) -> Optional[bytes]:
+    """Return the stored PDF bytes for an ACTIVE report owned by user_id.
+    None if not found, wrong owner, or deleted. The SQL's
+    `id = ? AND user_id = ?` makes this IDOR-safe."""
+    with get_conn() as c:
+        row = c.execute(
+            "SELECT pdf_bytes FROM reports "
+            "WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            (int(report_id), int(user_id)),
+        ).fetchone()
+    if row is None:
+        return None
+    data = row["pdf_bytes"]
+    if isinstance(data, memoryview):
+        data = bytes(data)
+    return data
+
+
+def soft_delete_report(report_id: int, *, user_id: int) -> bool:
+    """Soft-delete a report (set deleted_at). Returns True if an active
+    report was found and deleted, False otherwise. Ownership-gated."""
+    now = _now_iso()
+    with _write_lock, get_conn() as c:
+        row = c.execute(
+            "SELECT id FROM reports "
+            "WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            (int(report_id), int(user_id)),
+        ).fetchone()
+        if row is None:
+            return False
+        c.execute(
+            "UPDATE reports SET deleted_at = ? "
+            "WHERE id = ? AND user_id = ?",
+            (now, int(report_id), int(user_id)))
+        return True
+
+
+def restore_report(report_id: int, *, user_id: int) -> bool:
+    """Undo a soft delete. Returns False if the report is not found, is not
+    deleted, or if another active report for the same week now exists
+    (which would violate the partial unique index)."""
+    with _write_lock, get_conn() as c:
+        row = c.execute(
+            "SELECT week_start FROM reports "
+            "WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL",
+            (int(report_id), int(user_id)),
+        ).fetchone()
+        if row is None:
+            return False
+        clash = c.execute(
+            "SELECT 1 FROM reports WHERE user_id = ? AND week_start = ? "
+            "AND deleted_at IS NULL LIMIT 1",
+            (int(user_id), row["week_start"]),
+        ).fetchone()
+        if clash is not None:
+            return False
+        c.execute(
+            "UPDATE reports SET deleted_at = NULL "
+            "WHERE id = ? AND user_id = ?",
+            (int(report_id), int(user_id)))
+        return True
+
+
+def predictions_in_range(user_id: int, start_iso: str,
+                         end_iso: str) -> list[dict]:
+    """Predictions for a user with created_at in [start_iso, end_iso).
+    Carries response_json (for severity / urgency parsing) and the
+    has_image / has_heatmap flags, but NOT the heavy BLOBs. Newest first."""
+    with get_conn() as c:
+        rows = c.execute(
+            "SELECT id, crop, predicted_class, confidence, tier, "
+            "       response_json, created_at, "
+            "       (image_bytes IS NOT NULL) AS has_image, "
+            "       (heatmap_b64 IS NOT NULL) AS has_heatmap "
+            "FROM predictions "
+            "WHERE user_id = ? AND created_at >= ? AND created_at < ? "
+            "ORDER BY created_at DESC",
+            (int(user_id), start_iso, end_iso),
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["has_image"] = bool(d.get("has_image"))
+        d["has_heatmap"] = bool(d.get("has_heatmap"))
+        out.append(d)
+    return out
+
+
+def weekly_prediction_counts(user_id: int) -> dict:
+    """Map ISO Monday-week-start (YYYY-MM-DD) -> prediction count for a
+    user. Buckets in Python so week alignment is portable across the
+    sqlite and libSQL backends. Used by the Reports list."""
+    with get_conn() as c:
+        rows = c.execute(
+            "SELECT created_at FROM predictions WHERE user_id = ?",
+            (int(user_id),),
+        ).fetchall()
+    counts: dict = {}
+    for r in rows:
+        ts = r["created_at"]
+        if not ts:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except Exception:
+            try:
+                dt = datetime.strptime(str(ts)[:10], "%Y-%m-%d")
+            except Exception:
+                continue
+        monday = (dt - timedelta(days=dt.weekday())).date()
+        key = monday.isoformat()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
