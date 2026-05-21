@@ -45,6 +45,9 @@ RUN python -c "import timm; timm.create_model('vit_small_patch14_reg4_dinov2.lvd
 # ── Application code (last layers — this is what changes most often) ───────
 # `app/` carries the Model 2/3 + router config modules that scripts/ imports
 # as `from app.config_* import ...`; `scripts/` is the rest of the codebase.
+# `logo.png` lands at /app/logo.png — the weekly PDF report reads it from
+# the project root to draw the report cover logo.
+COPY --chown=user logo.png .
 COPY --chown=user app/ app/
 COPY --chown=user scripts/ scripts/
 

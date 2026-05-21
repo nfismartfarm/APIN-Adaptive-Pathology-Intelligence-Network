@@ -60,6 +60,13 @@ SINGLE_FILES = [
 # caches (caches/ is restored from apin-models at build time).
 EXCLUDE_DIRS = {"__pycache__", ".pytest_cache", "caches"}
 
+
+def _is_dev_helper(fname):
+    """Dev-only ad-hoc scripts never shipped to the Space — the `_*test*.py`
+    and `_*seed*.py` helpers. They are not imported by the server."""
+    b = fname.lower()
+    return b.startswith("_") and ("test" in b or "seed" in b)
+
 # Static deployment artifacts copied verbatim into the bundle root.
 ROOT_FILES = ["Dockerfile", "README.md", "requirements.txt",
               ".dockerignore", "download_weights.py"]
@@ -77,6 +84,8 @@ def stage_package(rel_pkg, exts, counters):
         dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
         for fname in filenames:
             if os.path.splitext(fname)[1] not in exts:
+                continue
+            if _is_dev_helper(fname):
                 continue
             src = os.path.join(dirpath, fname)
             rel = os.path.relpath(src, ROOT)
@@ -111,6 +120,17 @@ def main():
         shutil.copy2(src, os.path.join(STAGE, fname))
     print(f"  root artifacts              {len(ROOT_FILES):4d} files  "
           f"(Dockerfile, README, requirements, ...)")
+
+    # 1b. Project logo — the weekly PDF report renders it on the cover.
+    #     report_pdf.py reads it from the bundle root (_ROOT/logo.png).
+    logo_src = os.path.join(ROOT, "logo.png")
+    if os.path.exists(logo_src):
+        shutil.copy2(logo_src, os.path.join(STAGE, "logo.png"))
+        print(f"  logo.png                       1 files  "
+              f"{os.path.getsize(logo_src)/1024:8.1f} KB")
+    else:
+        print("  WARNING: logo.png not at project root — the report cover "
+              "will render without a logo (handled gracefully).")
 
     # 2. scripts/ package marker — make `scripts` an explicit package so
     #    `python scripts/apin_v2/apin_server.py` resolves `import scripts.*`
