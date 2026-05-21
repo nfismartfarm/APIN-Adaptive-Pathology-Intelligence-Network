@@ -14,6 +14,7 @@ Rate limit: 5 login attempts per IP per minute. Cleared on success.
 from __future__ import annotations
 
 import re
+import random
 import logging
 from typing import Optional
 
@@ -192,11 +193,12 @@ async def check_uniqueness(
         base = v.lower().strip()
         sugg = []
         if field == "username":
-            sugg = [f"{base}_kerala", f"{base}8766", f"{base}_lab"]
+            n = random.randint(2, 99)
+            sugg = [f"{base}_kerala", f"{base}{n}", f"{base}_lab"]
             # Filter out any that themselves are taken
             sugg = [s for s in sugg if not auth_db.is_taken("username", s)][:3]
         elif field == "display_name":
-            sugg = [f"{v} (Kerala)", f"{v} 8766"]
+            sugg = [f"{v} (Kerala)", f"{v} {random.randint(2, 99)}"]
             sugg = [s for s in sugg if not auth_db.is_taken("display_name", s)][:2]
         return {"available": False, "reason": "taken", "suggestions": sugg}
 

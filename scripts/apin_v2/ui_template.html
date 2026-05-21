@@ -4,7 +4,24 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>APIN: Adaptive Pathological Intelligence Network</title>
+<title>APIN: Adaptive Pathological Intelligence Network — free plant disease detection</title>
+<meta name="description" content="Free AI plant disease detection for okra, brassica and tomato leaves. Upload a leaf photo and get a tiered, confidence-rated diagnosis with a heatmap and treatment guidance.">
+<link rel="canonical" href="https://dxv-404-apin.hf.space/">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#2f6f3e">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="APIN">
+<meta property="og:title" content="APIN: Adaptive Pathological Intelligence Network">
+<meta property="og:description" content="Free AI plant disease detection for okra, brassica and tomato leaves. Upload a photo, get a tiered diagnosis with a heatmap.">
+<meta property="og:url" content="https://dxv-404-apin.hf.space/">
+<meta property="og:image" content="https://dxv-404-apin.hf.space/logo.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="APIN: Adaptive Pathological Intelligence Network">
+<meta name="twitter:description" content="Free AI plant disease detection for okra, brassica and tomato leaves.">
+<meta name="twitter:image" content="https://dxv-404-apin.hf.space/logo.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebApplication","name":"APIN: Adaptive Pathological Intelligence Network","alternateName":"APIN","url":"https://dxv-404-apin.hf.space/","description":"Free AI-assisted plant disease detection for okra, brassica and tomato leaves. Upload a leaf photo and receive a tiered, confidence-rated diagnosis with a Grad-CAM heatmap and treatment guidance.","applicationCategory":"Agriculture","operatingSystem":"Any modern web browser","browserRequirements":"Requires JavaScript","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"about":{"@type":"Thing","name":"Plant pathology and crop leaf disease detection"}}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..700,0..100,0..1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -4202,6 +4219,37 @@
 </style>
 </head>
 <body>
+
+<!-- ── iframe escape banner (shown only when APIN runs inside an iframe) ── -->
+<style id="apin-iframe-banner-css">
+#apin-iframe-banner{position:fixed;top:0;left:0;right:0;z-index:99999;
+  display:flex;align-items:center;justify-content:center;gap:12px;
+  flex-wrap:wrap;background:#b87d1e;color:#fff;
+  font-family:'Inter',system-ui,sans-serif;font-size:13px;line-height:1.4;
+  padding:8px 42px 8px 16px;box-shadow:0 2px 8px rgba(26,22,18,.25);}
+#apin-iframe-banner[hidden]{display:none;}
+#apin-iframe-banner a{color:#fff;font-weight:700;text-decoration:underline;
+  white-space:nowrap;}
+#apin-iframe-banner button{position:absolute;right:10px;top:50%;
+  transform:translateY(-50%);background:none;border:0;color:#fff;
+  font-size:18px;line-height:1;cursor:pointer;padding:2px 6px;}
+</style>
+<div id="apin-iframe-banner" role="region" aria-label="Open APIN in its own tab" hidden>
+  <span>For login, history and saved reports, open APIN in its own browser tab.</span>
+  <a href="https://dxv-404-apin.hf.space/" target="_blank" rel="noopener">Open APIN &#8599;</a>
+  <button type="button" aria-label="Dismiss" onclick="this.parentNode.hidden=true;document.body.style.paddingTop='';">&times;</button>
+</div>
+<script>
+(function(){
+  if(window.self===window.top)return;          /* not embedded — do nothing */
+  var b=document.getElementById('apin-iframe-banner');
+  if(!b)return;
+  b.hidden=false;
+  requestAnimationFrame(function(){
+    document.body.style.paddingTop=(b.offsetHeight||40)+'px';
+  });
+})();
+</script>
 
 <!-- LUCIDE ICON SPRITE (inlined, only the icons we use) -->
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
@@ -11617,6 +11665,53 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshAuth();
 })();
 </script>
+
+<!-- ── SEO footer ──────────────────────────────────────────────────────── -->
+<footer class="apin-seo-footer" role="contentinfo">
+  <div class="apin-foot-inner">
+    <div class="apin-foot-brand">
+      <strong>APIN</strong>
+      <span>Adaptive Pathological Intelligence Network</span>
+    </div>
+    <p class="apin-foot-desc">
+      Free, AI-assisted plant disease detection for okra, brassica and tomato
+      leaves. Upload a single leaf photo and APIN returns a tiered,
+      confidence-rated diagnosis, a heatmap of where the model looked, and
+      treatment guidance. It runs in your browser with no install, and your
+      leaf photos are never stored.
+    </p>
+    <nav class="apin-foot-links" aria-label="Footer">
+      <a href="/">Disease detector</a>
+      <a href="/landing">Sign in or create account</a>
+      <a href="https://github.com/Dxv-404/APIN-Adaptive-Pathology-Intelligence-Network"
+         target="_blank" rel="noopener nofollow">Source on GitHub</a>
+    </nav>
+    <p class="apin-foot-legal">
+      &copy; 2026 APIN. Field Laboratory, Kerala. A research and educational
+      tool, not a substitute for professional agronomic advice.
+    </p>
+  </div>
+</footer>
+<style>
+.apin-seo-footer{background:#efe9da;border-top:1px solid #c7bca9;
+  padding:34px 22px 40px;margin-top:48px;
+  font-family:'Inter',system-ui,sans-serif;color:#5a5246;}
+.apin-foot-inner{max-width:760px;margin:0 auto;text-align:center;}
+.apin-foot-brand strong{font-family:'Fraunces',Georgia,serif;font-size:20px;
+  color:#1a1612;letter-spacing:.02em;}
+.apin-foot-brand span{display:block;font-family:'Fraunces',Georgia,serif;
+  font-style:italic;font-size:13px;color:#2f6f3e;margin-top:2px;}
+.apin-foot-desc{font-size:13px;line-height:1.65;margin:14px auto 16px;
+  max-width:620px;}
+.apin-foot-links{display:flex;flex-wrap:wrap;gap:8px 22px;
+  justify-content:center;margin-bottom:14px;}
+.apin-foot-links a{color:#2f6f3e;text-decoration:none;font-size:12.5px;
+  font-weight:600;border-bottom:1px solid transparent;}
+.apin-foot-links a:hover{border-bottom-color:#2f6f3e;}
+.apin-foot-legal{font-size:11px;color:#8a7f6a;line-height:1.6;
+  border-top:1px dashed #c7bca9;padding-top:14px;max-width:620px;
+  margin:0 auto;}
+</style>
 
 </body>
 </html>

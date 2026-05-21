@@ -231,6 +231,36 @@ _APINInference.predict = _predict_with_ood_heatmap
 
 APIN_V2_DIR = PROJECT_ROOT / "scripts" / "apin_v2"
 
+# ── SEO / public-site constants ────────────────────────────────────────────
+# The canonical production origin. Used for canonical links, Open Graph
+# urls, robots.txt and sitemap.xml. The app is also reachable embedded in
+# an iframe under huggingface.co/spaces/...; canonical points search
+# engines at this direct origin.
+_PUBLIC_BASE_URL = "https://dxv-404-apin.hf.space"
+
+# Fresh-but-indexable: the public pages must always reflect the newest
+# deploy (no stale browser copy), but unlike the dashboard headers these
+# carry NO X-Robots-Tag, so search engines may still index them.
+_PUBLIC_PAGE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma":        "no-cache",
+}
+
+# Hand-drawn leaf favicon (SVG — crisp at every size, dark-mode friendly).
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+    '<path d="M13 51 C 7 32 19 9 53 11 C 56 44 35 58 13 51 Z" '
+    'fill="#3f8a4d" stroke="#1b3a26" stroke-width="3.4" '
+    'stroke-linejoin="round"/>'
+    '<path d="M15 50 C 27 41 39 27 50 14" fill="none" '
+    'stroke="#1b3a26" stroke-width="3" stroke-linecap="round"/>'
+    '<path d="M26 42 C 25 36 23 32 18 30" fill="none" '
+    'stroke="#1b3a26" stroke-width="2.4" stroke-linecap="round"/>'
+    '<path d="M37 30 C 36 24 35 21 31 18" fill="none" '
+    'stroke="#1b3a26" stroke-width="2.4" stroke-linecap="round"/>'
+    '</svg>'
+)
+
 
 # ── Public agronomy content for the share view ─────────────────────────────
 # diagnosis/diagnosis_lookup.json holds per-class full name, cause, symptoms,
@@ -613,10 +643,68 @@ def _add_landing_route(app):
 
     @app.get("/landing", response_class=HTMLResponse)
     async def v2_landing():
-        return HTMLResponse(html)
+        return HTMLResponse(html, headers=_PUBLIC_PAGE_HEADERS)
 
     logger.info(f"v2 '/landing' route registered — serving "
                 f"{APIN_V2_DIR / 'landing.html'} ({len(html):,} bytes)")
+
+
+def _add_seo_routes(app):
+    """Favicon, logo, robots.txt and sitemap.xml. Public and
+    unauthenticated, served from this process so the Space needs no
+    separate static-file mount."""
+    from fastapi.responses import Response as _Resp, PlainTextResponse
+
+    _ASSET_HEADERS = {"Cache-Control": "public, max-age=86400"}
+
+    @app.get("/favicon.svg")
+    async def v2_favicon_svg():
+        return _Resp(content=_FAVICON_SVG, media_type="image/svg+xml",
+                     headers=_ASSET_HEADERS)
+
+    @app.get("/favicon.ico")
+    async def v2_favicon_ico():
+        # Browsers auto-request /favicon.ico on every page; modern
+        # browsers render an SVG returned with the svg media type.
+        return _Resp(content=_FAVICON_SVG, media_type="image/svg+xml",
+                     headers=_ASSET_HEADERS)
+
+    @app.get("/logo.png")
+    async def v2_logo_png():
+        logo = PROJECT_ROOT / "logo.png"
+        if not logo.exists():
+            return _Resp(status_code=404, content=b"")
+        return _Resp(content=logo.read_bytes(), media_type="image/png",
+                     headers=_ASSET_HEADERS)
+
+    @app.get("/robots.txt")
+    async def v2_robots():
+        body = (
+            "User-agent: *\n"
+            "Disallow: /dashboard\n"
+            "Disallow: /auth/\n"
+            "Disallow: /share/\n"
+            "Disallow: /predict\n"
+            "Allow: /\n"
+            f"Sitemap: {_PUBLIC_BASE_URL}/sitemap.xml\n"
+        )
+        return PlainTextResponse(body)
+
+    @app.get("/sitemap.xml")
+    async def v2_sitemap():
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            f'  <url><loc>{_PUBLIC_BASE_URL}/</loc>'
+            '<changefreq>weekly</changefreq><priority>1.0</priority></url>\n'
+            f'  <url><loc>{_PUBLIC_BASE_URL}/landing</loc>'
+            '<changefreq>monthly</changefreq><priority>0.6</priority></url>\n'
+            '</urlset>\n'
+        )
+        return _Resp(content=body, media_type="application/xml")
+
+    logger.info("v2 SEO routes registered — /favicon.svg /favicon.ico "
+                "/logo.png /robots.txt /sitemap.xml")
 
 
 def _add_auth_routes(app):
@@ -720,6 +808,11 @@ def _add_dashboard_routes(app):
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "Pragma":        "no-cache",
         "Expires":       "0",
+        # Dashboard, share and private API responses must never be indexed
+        # (they carry user data). X-Robots-Tag is the HTTP-header form of
+        # <meta name="robots" content="noindex"> and covers every page and
+        # response that uses these headers in one place.
+        "X-Robots-Tag":  "noindex, nofollow",
     }
 
     def _resolve_user(request: Request):
@@ -1611,7 +1704,7 @@ def _override_index_route(app):
     # FastAPI builds the ASGI wrapper correctly this way.
     @app.get("/", response_class=HTMLResponse)
     async def v2_index():
-        return HTMLResponse(html)
+        return HTMLResponse(html, headers=_PUBLIC_PAGE_HEADERS)
 
     logger.info(f"v2 '/' route replaced (removed {removed} original) — "
                 f"serving {APIN_V2_DIR / 'ui_template.html'} "
@@ -2063,6 +2156,7 @@ def main():
     app = make_app()
     _override_index_route(app)
     _add_landing_route(app)  # cinematic landing + login/signup (additive)
+    _add_seo_routes(app)     # favicon, logo, robots.txt, sitemap.xml
     _add_auth_routes(app)    # /auth/* — real SQLite+argon2id, Day 3
     _add_dashboard_routes(app)  # /dashboard + /dashboard/data, Day 4
 
