@@ -79,6 +79,151 @@ def _lazy_load_model2_with_gradcam_fix(self):
 
 _APINInference._lazy_load_model2 = _lazy_load_model2_with_gradcam_fix
 
+
+# ── Grad-CAM target fix (monkeypatch over the read-only pipeline) ─────────
+# scripts/apin/inference.py:_generate_gradcam targets, for the Model 2
+# signal, `stages[3].layers[-1].depthwise_conv` — the depthwise conv INSIDE
+# the last ConvNeXt block, before the pointwise (channel-mixing) convs.
+# Those activations are not class-discriminative: the resulting CAM is a
+# rainbow wash on confident predictions and a border artifact otherwise.
+# The correct CAM target is the whole last block's output (after the
+# pointwise convs + residual). Verified by rendering both: the block
+# output localises tightly on the leaf lesions. Non-model2 signals are
+# left to the canonical implementation.
+import numpy as _np  # noqa: E402
+
+_orig_generate_gradcam = _APINInference._generate_gradcam
+
+
+def _pick_cam_signal(gate_weights_array):
+    """The gate-weighted top signal that has a neural backbone (PSV has
+    none). Mirrors the canonical _generate_gradcam selection."""
+    n = len(gate_weights_array)
+    order = (["model2", "efficientnet", "psv", "dinov2_head"] if n == 4
+             else ["model2", "efficientnet", "dinov2_head"])
+    for name, _w in sorted(zip(order, gate_weights_array), key=lambda x: -x[1]):
+        if name != "psv":
+            return name
+    return None
+
+
+def _generate_gradcam_fixed(self, img_rgb, gate_weights_array,
+                            predicted_class_idx):
+    chosen = _pick_cam_signal(gate_weights_array)
+    if chosen != "model2":
+        # efficientnet / dinov2 branches are unchanged — defer.
+        return _orig_generate_gradcam(self, img_rgb, gate_weights_array,
+                                      predicted_class_idx)
+    try:
+        import io as _io
+        import base64 as _b64
+        import cv2 as _cv2
+        from PIL import Image as _PIL
+        from pytorch_grad_cam import GradCAMPlusPlus
+        from pytorch_grad_cam.utils.image import show_cam_on_image
+        from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+        from scripts.apin.inference import preprocess_branch_a, M2_IMG_SIZE
+
+        self._lazy_load_model2()
+        model = self._model2
+        bb = model.backbone
+        stages = getattr(getattr(bb, "model", bb), "stages", None)
+        if stages is None:
+            stages = bb.stages
+        target = stages[3].layers[-1]      # whole last ConvNeXt block
+
+        tensor = preprocess_branch_a(img_rgb, M2_IMG_SIZE).to(self.device)
+        with GradCAMPlusPlus(model=model, target_layers=[target]) as cam:
+            grayscale = cam(
+                input_tensor=tensor,
+                targets=[ClassifierOutputTarget(predicted_class_idx)])[0]
+
+        rgb_resized = _cv2.resize(img_rgb, (M2_IMG_SIZE, M2_IMG_SIZE))
+        overlay = show_cam_on_image(
+            rgb_resized.astype(_np.float32) / 255.0,
+            grayscale, use_rgb=True, image_weight=0.55)
+        buf = _io.BytesIO()
+        _PIL.fromarray(overlay).save(buf, format="PNG", optimize=True)
+        return _b64.b64encode(buf.getvalue()).decode("ascii"), "model2"
+    except Exception as e:
+        logger.warning(f"Grad-CAM (fixed model2 target) failed: {e}")
+        return None, "model2"
+
+
+_APINInference._generate_gradcam = _generate_gradcam_fixed
+
+
+# ── OOD heatmap restoration (monkeypatch over the read-only pipeline) ──────
+# scripts/apin/inference.py skips Grad-CAM for OOD tiers 4A/4B (line ~1778),
+# so a best-guess card shows "no heatmap available". Farmers still want to
+# see where the model looked. We regenerate the heatmap after predict()
+# returns, reusing the pipeline's own _generate_gradcam (same GradCAM++,
+# same target layer) — but only attach a genuinely FOCUSED map, never a
+# diffuse full-image rainbow wash. Tier 3B (poor image quality) stays
+# skipped: a heatmap on an unreadable photo is meaningless.
+_orig_apin_predict = _APINInference.predict
+
+# Focus gate: fraction of the frame that reads as "hot" in the JET overlay.
+_OOD_CAM_HOT_MIN = 0.015   # below this → no spatial signal at all
+_OOD_CAM_HOT_MAX = 0.62    # above this → diffuse wash, not a focused blob
+
+
+def _ood_cam_focus(overlay_b64):
+    """Return (is_focused, hot_fraction) for a Grad-CAM++ overlay PNG.
+    In a JET overlay a hot pixel is strongly red-over-blue; a focused blob
+    covers a modest, concentrated fraction of the frame, a rainbow wash
+    covers most of it."""
+    try:
+        import io as _io
+        import base64 as _b64
+        from PIL import Image as _PIL
+        arr = _np.asarray(
+            _PIL.open(_io.BytesIO(_b64.b64decode(overlay_b64))).convert("RGB"),
+            dtype=_np.int16)
+        heat = arr[:, :, 0] - arr[:, :, 2]          # red minus blue
+        hot_fraction = float((heat > 60).mean())
+        focused = _OOD_CAM_HOT_MIN <= hot_fraction <= _OOD_CAM_HOT_MAX
+        return focused, hot_fraction
+    except Exception as e:
+        logger.warning(f"OOD heatmap focus check failed: {e}")
+        return False, 0.0
+
+
+def _predict_with_ood_heatmap(self, img_rgb):
+    result = _orig_apin_predict(self, img_rgb)
+    try:
+        if (result.gradcam_b64_png is None
+                and getattr(result, "tier", None) in ("4A", "4B")
+                and result.diagnosis in self.class_order
+                and result.gate_weights):
+            # result.gate_weights is insertion-ordered S1_M2, S2_EN,
+            # (S3_PSV), S4_DINOv2 — positionally aligned with the signal
+            # order _generate_gradcam expects (model2, efficientnet, psv,
+            # dinov2_head).
+            gate_arr = _np.array(list(result.gate_weights.values()),
+                                 dtype=float)
+            class_idx = self.class_order.index(result.diagnosis)
+            cam_b64, cam_sig = self._generate_gradcam(
+                img_rgb, gate_arr, class_idx)
+            if cam_b64:
+                focused, frac = _ood_cam_focus(cam_b64)
+                if focused:
+                    result.gradcam_b64_png = cam_b64
+                    result.gradcam_source_signal = cam_sig
+                    logger.info(
+                        f"OOD heatmap restored: tier={result.tier} "
+                        f"signal={cam_sig} hot_fraction={frac:.3f}")
+                else:
+                    logger.info(
+                        f"OOD heatmap withheld (not focused): tier="
+                        f"{result.tier} hot_fraction={frac:.3f}")
+    except Exception as e:
+        logger.warning(f"OOD heatmap regeneration skipped: {e}")
+    return result
+
+
+_APINInference.predict = _predict_with_ood_heatmap
+
 APIN_V2_DIR = PROJECT_ROOT / "scripts" / "apin_v2"
 
 
