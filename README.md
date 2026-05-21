@@ -1,80 +1,92 @@
-# Plant Disease Detection — Kerala
+# APIN — Plant Pathology Journal
 
-Detects okra and brassica leaf diseases from smartphone photographs.
-Designed for farmers in Kerala, South India.
+A leaf-disease diagnosis web app for **tomato**, **okra (ladies finger)** and
+**brassica (broccoli / cabbage)**. Photograph a leaf and get a calibrated
+diagnosis with a Grad-CAM heatmap, severity, treatment and prevention advice —
+kept in a personal field-notebook dashboard.
 
-## Supported diseases
+**Live demo:** https://dxv-404-apin.hf.space
 
-- Okra: Yellow Vein Mosaic Virus, Powdery Mildew, Cercospora Leaf Spot, Enation Leaf Curl
-- Brassica (broccoli/cabbage): Black Rot, Downy Mildew, Alternaria Leaf Spot, Clubroot
+---
 
-## Setup
+## What it does
 
-```bash
-# 1. Clone repository
-git clone https://github.com/yourusername/plant-disease-kerala.git
-cd plant-disease-kerala
+- **Diagnose** — upload a leaf photo, get the disease, a calibrated confidence,
+  a severity reading and a Grad-CAM heatmap showing where the model looked.
+- **Advise** — treatment, prevention and urgency for the detected (crop, disease).
+- **Track** — a private dashboard per account: prediction history, a disease
+  ledger, an activity calendar and a treatment log.
+- **Guests** — 3 free diagnoses without an account; sign up for the dashboard.
 
-# 2. Create virtual environment
-python -m venv venv
-venv\Scripts\activate.bat       # Windows CMD
-# source venv/Scripts/activate  # Git Bash
+## Architecture
 
-# 3. Copy and fill environment template
-cp .env.template .env
-# Edit .env with your Kaggle, GitHub, and Wandb credentials
+The diagnosis is an ensemble: a crop **router**, a **Model 2** specialist, an
+EfficientNet head, a **DINOv2** probe with an out-of-distribution detector, a
+tomato single-pass-LoRA specialist (**Model 3**), and a **PSV** signal stack
+fused through a calibrated stacking layer. Temperature scaling keeps the
+reported confidence honest.
 
-# 4. Run pipeline (trains the model — takes ~4 hours)
-python run_pipeline.py
+```
+scripts/apin/             APIN ensemble server + inference (okra/brassica/chilli)
+scripts/apin_v2/          FastAPI app — auth, dashboard, Field-Notes UI
+scripts/ladi_net/         LADI-Net tomato pipeline (Model 3 + LoRA)
+scripts/model3_training/  Model 3 architecture
+scripts/dinov2_probe/     DINOv2 feature probe + OOD detector
+scripts/psv/              Plant Signal Vector feature stack
+app/                      Model 2 / Model 3 / router config modules
+deploy/                   Hugging Face Space deployment tooling
 ```
 
-## Starting the server
+## Running it
+
+Model weights (~722 MB) are **not** in this repo — they live in the public
+[`dxv-404/apin-models`](https://huggingface.co/dxv-404/apin-models) model repo
+and are pulled automatically at build time.
+
+### Docker (recommended — mirrors the live deployment)
 
 ```bash
-# Development (auto-reload on code change)
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+git clone https://github.com/Dxv-404/Plant-disease-detection-for-brocolli-and-ladies-finger.git
+cd Plant-disease-detection-for-brocolli-and-ladies-finger
 
-# Production (4 workers, no reload)
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+python deploy/stage_space.py          # assemble deploy/apin-space/
+docker build -t apin deploy/apin-space
+docker run -p 7860:7860 \
+  -e TURSO_DATABASE_URL="libsql://<your-db>.turso.io" \
+  -e TURSO_AUTH_TOKEN="<your-token>" \
+  apin
 ```
 
-Open browser at: http://localhost:8000
+Open http://localhost:7860.
 
-## Adding Kerala field images for tier-3 evaluation
+### Local (development)
 
 ```bash
-python tools/add_kerala_image.py --path path/to/image.jpg --class okra_yvmv
+python -m venv venv && source venv/Scripts/activate   # Windows Git Bash
+pip install -r requirements.txt
+
+# Fetch the model weights into the working tree:
+python -c "from huggingface_hub import snapshot_download; \
+  snapshot_download('dxv-404/apin-models', repo_type='model', local_dir='.')"
+
+python scripts/apin_v2/apin_server.py --host 0.0.0.0 --port 8766
 ```
 
-## Running evaluations manually
+Open http://localhost:8766.
 
-```bash
-# Tier-2 PlantDoc evaluation (ONCE — run after training complete)
-python training/08_evaluate_tier2_plantdoc.py
+## Storage
 
-# Local test set evaluation (after tier-2)
-python training/10_evaluate_local_test.py
+Accounts, predictions and uploaded-image BLOBs persist in an external
+**Turso** (libSQL) database, selected by the `TURSO_DATABASE_URL` /
+`TURSO_AUTH_TOKEN` environment variables. With them unset, the app falls back
+to a local SQLite file — handy for development. See
+[`scripts/apin_v2/DEPLOYMENT.md`](scripts/apin_v2/DEPLOYMENT.md) for the full
+Hugging Face Space + Turso setup.
 
-# Tier-3 Kerala evaluation (when 50+ Kerala images collected)
-python training/09_evaluate_tier3_kerala.py
-```
+## Deployment
 
-## Pipeline steps
-
-| Step | Script | What it does |
-|------|--------|--------------|
-| 0 | setup/setup_project.py | Creates directories, validates env |
-| 1 | setup/install_cuda.py | CUDA 12.1 installation guide |
-| 2 | setup/install_dependencies.py | Installs Python packages |
-| 3 | agents/download_orchestrator.py | Downloads 6 training datasets |
-| 4 | agents/acquire_kerala_images.py | iNaturalist + YouTube + synthetic |
-| 5 | training/01_prepare_data.py | Label assertions, split, source_map.csv |
-| 6 | training/02_generate_severity.py | Severity proxy labels |
-| 7 | training/03_cache_features.py | Backbone feature caching |
-| 8 | training/04_train_phase1.py | Head training (~30 min) |
-| 9 | training/05_train_phase2.py | Full fine-tuning (~3.5 hr) |
-| 10 | training/06_calibrate.py | Temperature scaling |
-| 11 | training/07_evaluate_validation.py | Validation report |
-| 12 | setup/test_server.py | Server smoke test |
-| 13 | training/08_evaluate_tier2_plantdoc.py | Tier-2 evaluation (ONCE) |
-| 14 | setup/package_deployment.py | Dockerfile |
+`deploy/` holds everything for the free Hugging Face Space deployment:
+`stage_space.py` assembles the bundle, `space_files/Dockerfile` builds the
+image, `space_files/download_weights.py` pulls the weights, and
+`watch_space.py` monitors the build. Full guide in
+[`scripts/apin_v2/DEPLOYMENT.md`](scripts/apin_v2/DEPLOYMENT.md).

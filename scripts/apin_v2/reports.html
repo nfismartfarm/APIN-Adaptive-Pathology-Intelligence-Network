@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reports & Exports · APIN v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#fbf9f3; --paper-deep:#e9e2d1; --paper-edge:#c7bca9;
+  --ink:#1a1612; --ink-soft:#5a5246;
+  --accent-green:#2f6f3e; --accent-ochre:#b87d1e; --accent-crimson:#b01820;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#f4efe6;color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+[hidden]{display:none !important}
+.page{max-width:980px;margin:0 auto;padding:28px 24px 60px;}
+.back-link{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:'Fraunces',serif;font-style:italic;font-size:14px;
+  color:var(--accent-green);text-decoration:none;margin-bottom:12px;
+}
+.back-link:hover{text-decoration:underline}
+h1{
+  font-family:'Fraunces',serif;font-weight:500;font-size:32px;
+  letter-spacing:-0.015em;font-variation-settings:'SOFT' 30,'WONK' 0;
+  color:var(--ink);line-height:1.1;
+}
+.sub{
+  font-family:'Fraunces',serif;font-style:italic;font-size:15px;
+  color:var(--ink-soft);margin-top:4px;margin-bottom:26px;
+}
+.dev-banner{
+  margin:0 0 14px;padding:10px 14px;
+  border:1px dashed var(--accent-ochre);background:#fff7e8;
+  color:#7a4a0a;border-radius:6px;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;
+  letter-spacing:0.01em;
+}
+.report-card{
+  background:var(--paper);
+  border:1px solid var(--paper-edge);
+  border-radius:10px;
+  padding:22px 26px;
+  margin-bottom:18px;
+  position:relative;
+  box-shadow:0 1px 2px rgba(26,22,18,0.05);
+}
+.report-card::before{
+  content:'';position:absolute;top:-8px;right:36px;
+  width:56px;height:18px;
+  background:repeating-linear-gradient(45deg,#e8d9b8 0 6px,#e0cea3 6px 12px);
+  opacity:0.85;border-radius:1px;transform:rotate(-2deg);
+}
+.card-head{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:18px;
+  margin-bottom:10px;
+}
+.card-head .icon{
+  width:42px;height:42px;display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--paper-edge);border-radius:8px;
+  background:#fff;font-size:18px;flex-shrink:0;
+}
+.card-head h2{
+  font-family:'Fraunces',serif;font-weight:500;font-size:20px;
+  letter-spacing:-0.01em;color:var(--ink);
+  font-variation-settings:'SOFT' 30,'WONK' 0;
+}
+.card-head .one-liner{
+  font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);margin-top:2px;
+}
+.report-body{padding-top:8px}
+.field-row{
+  display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;
+  margin-bottom:12px;
+}
+.field-row label{
+  display:flex;flex-direction:column;gap:4px;
+  font-family:'Inter',sans-serif;font-size:10.5px;font-weight:600;
+  letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-soft);
+}
+.field-row input,.field-row select{
+  font-family:'Inter',sans-serif;font-size:13px;color:var(--ink);
+  background:#fff;border:1px solid var(--paper-edge);border-radius:6px;
+  padding:7px 10px;outline:none;min-width:140px;
+}
+.field-row input:focus,.field-row select:focus{border-color:var(--accent-green)}
+.btn{
+  font-family:'Inter',sans-serif;font-size:13px;font-weight:500;
+  padding:8px 18px;border-radius:6px;cursor:pointer;
+  border:1px solid var(--ink);background:#fff;color:var(--ink);
+  text-decoration:none;display:inline-block;
+  transition:background .15s, color .15s;
+}
+.btn:hover{background:var(--ink);color:var(--paper)}
+.btn.primary{background:var(--accent-green);color:#fff;border-color:var(--accent-green)}
+.btn.primary:hover{background:#1f5a30}
+.btn.danger{background:#fff;color:var(--accent-crimson);border-color:var(--accent-crimson)}
+.btn.danger:hover{background:var(--accent-crimson);color:#fff}
+.helper-text{
+  margin-top:8px;font-family:'Fraunces',serif;font-style:italic;
+  font-size:12px;color:var(--ink-soft);
+}
+
+/* Share-link list */
+.shares-list{margin-top:14px;border-top:1px dashed var(--paper-edge);padding-top:14px}
+.share-row{
+  display:grid;grid-template-columns:1fr 100px 100px 80px;
+  gap:10px;align-items:center;
+  padding:10px 12px;background:#fdfcf7;
+  border:1px solid var(--paper-edge);border-radius:6px;
+  margin-bottom:8px;
+}
+.share-row .meta{
+  font-family:'Fraunces',serif;font-size:13px;color:var(--ink);
+}
+.share-row .meta .label{display:block;font-weight:500}
+.share-row .meta .pid{
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-soft);
+  font-weight:400;display:block;margin-top:2px;
+}
+.share-row .mono{
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-soft);
+}
+.share-row .revoked{
+  font-family:'Fraunces',serif;font-style:italic;font-size:12px;
+  color:var(--accent-crimson);
+}
+.shares-empty{
+  font-family:'Fraunces',serif;font-style:italic;
+  color:var(--ink-soft);font-size:13.5px;padding:14px 4px;
+}
+/* Create-share modal */
+.share-create-result{
+  margin-top:14px;padding:14px 16px;
+  background:#fff7e8;border:1px dashed var(--accent-ochre);
+  border-radius:6px;
+}
+.share-create-result .label{
+  font-family:'Inter',sans-serif;font-size:10.5px;font-weight:600;
+  letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-soft);
+  margin-bottom:4px;
+}
+.share-create-result .url{
+  font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink);
+  background:#fff;border:1px solid var(--paper-edge);border-radius:4px;
+  padding:8px 10px;word-break:break-all;
+}
+.share-create-result .note{
+  font-family:'Fraunces',serif;font-style:italic;font-size:11.5px;
+  color:var(--ink-soft);margin-top:8px;
+}
+.share-create-result .actions{margin-top:10px;display:flex;gap:8px}
+@media (max-width:720px){
+  .share-row{grid-template-columns:1fr;gap:6px}
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <a class="back-link" href="/dashboard">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+      <path d="M10 3 L 4 8 L 10 13"/>
+    </svg>
+    back to journal
+  </a>
+
+  <h1>Reports &amp; Exports</h1>
+  <p class="sub">three ways to take your fieldwork outside the journal</p>
+
+  <div id="dev-banner" class="dev-banner" hidden></div>
+
+  <!-- ── 1. Weekly PDF report ───────────────────────────────────────── -->
+  <section class="report-card">
+    <div class="card-head">
+      <div class="icon">✉</div>
+      <div style="flex:1;">
+        <h2>Weekly PDF Report</h2>
+        <div class="one-liner">cover page · summary · per-prediction details — print or email to an extension officer</div>
+      </div>
+    </div>
+    <div class="report-body">
+      <div class="field-row">
+        <label>Week ending
+          <input type="date" id="pdf-week-end" />
+        </label>
+        <button class="btn primary" id="pdf-generate">Generate PDF</button>
+        <span class="helper-text" id="pdf-helper">PDF opens in a new tab.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 2. Public Share Link ───────────────────────────────────────── -->
+  <section class="report-card">
+    <div class="card-head">
+      <div class="icon">⌬</div>
+      <div style="flex:1;">
+        <h2>Public Share Links</h2>
+        <div class="one-liner">generate a revocable read-only URL for any single prediction</div>
+      </div>
+    </div>
+    <div class="report-body">
+      <div class="field-row">
+        <label>Prediction
+          <select id="share-prediction"></select>
+        </label>
+        <label>Label (optional)
+          <input type="text" id="share-label" maxlength="120" placeholder="e.g. for Krishi officer"/>
+        </label>
+        <button class="btn primary" id="share-create">Create share link</button>
+      </div>
+
+      <div id="share-result" class="share-create-result" hidden>
+        <div class="label">Share URL — copy now (raw token only shown once)</div>
+        <div class="url" id="share-url-text">—</div>
+        <div class="note">This URL is publicly accessible until you revoke it.  Anyone with the link can view this single prediction.</div>
+        <div class="actions">
+          <button class="btn" id="share-copy">Copy to clipboard</button>
+          <a class="btn" id="share-open" target="_blank">Open in new tab</a>
+        </div>
+      </div>
+
+      <div class="shares-list">
+        <div style="font-family:'Inter';font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink-soft);margin-bottom:10px;">Your share links</div>
+        <div id="shares-list-mount"></div>
+        <div id="shares-empty" class="shares-empty" hidden>no share links created yet</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 3. Treatment Log CSV ───────────────────────────────────────── -->
+  <section class="report-card">
+    <div class="card-head">
+      <div class="icon">⛁</div>
+      <div style="flex:1;">
+        <h2>Treatment Log Export</h2>
+        <div class="one-liner">download every treatment you've logged — useful for organic certification &amp; farm accounting</div>
+      </div>
+    </div>
+    <div class="report-body">
+      <div class="field-row">
+        <label>Crop
+          <select id="tx-crop">
+            <option value="">all crops</option>
+            <option value="okra">okra</option>
+            <option value="brassica">brassica</option>
+            <option value="tomato">tomato</option>
+            <option value="chilli">chilli</option>
+          </select>
+        </label>
+        <label>From
+          <input type="date" id="tx-from"/>
+        </label>
+        <label>To
+          <input type="date" id="tx-to"/>
+        </label>
+        <a class="btn primary" id="tx-export-btn" href="/dashboard/treatments/export.csv">⤓ Download CSV</a>
+      </div>
+      <div class="helper-text" id="tx-helper">0 treatments logged — visit the dashboard to start logging.</div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const escapeHtml = (s) => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+
+// ── Dev banner ─────────────────────────────────────────────────────────
+async function checkDevMode(){
+  try {
+    const r = await fetch("/dashboard/data", {credentials:"include"});
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j._dev_fallback){
+      $("#dev-banner").hidden = false;
+      $("#dev-banner").textContent =
+        "Dev mode — showing data for user '" + j._dev_fallback.username +
+        "'. Auth disabled on /dashboard/*.";
+    }
+  } catch(e){}
+}
+
+// ── 1. PDF generation ──────────────────────────────────────────────────
+(function initPDF(){
+  // Default week ending = today
+  const today = new Date().toISOString().slice(0,10);
+  $("#pdf-week-end").value = today;
+  $("#pdf-generate").addEventListener("click", () => {
+    const we = $("#pdf-week-end").value || today;
+    // Compute the week_start = we - 6 days
+    const end = new Date(we + "T00:00:00Z");
+    const start = new Date(end.getTime() - 6*24*60*60*1000);
+    const ws = start.toISOString().slice(0,10);
+    const url = `/dashboard/report/weekly.pdf?week_start=${encodeURIComponent(ws)}`;
+    window.open(url, "_blank", "noopener");
+    $("#pdf-helper").textContent =
+      `Opened PDF for ${ws} → ${we}. Use ⌘P / Ctrl-P inside the PDF tab to print.`;
+  });
+})();
+
+// ── 2. Share-link CRUD ─────────────────────────────────────────────────
+const Shares = (function(){
+  async function loadPredictions(){
+    try {
+      const r = await fetch("/dashboard/history/data?page_size=100",{credentials:"include"});
+      const j = await r.json();
+      const sel = $("#share-prediction");
+      sel.innerHTML = "";
+      (j.results || []).forEach(p => {
+        const o = document.createElement("option");
+        o.value = p.id;
+        const cls = (p.predicted_class || "—").replace(/_/g," ");
+        const date = (p.created_at || "").slice(0,10);
+        o.textContent = `#${String(p.id).padStart(4,"0")} · ${cls} · ${date}`;
+        sel.appendChild(o);
+      });
+      if (!sel.options.length){
+        const o = document.createElement("option");
+        o.value=""; o.textContent="(no predictions yet)"; o.disabled = true;
+        sel.appendChild(o);
+      }
+    } catch(e){}
+  }
+  async function refresh(){
+    try {
+      const r = await fetch("/dashboard/shares",{credentials:"include"});
+      const j = await r.json();
+      const mount = $("#shares-list-mount");
+      const empty = $("#shares-empty");
+      mount.innerHTML = "";
+      const items = j.results || [];
+      if (!items.length){ empty.hidden = false; return; }
+      empty.hidden = true;
+      items.forEach(s => {
+        const row = document.createElement("div");
+        row.className = "share-row";
+        const label = s.label || "(no label)";
+        row.innerHTML = `
+          <div class="meta">
+            <span class="label">${escapeHtml(label)}</span>
+            <span class="pid">prediction #${String(s.prediction_id).padStart(4,"0")} · created ${escapeHtml((s.created_at||"").slice(0,10))}</span>
+          </div>
+          <div class="mono">views: ${s.view_count || 0}</div>
+          <div class="mono">${s.revoked_at ? '<span class="revoked">revoked</span>' : "active"}</div>
+          <div>
+            ${s.revoked_at ? "" : `<button class="btn danger" data-revoke="${s.id}">Revoke</button>`}
+          </div>
+        `;
+        mount.appendChild(row);
+      });
+      mount.querySelectorAll("[data-revoke]").forEach(b => {
+        b.addEventListener("click", async () => {
+          if (!confirm("Revoke this share link? The URL stops working immediately.")) return;
+          await fetch(`/dashboard/shares/${b.dataset.revoke}`,
+                      {method:"DELETE",credentials:"include"});
+          refresh();
+        });
+      });
+    } catch(e){}
+  }
+  async function create(){
+    const pid = parseInt($("#share-prediction").value || "0", 10);
+    if (!pid){ alert("Pick a prediction first."); return; }
+    const label = $("#share-label").value.trim() || null;
+    try {
+      const r = await fetch("/dashboard/shares",{
+        method:"POST",credentials:"include",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({prediction_id: pid, label}),
+      });
+      if (!r.ok){
+        const j = await r.json().catch(()=>null);
+        alert("Could not create share link: " + ((j && j.detail) || r.status));
+        return;
+      }
+      const j = await r.json();
+      const url = window.location.origin + "/share/" + j.token;
+      $("#share-result").hidden = false;
+      $("#share-url-text").textContent = url;
+      $("#share-open").href = url;
+      $("#share-label").value = "";
+      refresh();
+    } catch(e){
+      alert("Network error creating share link.");
+    }
+  }
+  function copyURL(){
+    const url = $("#share-url-text").textContent;
+    if (!url || url === "—") return;
+    navigator.clipboard.writeText(url).then(
+      () => { $("#share-copy").textContent = "Copied ✓"; setTimeout(()=>$("#share-copy").textContent="Copy to clipboard",1500); },
+      () => { $("#share-copy").textContent = "Could not copy"; },
+    );
+  }
+  return { loadPredictions, refresh, create, copyURL };
+})();
+$("#share-create").addEventListener("click", Shares.create);
+$("#share-copy").addEventListener("click", Shares.copyURL);
+
+// ── 3. Treatment CSV ───────────────────────────────────────────────────
+function syncTxExport(){
+  const q = new URLSearchParams();
+  if ($("#tx-crop").value) q.set("crop", $("#tx-crop").value);
+  if ($("#tx-from").value) q.set("from", $("#tx-from").value);
+  if ($("#tx-to").value)   q.set("to", $("#tx-to").value);
+  const qs = q.toString();
+  $("#tx-export-btn").href = "/dashboard/treatments/export.csv" + (qs ? "?"+qs : "");
+}
+["#tx-crop","#tx-from","#tx-to"].forEach(sel =>
+  $(sel).addEventListener("change", syncTxExport)
+);
+async function loadTxHelper(){
+  try {
+    const r = await fetch("/dashboard/treatments",{credentials:"include"});
+    const j = await r.json();
+    const n = (j.results || []).length;
+    $("#tx-helper").textContent = n
+      ? `${n} treatment${n===1?"":"s"} on record — apply filters above to narrow the CSV.`
+      : "0 treatments logged — visit the dashboard's Treatment Log widget to start.";
+  } catch(e){}
+}
+
+// ── Init ────────────────────────────────────────────────────────────────
+checkDevMode();
+Shares.loadPredictions();
+Shares.refresh();
+loadTxHelper();
+syncTxExport();
+</script>
+</body>
+</html>

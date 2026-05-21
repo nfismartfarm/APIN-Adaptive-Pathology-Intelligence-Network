@@ -1,0 +1,1413 @@
+<!DOCTYPE html>
+<!-- apin_v2 landing — clean restrained signin / create-account page
+     Site masthead at top, centered card, brief fade-up animation, refined typography. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Sign in · Pathology Journal · Lab 8766</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..700,0..100,0..1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  /* ═════════ DESIGN TOKENS (mirrors ui_template.html 1:1) ═════════ */
+  :root{
+    --paper-deep:#e9e2d1;
+    --paper:#f4efe6;
+    --paper-light:#fbf9f3;
+    --paper-shadow:#d8cfbc;
+    --ink:#1a1612;
+    --ink-body:#3a3228;
+    --ink-meta:#7a6f60;
+    --ink-faint:#a79c89;
+    --rule:#c7bca9;
+    --rule-faint:#ded3bf;
+    --accent-green:#2f6f3e;
+    --accent-green-wash:#d9e6d3;
+    --accent-green-deep:#1e4d29;
+    --accent-ochre:#b87d1e;
+    --accent-slate:#4a5a72;
+    --accent-crimson:#b01820;
+    --shadow-sm:0 1px 2px rgba(26,22,18,0.06), 0 2px 4px rgba(26,22,18,0.04);
+    --shadow-md:0 2px 6px rgba(26,22,18,0.08), 0 6px 20px rgba(26,22,18,0.06);
+    --shadow-paper:0 1px 0 rgba(0,0,0,0.02), 0 10px 40px rgba(26,22,18,0.10);
+    --ease-out-quad:cubic-bezier(0.25,0.46,0.45,0.94);
+    --ease-out-expo:cubic-bezier(0.16,1,0.3,1);
+  }
+
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    background:var(--paper);
+    background-image:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.16  0 0 0 0 0.13  0 0 0 0 0.10  0 0 0 0.04 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    color:var(--ink-body);
+    min-height:100vh;
+    font-size:15px;
+    line-height:1.55;
+    letter-spacing:0.01em;
+    -webkit-font-smoothing:antialiased;
+    display:flex;
+    flex-direction:column;
+  }
+  .serif{font-family:'Fraunces',Georgia,serif;color:var(--ink);font-weight:500;letter-spacing:-0.01em}
+  .mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+  /* ═════════ MASTHEAD (1:1 mirror of ui_template.html) ═════════ */
+  header.masthead{
+    padding:36px 24px 28px;
+    border-bottom:1px double var(--rule);
+    background:var(--paper);
+    position:relative;
+  }
+  header.masthead::before{
+    content:"";position:absolute;left:0;right:0;bottom:3px;height:1px;background:var(--rule-faint);
+  }
+  .masthead-inner{
+    max-width:1100px;margin:0 auto;
+    display:grid;grid-template-columns:1fr auto;gap:16px;align-items:end;
+  }
+  .title-block h1{
+    font-family:'Fraunces',serif;
+    font-weight:550;
+    font-size:clamp(26px,3.4vw,38px);
+    color:var(--ink);
+    letter-spacing:-0.025em;
+    line-height:1;
+    font-variation-settings:'SOFT' 30, 'WONK' 0;
+    margin:0;
+  }
+  .title-block .brand-line{
+    font-family:'Fraunces',serif;
+    font-style:italic;
+    font-weight:500;
+    font-size:1.35rem;
+    color:var(--accent-green);
+    letter-spacing:-0.005em;
+    margin-top:4px;
+    font-variation-settings:'SOFT' 100, 'WONK' 1;
+    display:inline-flex;
+    align-items:baseline;
+    gap:10px;
+  }
+  .title-block .brand-line::before{
+    content:"";
+    display:inline-block;
+    width:28px;height:1px;
+    background:var(--accent-green);
+    transform:translateY(-6px);
+    opacity:0.6;
+  }
+  .masthead-meta{
+    text-align:right;
+    font-family:'Fraunces',serif;
+    font-style:italic;
+    color:var(--ink-meta);
+    font-size:0.92rem;
+    line-height:1.5;
+  }
+  .masthead-meta .est{
+    font-family:'JetBrains Mono',ui-monospace,monospace;
+    font-style:normal;
+    font-size:0.74rem;
+    color:var(--ink-faint);
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    display:block;
+    margin-top:2px;
+  }
+
+  /* ═════════ PAGE LAYOUT ═════════ */
+  main.page{
+    flex:1;
+    display:grid;
+    place-items:center;
+    padding:64px 24px 96px;
+  }
+
+  /* ═════════ AUTH CARD ═════════ */
+  .auth-card{
+    position:relative;
+    width:100%;
+    max-width:460px;
+    background:var(--paper-light);
+    border:1px solid var(--rule);
+    border-radius:6px;
+    padding:48px 44px 40px;
+    box-shadow:var(--shadow-paper);
+    /* Double-rule outline effect via inset border */
+  }
+  .auth-card::before{
+    content:"";
+    position:absolute;
+    inset:6px;
+    border:1px solid var(--rule-faint);
+    border-radius:3px;
+    pointer-events:none;
+  }
+  /* Initial state — JS fades up */
+  .auth-card{
+    opacity:0;
+    transform:translateY(28px);
+  }
+  .auth-card.in{
+    opacity:1;
+    transform:translateY(0);
+    transition:opacity 700ms var(--ease-out-expo),
+               transform 800ms var(--ease-out-expo);
+  }
+
+  /* Small hand-drawn leaf stamp top-right */
+  .leaf-stamp{
+    position:absolute;
+    top:18px;right:22px;
+    width:32px;height:32px;
+    opacity:0.55;
+    pointer-events:none;
+  }
+  .leaf-stamp svg{width:100%;height:100%;display:block}
+
+  /* Plate number, top-left of card */
+  .plate-no{
+    position:absolute;
+    top:18px;left:22px;
+    font-family:'JetBrains Mono',ui-monospace,monospace;
+    font-size:10px;
+    color:var(--ink-faint);
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+  }
+  .plate-no .num{
+    font-weight:600;
+    color:var(--accent-crimson);
+    margin-left:4px;
+  }
+
+  /* ═════════ CARD HEADER (title + subtitle) ═════════ */
+  .card-title{
+    font-family:'Fraunces',serif;
+    font-weight:500;
+    font-size:28px;
+    color:var(--ink);
+    letter-spacing:-0.025em;
+    line-height:1.1;
+    margin:18px 0 4px;
+    font-variation-settings:'SOFT' 50,'WONK' 0;
+  }
+  .card-subtitle{
+    font-family:'Fraunces',serif;
+    font-style:italic;
+    font-size:13px;
+    color:var(--ink-meta);
+    letter-spacing:0.04em;
+    margin-bottom:32px;
+  }
+  .card-subtitle .step{
+    font-family:'JetBrains Mono',ui-monospace,monospace;
+    font-style:normal;
+    font-size:10px;
+    color:var(--accent-green);
+    background:var(--accent-green-wash);
+    padding:2px 7px;
+    border-radius:10px;
+    margin-right:8px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    font-weight:600;
+  }
+
+  /* ═════════ FORM FIELDS ═════════ */
+  .field{
+    margin-bottom:22px;
+    position:relative;
+  }
+  .field label{
+    display:block;
+    font-family:'Inter',sans-serif;
+    font-size:11px;
+    font-weight:500;
+    color:var(--ink-meta);
+    letter-spacing:0.10em;
+    text-transform:uppercase;
+    margin-bottom:6px;
+  }
+  .field .input-wrap{
+    position:relative;
+    display:flex;
+    align-items:center;
+    border-bottom:1px solid var(--rule);
+    transition:border-color 220ms var(--ease-out-expo);
+    padding:2px 0;
+  }
+  .field .input-wrap:focus-within{
+    border-bottom-color:var(--ink-body);
+    border-bottom-width:1.5px;
+  }
+  .field input{
+    flex:1;
+    border:0;
+    background:transparent;
+    padding:8px 0 10px;
+    font-family:'Fraunces',serif;
+    font-size:17px;
+    color:var(--ink);
+    outline:none;
+    font-variation-settings:'SOFT' 30,'WONK' 0;
+  }
+  .field input::placeholder{
+    color:var(--ink-faint);
+    font-style:italic;
+    opacity:0.85;
+  }
+  .field .field-hint{
+    font-family:'Fraunces',serif;
+    font-style:italic;
+    font-size:11.5px;
+    color:var(--ink-meta);
+    white-space:nowrap;
+    padding-left:10px;
+  }
+  .field .field-hint.ok{color:var(--accent-green)}
+  .field .field-hint.bad{color:var(--accent-crimson)}
+
+  /* ═════════ BUTTONS ═════════ */
+  .btn-primary{
+    appearance:none;
+    border:none;
+    background:var(--ink);
+    color:var(--paper-light);
+    font-family:'Fraunces',serif;
+    font-weight:500;
+    font-size:14px;
+    letter-spacing:0.04em;
+    padding:13px 28px;
+    border-radius:4px;
+    cursor:pointer;
+    width:100%;
+    margin-top:14px;
+    transition:background 220ms var(--ease-out-expo),
+               transform 180ms var(--ease-out-expo),
+               box-shadow 220ms var(--ease-out-expo);
+    box-shadow:0 1px 2px rgba(26,22,18,0.08);
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+  }
+  .btn-primary:hover{
+    background:var(--accent-green-deep);
+    box-shadow:0 4px 12px rgba(26,22,18,0.16);
+    transform:translateY(-1px);
+  }
+  .btn-primary:active{
+    transform:translateY(0);
+    box-shadow:0 1px 1px rgba(26,22,18,0.10);
+  }
+  .btn-primary:disabled{
+    opacity:0.4;
+    cursor:not-allowed;
+    transform:none;
+  }
+  .btn-primary .arrow{
+    transition:transform 200ms var(--ease-out-expo);
+  }
+  .btn-primary:hover .arrow{transform:translateX(3px)}
+
+  /* ═════════ ERROR / SUCCESS BANNER ═════════ */
+  .auth-banner{
+    display:none;
+    margin:0 0 20px;
+    padding:10px 14px;
+    border-radius:4px;
+    font-family:'Inter',sans-serif;
+    font-size:13px;
+    border:1px solid;
+    line-height:1.45;
+  }
+  .auth-banner.show{display:block; animation:banner-in 280ms var(--ease-out-expo) both}
+  @keyframes banner-in{
+    from{opacity:0; transform:translateY(-4px)}
+    to{opacity:1; transform:translateY(0)}
+  }
+  .auth-banner.error{
+    background:#fdedea;
+    border-color:#e7c3bd;
+    color:var(--accent-crimson);
+  }
+  .auth-banner.success{
+    background:var(--accent-green-wash);
+    border-color:#b4d0a4;
+    color:var(--accent-green-deep);
+  }
+
+  /* Loading state on buttons */
+  .btn-primary.loading{
+    pointer-events:none;
+    opacity:0.85;
+  }
+  .btn-primary.loading .arrow{display:none}
+  .btn-primary.loading::after{
+    content:"";
+    display:inline-block;
+    width:14px;height:14px;
+    border:2px solid currentColor;
+    border-top-color:transparent;
+    border-radius:50%;
+    margin-left:8px;
+    animation:btn-spin 700ms linear infinite;
+    vertical-align:-2px;
+  }
+  @keyframes btn-spin{
+    to{ transform:rotate(360deg); }
+  }
+
+  /* ═════════ PASSWORD STRENGTH METER ═════════ */
+  .pw-strength{
+    margin-top:10px;
+    opacity:0;
+    transform:translateY(-4px);
+    max-height:0;
+    overflow:hidden;
+    transition:opacity 280ms var(--ease-out-expo),
+               transform 280ms var(--ease-out-expo),
+               max-height 320ms var(--ease-out-expo);
+    pointer-events:none;
+  }
+  .pw-strength.show{
+    opacity:1;
+    transform:translateY(0);
+    max-height:200px;
+    pointer-events:auto;
+  }
+  .pw-bar{
+    display:flex;
+    gap:4px;
+    margin-bottom:8px;
+  }
+  .pw-bar .seg{
+    flex:1;
+    height:3px;
+    background:var(--rule-faint);
+    border-radius:2px;
+    transition:background 280ms var(--ease-out-expo);
+  }
+  .pw-bar[data-level="1"] .seg:nth-child(1){background:var(--accent-crimson)}
+  .pw-bar[data-level="2"] .seg:nth-child(-n+2){background:var(--accent-ochre)}
+  .pw-bar[data-level="3"] .seg:nth-child(-n+3){background:#7a9434}
+  .pw-bar[data-level="4"] .seg:nth-child(-n+4){background:var(--accent-green)}
+  .pw-bar[data-level="5"] .seg{background:var(--accent-green-deep)}
+  .pw-label{
+    font-family:'Fraunces',serif;
+    font-style:italic;
+    font-size:11px;
+    color:var(--ink-meta);
+    margin-bottom:8px;
+    letter-spacing:0.04em;
+  }
+  .pw-checks{
+    list-style:none;
+    padding:0;
+    margin:0;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:3px 14px;
+  }
+  .pw-checks li{
+    font-family:'Inter',sans-serif;
+    font-size:11px;
+    color:var(--ink-faint);
+    display:flex;
+    align-items:center;
+    gap:6px;
+    transition:color 220ms var(--ease-out-expo);
+  }
+  .pw-checks li::before{
+    content:"○";
+    font-size:10px;
+    color:var(--ink-faint);
+    transition:all 220ms var(--ease-out-expo);
+  }
+  .pw-checks li.met{
+    color:var(--accent-green-deep);
+  }
+  .pw-checks li.met::before{
+    content:"✓";
+    color:var(--accent-green);
+    font-weight:bold;
+  }
+
+  /* Field-hint refinements (subtle, never garish) */
+  .field-hint.checking{
+    color:var(--ink-faint);
+    opacity:0.7;
+  }
+  .field-hint.checking::before{content:"· · ·  "}
+  .field-hint.ok::before{content:"✓  "; color:var(--accent-green)}
+  .field-hint.bad::before{content:"✗  "; color:var(--accent-crimson)}
+  /* Suggestion chips */
+  .field-suggestions{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-top:6px;
+    font-family:'Inter',sans-serif;
+    font-size:11px;
+  }
+  .field-suggestions .chip{
+    background:var(--paper-deep);
+    color:var(--ink-body);
+    padding:3px 10px;
+    border-radius:12px;
+    cursor:pointer;
+    transition:background 200ms var(--ease-out-expo),
+               color 200ms var(--ease-out-expo);
+  }
+  .field-suggestions .chip:hover{
+    background:var(--ink);
+    color:var(--paper-light);
+  }
+  .field-suggestions .label{
+    color:var(--ink-meta);
+    font-style:italic;
+    font-family:'Fraunces',serif;
+    font-size:11.5px;
+    margin-right:2px;
+  }
+
+  /* ═════════ PROGRESS DOTS ═════════ */
+  .progress-dots{
+    display:flex;
+    justify-content:center;
+    gap:8px;
+    margin-top:18px;
+  }
+  .progress-dots .dot{
+    width:6px;height:6px;
+    border-radius:50%;
+    background:var(--rule);
+    transition:all 240ms var(--ease-out-expo);
+  }
+  .progress-dots .dot.active{
+    background:var(--ink-body);
+    width:18px;
+    border-radius:3px;
+  }
+  .progress-dots .dot.done{
+    background:var(--accent-green);
+  }
+
+  /* ═════════ TOGGLE / MODE SWITCH ═════════ */
+  .toggle-link{
+    display:block;
+    text-align:center;
+    margin-top:24px;
+    padding-top:20px;
+    border-top:1px solid var(--rule-faint);
+    font-family:'Inter',sans-serif;
+    font-size:13px;
+    color:var(--ink-meta);
+    text-decoration:none;
+    transition:color 200ms var(--ease-out-expo);
+  }
+  .toggle-link b{
+    color:var(--ink);
+    font-weight:600;
+    text-decoration:underline;
+    text-decoration-color:var(--rule);
+    text-decoration-thickness:1px;
+    text-underline-offset:3px;
+    transition:text-decoration-color 200ms var(--ease-out-expo);
+  }
+  .toggle-link:hover b{
+    text-decoration-color:var(--ink);
+  }
+  .back-link{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    margin-top:14px;
+    font-family:'Inter',sans-serif;
+    font-size:13px;
+    color:var(--ink-meta);
+    text-decoration:none;
+    transition:color 200ms var(--ease-out-expo);
+  }
+  .back-link:hover{color:var(--ink)}
+
+  /* ═════════ FOOTER ═════════ */
+  footer.foot{
+    padding:24px;
+    text-align:center;
+    font-family:'Fraunces',serif;
+    font-style:italic;
+    font-size:11px;
+    color:var(--ink-faint);
+    letter-spacing:0.08em;
+    border-top:1px solid var(--rule-faint);
+  }
+
+  /* ═════════ STAGE SWITCHING (signup steps) ═════════ */
+  .stage{display:none}
+  .stage.active{display:block}
+  .stage.fading-out{
+    animation:stage-out 180ms var(--ease-out-expo) forwards;
+  }
+  .stage.fading-in{
+    animation:stage-in 320ms var(--ease-out-expo) forwards;
+  }
+  @keyframes stage-out{
+    to{ opacity:0; transform:translateY(-8px); }
+  }
+  @keyframes stage-in{
+    from{ opacity:0; transform:translateY(10px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+
+  /* ═════════ RESPONSIVE ═════════ */
+  @media (max-width:520px){
+    main.page{padding:32px 16px 64px}
+    .auth-card{padding:42px 28px 32px}
+    .card-title{font-size:24px}
+    header.masthead{padding:24px 16px 20px}
+    .title-block h1{font-size:24px}
+    .title-block .brand-line{font-size:1.05rem}
+  }
+
+  /* ═════════ REDUCED MOTION ═════════ */
+  @media (prefers-reduced-motion: reduce){
+    .auth-card{transition:none}
+    .stage.fading-out,.stage.fading-in{animation:none}
+  }
+</style>
+</head>
+<body>
+
+<!-- ════════ Masthead (mirrors ui_template.html exactly) ════════ -->
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="title-block">
+      <h1>Pathology Journal</h1>
+      <span class="brand-line">Of Plant Disease</span>
+    </div>
+    <div class="masthead-meta" id="masthead-date">
+      <span id="dateline">11 May 2026</span>
+      <span class="est">Lab 8766 · Kerala · Est. 2025</span>
+    </div>
+  </div>
+</header>
+
+<!-- ════════ Hand-drawn leaf SVG (single ink stroke, used as small stamp) ════════ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Small confident ink-stroke okra leaf. Single stroke color, no fills,
+         no filters, no gradients. Just clean botanical line art. -->
+    <symbol id="leaf-mark" viewBox="0 0 64 64">
+      <g fill="none" stroke="currentColor" stroke-width="1.3"
+         stroke-linecap="round" stroke-linejoin="round">
+        <!-- Outline: 5 simple lobes -->
+        <path d="M 32 50
+                 C 24 49, 16 46, 11 38
+                 C 12 32, 14 31, 18 32
+                 C 14 28, 11 22, 12 17
+                 C 18 14, 22 16, 26 22
+                 C 24 16, 24 11, 28 8
+                 C 32 8, 33 12, 32 18
+                 C 32 12, 33 8, 36 8
+                 C 40 11, 40 16, 38 22
+                 C 42 16, 46 14, 52 17
+                 C 53 22, 50 28, 46 32
+                 C 50 31, 52 32, 53 38
+                 C 48 46, 40 49, 32 50 Z"/>
+        <!-- Primary veins (5, from petiole) -->
+        <path d="M 32 50 L 32 12" opacity="0.7"/>
+        <path d="M 32 50 L 14 22" opacity="0.55"/>
+        <path d="M 32 50 L 50 22" opacity="0.55"/>
+        <path d="M 32 50 L 13 36" opacity="0.45"/>
+        <path d="M 32 50 L 51 36" opacity="0.45"/>
+        <!-- Petiole (stem below leaf) -->
+        <path d="M 32 50 L 33 60" stroke-width="1.1"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ════════ Page content ════════ -->
+<main class="page">
+
+  <!-- ▸▸▸ SIGN-IN CARD ◂◂◂ -->
+  <div class="auth-card" id="signin-card" style="display:none">
+    <span class="plate-no">PLATE №<span class="num">00·00·047</span></span>
+    <span class="leaf-stamp" style="color:var(--accent-green)"><svg><use href="#leaf-mark"/></svg></span>
+
+    <h2 class="card-title">Sign in</h2>
+    <p class="card-subtitle">Welcome back to the journal.</p>
+
+    <div class="auth-banner" id="signin-banner" role="alert"></div>
+
+    <form id="signin-form" autocomplete="on" novalidate>
+      <div class="field">
+        <label for="si-handle">Username or email</label>
+        <div class="input-wrap">
+          <input id="si-handle" name="handle" type="text"
+                 placeholder="ramesh_kerala or ramesh@krishi.kerala.in"
+                 autocomplete="username" required>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="si-password">Password</label>
+        <div class="input-wrap">
+          <input id="si-password" name="password" type="password"
+                 placeholder="••••••••" autocomplete="current-password" required>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-primary">
+        Sign in <span class="arrow">→</span>
+      </button>
+    </form>
+
+    <a href="#" class="toggle-link" id="to-signup">
+      New here? <b>Create an account</b>
+    </a>
+  </div>
+
+  <!-- ▸▸▸ CREATE ACCOUNT CARD (multi-stage) ◂◂◂ -->
+  <div class="auth-card" id="signup-card">
+    <span class="plate-no">PLATE №<span class="num" id="accessionTicker">00·00·047</span></span>
+    <span class="leaf-stamp" style="color:var(--accent-green)"><svg><use href="#leaf-mark"/></svg></span>
+
+    <h2 class="card-title">Create account</h2>
+
+    <div class="auth-banner" id="signup-banner" role="alert"></div>
+
+    <!-- STAGE I — Identity -->
+    <div class="stage active" data-stage="identity">
+      <p class="card-subtitle"><span class="step">Step 1 of 3</span>Identity</p>
+
+      <form id="signup-form-1" novalidate>
+        <div class="field">
+          <label for="su-username">Username</label>
+          <div class="input-wrap">
+            <input id="su-username" name="username" type="text"
+                   placeholder="ramesh_kerala"
+                   autocomplete="username" required>
+            <span class="field-hint" id="su-username-hint"></span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="su-name">Display name</label>
+          <div class="input-wrap">
+            <input id="su-name" name="display_name" type="text"
+                   placeholder="How you'll be addressed" required>
+            <span class="field-hint" id="su-name-hint"></span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="su-email">Email</label>
+          <div class="input-wrap">
+            <input id="su-email" name="email" type="email"
+                   placeholder="ramesh@krishi.kerala.in"
+                   autocomplete="email" required>
+            <span class="field-hint" id="su-email-hint"></span>
+          </div>
+        </div>
+
+        <button type="button" class="btn-primary" id="su-next-1" disabled>
+          Continue <span class="arrow">→</span>
+        </button>
+      </form>
+    </div>
+
+    <!-- STAGE II — Security -->
+    <div class="stage" data-stage="security">
+      <p class="card-subtitle"><span class="step">Step 2 of 3</span>Security</p>
+
+      <form id="signup-form-2" novalidate>
+        <div class="field">
+          <label for="su-password">Password</label>
+          <div class="input-wrap">
+            <input id="su-password" name="password" type="password"
+                   placeholder="At least 12 characters"
+                   autocomplete="new-password" required>
+          </div>
+          <!-- Password strength meter (revealed once user starts typing) -->
+          <div class="pw-strength" id="pw-strength" aria-live="polite">
+            <div class="pw-bar" data-level="0" id="pw-bar">
+              <span class="seg"></span><span class="seg"></span>
+              <span class="seg"></span><span class="seg"></span>
+            </div>
+            <div class="pw-label" id="pw-label">Weak</div>
+            <ul class="pw-checks" id="pw-checks">
+              <li data-rule="len">12 characters or more</li>
+              <li data-rule="upper">An uppercase letter</li>
+              <li data-rule="lower">A lowercase letter</li>
+              <li data-rule="digit">A number</li>
+              <li data-rule="special">A special character</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="su-password2">Confirm password</label>
+          <div class="input-wrap">
+            <input id="su-password2" name="password_confirm" type="password"
+                   placeholder="Re-enter password" required>
+            <span class="field-hint" id="su-password2-hint"></span>
+          </div>
+        </div>
+
+        <button type="button" class="btn-primary" id="su-next-2" disabled>
+          Continue <span class="arrow">→</span>
+        </button>
+        <a href="#" class="back-link" id="su-back-2">← Back</a>
+      </form>
+    </div>
+
+    <!-- STAGE III — Contact -->
+    <div class="stage" data-stage="contact">
+      <p class="card-subtitle"><span class="step">Step 3 of 3</span>Contact</p>
+
+      <form id="signup-form-3" novalidate>
+        <div class="field">
+          <label for="su-mobile">Mobile number</label>
+          <div class="input-wrap">
+            <input id="su-mobile" name="mobile" type="tel"
+                   placeholder="+91 98765 43210"
+                   autocomplete="tel" required>
+            <span class="field-hint" id="su-mobile-hint"></span>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary" id="su-submit" disabled>
+          Create account <span class="arrow">→</span>
+        </button>
+        <a href="#" class="back-link" id="su-back-3">← Back</a>
+      </form>
+    </div>
+
+    <div class="progress-dots" id="signup-dots">
+      <span class="dot active"></span>
+      <span class="dot"></span>
+      <span class="dot"></span>
+    </div>
+
+    <a href="#" class="toggle-link" id="to-signin">
+      Already a member? <b>Sign in</b>
+    </a>
+  </div>
+
+</main>
+
+<footer class="foot">
+  Lab 8766 · Kerala · Plant Pathology Records
+</footer>
+
+<script>
+"use strict";
+(function(){
+
+  /* ════════════════════════════════════════════════════════════════════
+     DAY 1 — frontend validation
+     • debounced live uniqueness checks (username / display_name / email)
+     • password strength meter (5-rule, all required)
+     • confirm-password real-time matching
+     • mobile-number formatter + Indian carrier validation
+     • per-stage Continue button gating
+     • accession ticker pulls from /auth/next-accession
+     ════════════════════════════════════════════════════════════════════ */
+
+  /* ──── Redirect if already signed in (silent if not) ──── */
+  // The real session cookie is HttpOnly (invisible to JS for security).
+  // The backend ALSO sets a non-HttpOnly marker cookie `apin_v2_signed_in=1`
+  // which we read here as a "maybe signed in" hint. Only then do we call
+  // /auth/me — this avoids the 401 console-noise for first-time visitors.
+  function hasSessionMarker(){
+    return document.cookie.split(';').some(c =>
+      c.trim().startsWith('apin_v2_signed_in='));
+  }
+  /* Read ?next=URL from the current URL, sanitized to same-origin paths only.
+     This lets a caller (e.g. /dashboard's auth gate) say "after sign-in, come
+     back to /dashboard" instead of dumping the user on the inference site. */
+  function safeNextURL(fallback){
+    try {
+      const raw = new URLSearchParams(window.location.search).get('next');
+      if(!raw) return fallback;
+      // Only allow same-origin path-style redirects to prevent open-redirect.
+      if(raw.startsWith('/') && !raw.startsWith('//')) return raw;
+    } catch(_) {}
+    return fallback;
+  }
+  window.__APIN_NEXT_URL__ = safeNextURL('/');
+
+  /* ?force=1 → skip the "already signed in, redirect" optimization and ALWAYS
+     show the sign-in/sign-up form. The dashboard's auth gate sets this when
+     bouncing the user here, because a stale marker cookie can otherwise
+     trigger an infinite redirect loop:
+        /dashboard (401) → /landing (auto-redirect because marker is set)
+                        → /dashboard (still 401) → /landing → ...
+     With force=1, the user re-authenticates and gets a fresh cookie. */
+  const __APIN_FORCE__ =
+    new URLSearchParams(window.location.search).get('force') === '1';
+
+  if(hasSessionMarker() && !__APIN_FORCE__){
+    fetch('/auth/me', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : null)
+      .then(u => {
+        if(u && u.id){
+          document.body.style.transition = 'opacity 220ms ease-out';
+          document.body.style.opacity = '0.4';
+          setTimeout(() => { window.location.href = window.__APIN_NEXT_URL__; }, 180);
+        }
+      })
+      .catch(() => { /* network failure — stay on the form */ });
+  }
+
+  /* ──── Live dateline (today's date in the masthead) ──── */
+  const dl = document.getElementById('dateline');
+  if(dl){
+    const today = new Date();
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    dl.textContent = `${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()}`;
+  }
+
+  /* ──── Mode toggle (signin ↔ signup) ──── */
+  const signinCard = document.getElementById('signin-card');
+  const signupCard = document.getElementById('signup-card');
+  const toSignin   = document.getElementById('to-signin');
+  const toSignup   = document.getElementById('to-signup');
+
+  function show(card){
+    [signinCard, signupCard].forEach(c => c.style.display = 'none');
+    card.style.display = '';
+    card.classList.remove('in');
+    requestAnimationFrame(() => requestAnimationFrame(() => card.classList.add('in')));
+  }
+  toSignin.addEventListener('click', (e) => { e.preventDefault(); show(signinCard); });
+  toSignup.addEventListener('click', (e) => { e.preventDefault(); show(signupCard); });
+  show(signupCard);
+
+  /* ──── Stage navigation (with per-stage gating; can't bypass disabled buttons) ──── */
+  const stages = signupCard.querySelectorAll('.stage');
+  const dots   = signupCard.querySelectorAll('#signup-dots .dot');
+
+  function gotoStage(idx){
+    const current = signupCard.querySelector('.stage.active');
+    if(current){
+      current.classList.add('fading-out');
+      current.addEventListener('animationend', function handler(){
+        current.classList.remove('active','fading-out');
+        current.removeEventListener('animationend', handler);
+      }, { once:true });
+    }
+    setTimeout(() => {
+      stages[idx].classList.add('active','fading-in');
+      stages[idx].addEventListener('animationend', function handler(){
+        stages[idx].classList.remove('fading-in');
+        stages[idx].removeEventListener('animationend', handler);
+      }, { once:true });
+      const firstInput = stages[idx].querySelector('input');
+      if(firstInput) setTimeout(() => firstInput.focus(), 60);
+      // re-evaluate gating for the stage we landed on
+      if(idx === 0) evalStage1();
+      if(idx === 1) evalStage2();
+      if(idx === 2) evalStage3();
+    }, 180);
+    dots.forEach((d, i) => {
+      d.classList.remove('active','done');
+      if(i < idx) d.classList.add('done');
+      else if(i === idx) d.classList.add('active');
+    });
+  }
+  document.getElementById('su-back-2').addEventListener('click', (e) => {
+    e.preventDefault(); gotoStage(0);
+  });
+  document.getElementById('su-back-3').addEventListener('click', (e) => {
+    e.preventDefault(); gotoStage(1);
+  });
+  document.getElementById('su-next-1').addEventListener('click', () => {
+    if(!document.getElementById('su-next-1').disabled) gotoStage(1);
+  });
+  document.getElementById('su-next-2').addEventListener('click', () => {
+    if(!document.getElementById('su-next-2').disabled) gotoStage(2);
+  });
+
+  /* ════════════════════════════════════════════════════════════════════
+     STAGE I — Identity: username, display_name, email
+     Validation: format regex first, then debounced uniqueness check.
+     ════════════════════════════════════════════════════════════════════ */
+
+  const usernameInput = document.getElementById('su-username');
+  const nameInput     = document.getElementById('su-name');
+  const emailInput    = document.getElementById('su-email');
+  const usernameHint  = document.getElementById('su-username-hint');
+  const nameHint      = document.getElementById('su-name-hint');
+  const emailHint     = document.getElementById('su-email-hint');
+  const next1Btn      = document.getElementById('su-next-1');
+
+  // Local state for each field: { valid: bool, message: str, checking: bool }
+  const fieldState = {
+    username:     { valid:false, msg:'', checking:false, value:'' },
+    display_name: { valid:false, msg:'', checking:false, value:'' },
+    email:        { valid:false, msg:'', checking:false, value:'' },
+  };
+
+  function setHint(el, state){
+    el.className = 'field-hint';
+    if(state.checking){
+      el.classList.add('checking');
+      el.textContent = 'checking…';
+    } else if(state.value === ''){
+      el.textContent = '';
+    } else if(state.valid){
+      el.classList.add('ok');
+      el.textContent = state.msg || 'available';
+    } else {
+      el.classList.add('bad');
+      el.textContent = state.msg || 'invalid';
+    }
+  }
+
+  // Map server-side field name → actual DOM input id (HTML uses 'su-name'
+  // for the display_name field; everything else matches by simple prefix)
+  function getInputForField(field){
+    if(field === 'display_name') return document.getElementById('su-name');
+    return document.getElementById('su-' + field);  // 'su-username', 'su-email'
+  }
+
+  // Remove any existing suggestion-chips below a field
+  function clearSuggestions(field){
+    const input = getInputForField(field);
+    if(!input) return;
+    const wrap = input.closest('.field');
+    if(!wrap) return;
+    const exist = wrap.querySelector('.field-suggestions');
+    if(exist) exist.remove();
+  }
+
+  function showSuggestions(field, value, suggestions){
+    clearSuggestions(field);
+    if(!suggestions || !suggestions.length) return;
+    const input = getInputForField(field);
+    if(!input) return;
+    const wrap = input.closest('.field');
+    if(!wrap) return;
+    const div = document.createElement('div');
+    div.className = 'field-suggestions';
+    div.innerHTML = '<span class="label">try:</span>';
+    suggestions.forEach(s => {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = s;
+      chip.addEventListener('click', () => {
+        const target = getInputForField(field);
+        if(target){
+          target.value = s;
+          target.dispatchEvent(new Event('input'));
+        }
+      });
+      div.appendChild(chip);
+    });
+    wrap.appendChild(div);
+  }
+
+  // Regex / format gates (cheap synchronous check before hitting the API)
+  function formatCheck(field, value){
+    const v = value.trim();
+    if(v === '') return { ok:false, msg:'' };
+    if(field === 'username'){
+      if(v.length < 3)  return { ok:false, msg:'too short (min 3)' };
+      if(v.length > 32) return { ok:false, msg:'too long (max 32)' };
+      if(!/^[a-zA-Z0-9_]+$/.test(v)) return { ok:false, msg:'letters / numbers / _ only' };
+    }
+    if(field === 'display_name'){
+      if(v.length < 2)  return { ok:false, msg:'too short (min 2)' };
+      if(v.length > 80) return { ok:false, msg:'too long (max 80)' };
+    }
+    if(field === 'email'){
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return { ok:false, msg:"doesn't look like an email" };
+    }
+    return { ok:true };
+  }
+
+  // Debounced uniqueness check (one in-flight per field)
+  const debouncers = {};
+  const inFlight   = {};
+  function debouncedCheck(field, value, hintEl){
+    clearTimeout(debouncers[field]);
+    const state = fieldState[field];
+    state.value = value;
+    clearSuggestions(field);
+
+    // Step 1: synchronous format check
+    const fmt = formatCheck(field, value);
+    if(value.trim() === ''){
+      state.valid = false; state.msg = ''; state.checking = false;
+      setHint(hintEl, state);
+      gateStage1();
+      return;
+    }
+    if(!fmt.ok){
+      state.valid = false; state.msg = fmt.msg; state.checking = false;
+      setHint(hintEl, state);
+      gateStage1();
+      return;
+    }
+
+    // Step 2: schedule uniqueness call
+    state.checking = true; state.valid = false; state.msg = '';
+    setHint(hintEl, state);
+    gateStage1();
+
+    debouncers[field] = setTimeout(async () => {
+      if(inFlight[field]) inFlight[field].abort();
+      const ctrl = new AbortController();
+      inFlight[field] = ctrl;
+      try {
+        const url = `/auth/check?field=${encodeURIComponent(field)}&value=${encodeURIComponent(value)}`;
+        const r = await fetch(url, { signal:ctrl.signal });
+        const j = await r.json();
+        // Stale-response guard
+        if(state.value !== value) return;
+        state.checking = false;
+        if(j.available){
+          state.valid = true;
+          state.msg = 'available';
+        } else {
+          state.valid = false;
+          if(j.reason === 'taken'){
+            state.msg = 'taken';
+            showSuggestions(field, value, j.suggestions);
+          } else if(j.reason === 'format'){
+            state.msg = 'invalid format';
+          } else if(j.reason === 'length'){
+            state.msg = 'wrong length';
+          } else {
+            state.msg = 'unavailable';
+          }
+        }
+        setHint(hintEl, state);
+        gateStage1();
+      } catch(e){
+        if(e.name === 'AbortError') return;
+        // Network error — fail open (allow user to proceed; server will re-validate)
+        state.checking = false;
+        state.valid = true;
+        state.msg = 'looks fine';
+        setHint(hintEl, state);
+        gateStage1();
+      }
+    }, 380);
+  }
+
+  usernameInput.addEventListener('input', () => debouncedCheck('username',     usernameInput.value, usernameHint));
+  nameInput    .addEventListener('input', () => debouncedCheck('display_name', nameInput.value,     nameHint));
+  emailInput   .addEventListener('input', () => debouncedCheck('email',        emailInput.value,    emailHint));
+
+  function gateStage1(){
+    const allOk = fieldState.username.valid &&
+                  fieldState.display_name.valid &&
+                  fieldState.email.valid;
+    next1Btn.disabled = !allOk;
+  }
+  function evalStage1(){ gateStage1(); }
+
+  /* ════════════════════════════════════════════════════════════════════
+     STAGE II — Security: password (5 rules) + confirm match
+     ════════════════════════════════════════════════════════════════════ */
+
+  const pwInput     = document.getElementById('su-password');
+  const pw2Input    = document.getElementById('su-password2');
+  const pw2Hint     = document.getElementById('su-password2-hint');
+  const pwStrength  = document.getElementById('pw-strength');
+  const pwBar       = document.getElementById('pw-bar');
+  const pwLabel     = document.getElementById('pw-label');
+  const pwChecksEl  = document.getElementById('pw-checks');
+  const next2Btn    = document.getElementById('su-next-2');
+
+  const PW_LABELS = ['', 'Weak', 'Fair', 'Strong', 'Very strong', 'Ironclad'];
+
+  function checkPassword(pw){
+    return {
+      len:     pw.length >= 12,
+      upper:   /[A-Z]/.test(pw),
+      lower:   /[a-z]/.test(pw),
+      digit:   /[0-9]/.test(pw),
+      special: /[^A-Za-z0-9]/.test(pw),
+    };
+  }
+  function pwLevel(checks){
+    return Object.values(checks).filter(Boolean).length;
+  }
+
+  pwInput.addEventListener('input', () => {
+    const pw = pwInput.value;
+    if(pw.length === 0){
+      pwStrength.classList.remove('show');
+      pwBar.setAttribute('data-level', '0');
+      pwChecksEl.querySelectorAll('li').forEach(li => li.classList.remove('met'));
+      gateStage2();
+      return;
+    }
+    pwStrength.classList.add('show');
+    const checks = checkPassword(pw);
+    const level = pwLevel(checks);
+    pwBar.setAttribute('data-level', String(level));
+    pwLabel.textContent = PW_LABELS[level] || '';
+    pwChecksEl.querySelectorAll('li').forEach(li => {
+      const rule = li.dataset.rule;
+      li.classList.toggle('met', !!checks[rule]);
+    });
+    // If pw2 was already typed, re-evaluate match
+    if(pw2Input.value) evalPw2();
+    gateStage2();
+  });
+
+  function evalPw2(){
+    if(pw2Input.value === ''){
+      pw2Hint.className = 'field-hint';
+      pw2Hint.textContent = '';
+      return false;
+    }
+    if(pw2Input.value === pwInput.value){
+      pw2Hint.className = 'field-hint ok';
+      pw2Hint.textContent = 'match';
+      return true;
+    }
+    pw2Hint.className = 'field-hint bad';
+    pw2Hint.textContent = 'no match';
+    return false;
+  }
+  pw2Input.addEventListener('input', () => {
+    evalPw2();
+    gateStage2();
+  });
+
+  function gateStage2(){
+    const pw = pwInput.value;
+    const checks = checkPassword(pw);
+    const allRulesMet = Object.values(checks).every(Boolean);
+    const matches = pw2Input.value !== '' && pw === pw2Input.value;
+    next2Btn.disabled = !(allRulesMet && matches);
+  }
+  function evalStage2(){ gateStage2(); }
+
+  /* ════════════════════════════════════════════════════════════════════
+     STAGE III — Contact: mobile (Indian validation + formatter)
+     ════════════════════════════════════════════════════════════════════ */
+
+  const mobileInput = document.getElementById('su-mobile');
+  const mobileHint  = document.getElementById('su-mobile-hint');
+  const submitBtn   = document.getElementById('su-submit');
+
+  function formatMobile(raw){
+    // Strip everything except digits and leading +
+    let s = raw.replace(/[^\d+]/g, '');
+    // If no leading +, assume Indian and prepend +91
+    if(!s.startsWith('+')){
+      // strip leading 0 if user typed it
+      if(s.startsWith('0')) s = s.slice(1);
+      // strip leading 91 if user typed it without the +
+      if(s.length > 10 && s.startsWith('91')) s = s.slice(2);
+      s = '+91' + s;
+    }
+    // Now s looks like +91XXXXXXXXXX. Format as +91 XXXXX XXXXX
+    if(s.startsWith('+91')){
+      const digits = s.slice(3).replace(/\D/g, '');
+      const a = digits.slice(0, 5);
+      const b = digits.slice(5, 10);
+      if(b) return `+91 ${a} ${b}`;
+      if(a) return `+91 ${a}`;
+      return '+91';
+    }
+    return s;
+  }
+  function validateIndianMobile(formatted){
+    const digits = formatted.replace(/\D/g, '');
+    if(!digits.startsWith('91')) return { ok:false, msg:'must start with +91' };
+    const local = digits.slice(2);
+    if(local.length < 10) return { ok:false, msg:`${10 - local.length} more digits` };
+    if(local.length > 10) return { ok:false, msg:'too long' };
+    if(!/^[6-9]/.test(local)) return { ok:false, msg:'invalid carrier prefix' };
+    return { ok:true, msg:'valid' };
+  }
+
+  mobileInput.addEventListener('input', (e) => {
+    const caretEnd = mobileInput.selectionStart === mobileInput.value.length;
+    const formatted = formatMobile(mobileInput.value);
+    if(mobileInput.value !== formatted){
+      mobileInput.value = formatted;
+      if(caretEnd) mobileInput.setSelectionRange(formatted.length, formatted.length);
+    }
+    const v = validateIndianMobile(formatted);
+    mobileHint.className = 'field-hint';
+    if(formatted === '+91' || formatted === '+91 '){
+      mobileHint.textContent = '';
+    } else if(v.ok){
+      mobileHint.classList.add('ok');
+      mobileHint.textContent = v.msg;
+    } else {
+      mobileHint.classList.add('bad');
+      mobileHint.textContent = v.msg;
+    }
+    gateStage3();
+  });
+  // Prime placeholder behaviour: on focus, if empty, pre-fill +91
+  mobileInput.addEventListener('focus', () => {
+    if(mobileInput.value === ''){
+      mobileInput.value = '+91 ';
+      mobileInput.setSelectionRange(4, 4);
+    }
+  });
+
+  function gateStage3(){
+    const v = validateIndianMobile(mobileInput.value);
+    submitBtn.disabled = !v.ok;
+  }
+  function evalStage3(){ gateStage3(); }
+
+  /* ════════════════════════════════════════════════════════════════════
+     SUBMIT — REAL auth endpoints (Day 3)
+     ════════════════════════════════════════════════════════════════════ */
+
+  function showBanner(el, message, kind /* 'error' | 'success' */){
+    el.textContent = message;
+    el.className = 'auth-banner show ' + kind;
+  }
+  function hideBanner(el){
+    el.className = 'auth-banner';
+    el.textContent = '';
+  }
+  function setLoading(btn, isLoading, labelWhenLoading){
+    if(isLoading){
+      btn.dataset.originalLabel = btn.innerHTML;
+      btn.classList.add('loading');
+      btn.disabled = true;
+      btn.innerHTML = labelWhenLoading;
+    } else {
+      btn.classList.remove('loading');
+      btn.disabled = false;
+      if(btn.dataset.originalLabel) btn.innerHTML = btn.dataset.originalLabel;
+    }
+  }
+
+  /* ── SIGN UP final submit ────────────────────────────────────────── */
+  const signupBanner = document.getElementById('signup-banner');
+  document.getElementById('signup-form-3').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if(submitBtn.disabled) return;
+    hideBanner(signupBanner);
+    setLoading(submitBtn, true, 'Creating account');
+
+    const payload = {
+      username:     usernameInput.value.trim(),
+      display_name: nameInput.value.trim(),
+      email:        emailInput.value.trim(),
+      password:     pwInput.value,
+      mobile:       mobileInput.value.replace(/\s/g, ''),
+    };
+    try {
+      const r = await fetch('/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'same-origin',
+      });
+      const j = await r.json();
+      if(!r.ok){
+        // Map server error to user message
+        let msg = j.detail || 'Could not create account. Please try again.';
+        if(typeof msg !== 'string') msg = JSON.stringify(msg);
+        showBanner(signupBanner, msg, 'error');
+        setLoading(submitBtn, false);
+        // If the conflict is on stage-1 fields, jump back to stage 1 so they can fix
+        if(/username|email|display_name/.test(msg)){
+          setTimeout(() => gotoStage(0), 600);
+        }
+        return;
+      }
+      // Success — honor a ?next= URL if one was passed in, else use server's redirect.
+      showBanner(signupBanner, 'Welcome, ' + (j.user.display_name || 'collector') + '. Redirecting…', 'success');
+      setTimeout(() => {
+        window.location.href = window.__APIN_NEXT_URL__ || j.redirect || '/';
+      }, 700);
+    } catch(err){
+      showBanner(signupBanner, 'Network error — please check your connection and try again.', 'error');
+      setLoading(submitBtn, false);
+    }
+  });
+
+  /* ── SIGN IN submit ──────────────────────────────────────────────── */
+  const signinBanner = document.getElementById('signin-banner');
+  const signinSubmitBtn = document.querySelector('#signin-form button[type=submit]');
+  document.getElementById('signin-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideBanner(signinBanner);
+    const handle = document.getElementById('si-handle').value.trim();
+    const password = document.getElementById('si-password').value;
+    if(!handle || !password){
+      showBanner(signinBanner, 'Please enter both username/email and password.', 'error');
+      return;
+    }
+    setLoading(signinSubmitBtn, true, 'Signing in');
+    try {
+      const r = await fetch('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ handle, password }),
+        credentials: 'same-origin',
+      });
+      const j = await r.json();
+      if(!r.ok){
+        let msg = j.detail || 'Sign-in failed.';
+        if(r.status === 429) msg = 'Too many attempts. Please wait a minute.';
+        if(r.status === 401) msg = 'Username or password is incorrect.';
+        showBanner(signinBanner, msg, 'error');
+        setLoading(signinSubmitBtn, false);
+        return;
+      }
+      showBanner(signinBanner, 'Welcome back, ' + (j.user.display_name || 'collector') + '. Redirecting…', 'success');
+      setTimeout(() => {
+        window.location.href = window.__APIN_NEXT_URL__ || j.redirect || '/';
+      }, 600);
+    } catch(err){
+      showBanner(signinBanner, 'Network error — please check your connection and try again.', 'error');
+      setLoading(signinSubmitBtn, false);
+    }
+  });
+
+  /* ════════════════════════════════════════════════════════════════════
+     ACCESSION TICKER — fetches real next-available number from backend
+     ════════════════════════════════════════════════════════════════════ */
+  const ticker = document.getElementById('accessionTicker');
+  async function startTicker(){
+    if(!ticker) return;
+    let target = 47;
+    try {
+      const r = await fetch('/auth/next-accession');
+      const j = await r.json();
+      if(typeof j.accession === 'number') target = j.accession;
+    } catch(e){ /* keep default */ }
+    let start = null;
+    const dur = 1400;
+    function step(ts){
+      if(!start) start = ts;
+      const t = Math.min(1, (ts - start) / dur);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const val = Math.round(eased * target);
+      ticker.textContent = '00·00·' + String(val).padStart(3, '0');
+      if(t < 1) requestAnimationFrame(step);
+    }
+    setTimeout(() => requestAnimationFrame(step), 600);
+  }
+  startTicker();
+
+})();
+</script>
+
+</body>
+</html>

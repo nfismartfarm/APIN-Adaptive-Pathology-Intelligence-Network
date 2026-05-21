@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Loupe · APIN v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#fbf9f3; --paper-deep:#e9e2d1; --paper-edge:#c7bca9;
+  --ink:#1a1612; --ink-soft:#5a5246;
+  --accent-green:#2f6f3e; --accent-ochre:#b87d1e; --accent-crimson:#b01820;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#f4efe6;color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+[hidden]{display:none !important}
+.page{max-width:1100px;margin:0 auto;padding:28px 24px 60px;}
+.back-link{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:'Fraunces',serif;font-style:italic;font-size:14px;
+  color:var(--accent-green);text-decoration:none;margin-bottom:12px;
+}
+.back-link:hover{text-decoration:underline}
+h1{
+  font-family:'Fraunces',serif;font-weight:500;font-size:32px;
+  letter-spacing:-0.015em;font-variation-settings:'SOFT' 30,'WONK' 0;line-height:1.1;
+}
+.sub{
+  font-family:'Fraunces',serif;font-style:italic;font-size:15px;
+  color:var(--ink-soft);margin-top:4px;margin-bottom:24px;
+}
+.picker-row{
+  display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap;
+  margin-bottom:18px;
+}
+.picker-row > div{flex:1;min-width:240px}
+.picker-row label{
+  display:block;
+  font-family:'Inter',sans-serif;font-size:10.5px;font-weight:600;
+  letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-soft);
+  margin-bottom:4px;
+}
+.picker-row select{
+  width:100%;
+  font-family:'Inter',sans-serif;font-size:13px;color:var(--ink);
+  background:#fff;border:1px solid var(--paper-edge);border-radius:6px;
+  padding:8px 10px;outline:none;
+}
+.picker-row select:focus{border-color:var(--accent-green)}
+.actions-row{
+  display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap;
+}
+.btn{
+  font-family:'Inter',sans-serif;font-size:13px;font-weight:500;
+  padding:7px 14px;border-radius:6px;cursor:pointer;
+  border:1px solid var(--ink);background:#fff;color:var(--ink);
+  transition:background .15s, color .15s;
+}
+.btn:hover{background:var(--ink);color:var(--paper)}
+.btn.ghost{border-color:var(--paper-edge);color:var(--ink-soft)}
+.btn.ghost:hover{background:var(--paper-edge);color:var(--ink)}
+/* ── Split viewer ──────────────────────────────────────────────── */
+.loupe{
+  position:relative;
+  width:100%;
+  aspect-ratio:16 / 9;
+  max-height:560px;
+  background:var(--paper);
+  border:1px solid var(--paper-edge);
+  border-radius:10px;
+  overflow:hidden;
+  box-shadow:0 1px 2px rgba(26,22,18,0.05);
+  user-select:none;
+}
+.loupe-pane{
+  position:absolute;top:0;bottom:0;
+  width:50%;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:18px;color:var(--ink);
+}
+.loupe-pane.a{left:0;background:#fdfcf7;border-right:1px solid var(--paper-edge)}
+.loupe-pane.b{right:0;background:#f8f1de}
+.loupe-pane .image{
+  width:min(70%, 320px); aspect-ratio:1;
+  background:#dfe7d3;
+  border:1px solid var(--paper-edge); border-radius:8px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:56px; margin-bottom:12px;
+  overflow:hidden; position:relative;
+}
+.loupe-pane .image img{
+  width:100%; height:100%; object-fit:cover; display:block;
+}
+/* Pre-upgrade honest placeholder (matches dashboard/gallery aesthetic) */
+.loupe-pane .image.photo-empty{
+  background:repeating-linear-gradient(45deg,#e7e1d3 0 6px,#ddd4be 6px 12px);
+  flex-direction:column;color:var(--ink-soft);
+  font-family:'Fraunces',serif;font-style:italic;
+}
+.loupe-pane .image.photo-empty .photo-empty-icon{font-size:34px;opacity:0.55;margin-bottom:6px;}
+.loupe-pane .image.photo-empty .photo-empty-text{font-size:12px;line-height:1.2;text-align:center;}
+.loupe-pane .image.heatmap.photo-empty{
+  background:radial-gradient(circle at 40% 45%,#c44a2a 0%,#d97f3c 18%,#e9a85b 34%,#d0bb6a 50%,#80b070 68%,#3a6f4a 88%);
+}
+.loupe-pane .class{
+  font-family:'Fraunces',serif;font-size:16px;font-weight:500;
+  text-align:center;color:var(--ink);
+  font-variation-settings:'SOFT' 30,'WONK' 0;
+}
+.loupe-pane .meta{
+  font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--ink-soft);margin-top:4px;text-align:center;
+}
+.loupe-pane .conf{
+  font-family:'JetBrains Mono',monospace;font-size:18px;
+  font-weight:600;color:var(--ink);margin-top:4px;
+}
+.loupe-divider{
+  position:absolute;top:0;bottom:0;
+  width:6px;
+  left:50%;
+  transform:translateX(-50%);
+  background:var(--ink);
+  cursor:ew-resize;
+  z-index:5;
+  display:flex;align-items:center;justify-content:center;
+}
+.loupe-divider::before{
+  content:'⇔';
+  position:absolute;
+  width:30px;height:30px;
+  background:var(--paper);
+  border:1.5px solid var(--ink);
+  border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;color:var(--ink);
+  pointer-events:none;
+}
+.tag{
+  position:absolute;top:14px;
+  font-family:'Inter',sans-serif;font-size:10px;font-weight:700;
+  text-transform:uppercase;letter-spacing:0.1em;
+  background:var(--ink);color:var(--paper);
+  padding:3px 8px;border-radius:3px;z-index:4;
+}
+.tag.a{left:18px}
+.tag.b{right:18px}
+.empty-state{
+  text-align:center;padding:60px 24px;
+  font-family:'Fraunces',serif;font-style:italic;
+  font-size:16px;color:var(--ink-soft);
+}
+.dev-banner{
+  margin:0 0 14px;padding:10px 14px;
+  border:1px dashed var(--accent-ochre);background:#fff7e8;
+  color:#7a4a0a;border-radius:6px;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:0.01em;
+}
+.helper{
+  margin-top:14px;
+  font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);text-align:center;
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <a class="back-link" href="/dashboard">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+      <path d="M10 3 L 4 8 L 10 13"/>
+    </svg>
+    back to journal
+  </a>
+  <h1>The Loupe</h1>
+  <p class="sub">drag the divider to compare two specimens side by side</p>
+
+  <div id="dev-banner" class="dev-banner" hidden></div>
+
+  <div class="picker-row">
+    <div>
+      <label>specimen A</label>
+      <select id="pick-a"></select>
+    </div>
+    <div>
+      <label>specimen B</label>
+      <select id="pick-b"></select>
+    </div>
+  </div>
+
+  <div class="actions-row">
+    <button class="btn" id="swap-btn">◀▶ swap A ↔ B</button>
+    <button class="btn ghost" id="heatmap-toggle">↻ heatmap overlay</button>
+    <button class="btn ghost" id="reset-btn">↺ reset divider</button>
+  </div>
+
+  <div class="loupe" id="loupe">
+    <span class="tag a">A</span>
+    <span class="tag b">B</span>
+    <div class="loupe-pane a" id="pane-a">
+      <div class="image photo-empty" id="image-a">
+        <span class="photo-empty-icon">📷</span>
+        <span class="photo-empty-text">pick a specimen</span>
+      </div>
+      <div class="class" id="class-a">—</div>
+      <div class="meta" id="meta-a">—</div>
+      <div class="conf" id="conf-a">—</div>
+    </div>
+    <div class="loupe-pane b" id="pane-b">
+      <div class="image photo-empty" id="image-b">
+        <span class="photo-empty-icon">📷</span>
+        <span class="photo-empty-text">pick a specimen</span>
+      </div>
+      <div class="class" id="class-b">—</div>
+      <div class="meta" id="meta-b">—</div>
+      <div class="conf" id="conf-b">—</div>
+    </div>
+    <div class="loupe-divider" id="divider"></div>
+  </div>
+
+  <p class="helper">Each pane shows the actual specimen image the model
+  saw for that prediction. Rows logged before the image-storage upgrade
+  show an "image not captured" tile — re-upload the leaf to add a photo.</p>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const escapeHtml = (s) => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+function prettyClass(s){
+  return !s ? "—" : s.replace(/_/g," ").replace(/\b\w/g, c => c.toUpperCase());
+}
+function fmtDate(iso){
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+  } catch(_){ return iso.slice(0,10); }
+}
+function cropIcon(crop){
+  const c = (crop || "").toLowerCase();
+  return c === "okra" ? "🌿" : c === "brassica" ? "🥬"
+       : c === "tomato" ? "🍅" : c === "chilli" ? "🌶" : "📷";
+}
+
+// ── Load predictions, populate both pickers ──────────────────────────
+let allPredictions = [];
+async function loadPredictions(){
+  try {
+    const r = await fetch("/dashboard/history/data?page_size=100",{credentials:"include"});
+    const j = await r.json();
+    allPredictions = j.results || [];
+    if (j._dev_fallback){
+      $("#dev-banner").hidden = false;
+      $("#dev-banner").textContent =
+        "Dev mode — showing data for user '" + j._dev_fallback.username + "'.";
+    }
+    const optsHTML = allPredictions.map(p =>
+      `<option value="${p.id}">#${String(p.id).padStart(4,"0")} · ${escapeHtml(prettyClass(p.predicted_class))} · ${escapeHtml(fmtDate(p.created_at))}</option>`
+    ).join("");
+    $("#pick-a").innerHTML = optsHTML;
+    $("#pick-b").innerHTML = optsHTML;
+    if (allPredictions.length >= 2){
+      $("#pick-a").value = allPredictions[0].id;
+      $("#pick-b").value = allPredictions[1].id;
+    }
+    paintPanes();
+  } catch(e){
+    $("#loupe").innerHTML =
+      "<div class='empty-state'>Could not load predictions. Is the server running?</div>";
+  }
+}
+
+function paintPanes(){
+  const a = allPredictions.find(p => String(p.id) === $("#pick-a").value);
+  const b = allPredictions.find(p => String(p.id) === $("#pick-b").value);
+  const heatmapMode = $("#image-a").classList.contains("heatmap");
+  function paint(side, p){
+    const tile = $(`#image-${side}`);
+    if (!p){
+      tile.classList.add("photo-empty");
+      tile.innerHTML = `<span class="photo-empty-icon">—</span><span class="photo-empty-text">no specimen</span>`;
+      $(`#class-${side}`).textContent = "no specimen";
+      $(`#meta-${side}`).textContent  = "—";
+      $(`#conf-${side}`).textContent  = "—";
+      return;
+    }
+    // PHASE 3.5 — render the real image (or heatmap when toggled).
+    // has_image / has_heatmap come from the listing endpoint; rows that
+    // pre-date the schema migration render the honest placeholder.
+    const wantHeatmap = heatmapMode;
+    const have = wantHeatmap ? (p.has_heatmap !== false) : (p.has_image !== false);
+    const ep   = `/dashboard/predictions/${p.id}/${wantHeatmap ? "heatmap" : "image"}`;
+    if (have){
+      tile.classList.remove("photo-empty");
+      tile.innerHTML = `<img src="${ep}" alt="" loading="lazy" decoding="async"
+        onerror="this.parentElement.classList.add('photo-empty');
+                 this.outerHTML='<span class=&quot;photo-empty-icon&quot;>📷</span><span class=&quot;photo-empty-text&quot;>'+(${wantHeatmap}?'heatmap':'image')+' not captured</span>';">`;
+    } else {
+      tile.classList.add("photo-empty");
+      tile.innerHTML = `<span class="photo-empty-icon">${wantHeatmap ? '⬚' : '📷'}</span>
+                        <span class="photo-empty-text">${wantHeatmap ? 'heatmap' : 'image'} not captured</span>`;
+    }
+    $(`#class-${side}`).textContent = prettyClass(p.predicted_class);
+    $(`#meta-${side}`).textContent  = `${(p.crop || "—").toUpperCase()} · ${fmtDate(p.created_at)} · ${(p.tier || "—").replace(/_/g," ")}`;
+    $(`#conf-${side}`).textContent  = p.confidence != null ? Number(p.confidence).toFixed(3) : "—";
+  }
+  paint("a", a);
+  paint("b", b);
+}
+
+$("#pick-a").addEventListener("change", paintPanes);
+$("#pick-b").addEventListener("change", paintPanes);
+$("#swap-btn").addEventListener("click", () => {
+  const av = $("#pick-a").value;
+  $("#pick-a").value = $("#pick-b").value;
+  $("#pick-b").value = av;
+  paintPanes();
+});
+$("#heatmap-toggle").addEventListener("click", () => {
+  // Toggle the heatmap class on both tiles, then re-paint so the
+  // <img> src flips between /image and /heatmap (instead of just
+  // overlaying a CSS gradient on the leaf photo).
+  $("#image-a").classList.toggle("heatmap");
+  $("#image-b").classList.toggle("heatmap");
+  paintPanes();
+});
+$("#reset-btn").addEventListener("click", () => setDividerPct(50));
+
+// ── Sliding divider ───────────────────────────────────────────────────
+const loupe = $("#loupe");
+const divider = $("#divider");
+const paneA = $("#pane-a");
+const paneB = $("#pane-b");
+
+function setDividerPct(pct){
+  pct = Math.max(8, Math.min(92, pct));
+  paneA.style.width = pct + "%";
+  paneB.style.width = (100 - pct) + "%";
+  divider.style.left = pct + "%";
+}
+
+let dragging = false;
+divider.addEventListener("pointerdown", e => {
+  dragging = true;
+  divider.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+divider.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  const r = loupe.getBoundingClientRect();
+  const pct = ((e.clientX - r.left) / r.width) * 100;
+  setDividerPct(pct);
+});
+divider.addEventListener("pointerup", e => {
+  dragging = false;
+  divider.releasePointerCapture(e.pointerId);
+});
+// Also support keyboard control for accessibility
+divider.tabIndex = 0;
+divider.setAttribute("role", "separator");
+divider.setAttribute("aria-orientation", "vertical");
+divider.addEventListener("keydown", e => {
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  e.preventDefault();
+  const cur = parseFloat(divider.style.left) || 50;
+  setDividerPct(cur + (e.key === "ArrowRight" ? 4 : -4));
+});
+
+loadPredictions();
+setDividerPct(50);
+</script>
+</body>
+</html>

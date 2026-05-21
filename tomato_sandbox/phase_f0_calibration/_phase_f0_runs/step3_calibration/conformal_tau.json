@@ -1,8 +1,0 @@
-{
-  "tau": 0.8571428571428572,
-  "alpha": 0.1,
-  "calibration_set_size": 203,
-  "n": 203,
-  "computed_at": "2026-05-04T09:38:13.822353+00:00",
-  "method": "split_conformal_v1"
-}

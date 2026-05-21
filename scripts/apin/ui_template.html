@@ -1,0 +1,2951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>APIN — Pathology Journal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..700,0..100,0..1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  /* ═════════════════════ DESIGN TOKENS ═════════════════════ */
+  :root{
+    --paper-deep:#e9e2d1;
+    --paper:#f4efe6;
+    --paper-light:#fbf9f3;
+    --paper-shadow:#d8cfbc;
+    --ink:#1a1612;
+    --ink-body:#3a3228;
+    --ink-meta:#7a6f60;
+    --ink-faint:#a79c89;
+    --rule:#c7bca9;
+    --rule-faint:#ded3bf;
+
+    --accent-green:#2f6f3e;      /* confident/healthy */
+    --accent-green-wash:#d9e6d3;
+    --accent-ochre:#b87d1e;      /* differential */
+    --accent-ochre-wash:#f0e1c0;
+    --accent-slate:#4a5a72;      /* uncertain */
+    --accent-slate-wash:#d8dde5;
+    --accent-terracotta:#a84628; /* ood */
+    --accent-terracotta-wash:#ebc9be;
+    --accent-crimson:#b01820;    /* critical tier 5 */
+
+    --shadow-sm:0 1px 2px rgba(26,22,18,0.06), 0 2px 4px rgba(26,22,18,0.04);
+    --shadow-md:0 2px 6px rgba(26,22,18,0.08), 0 6px 20px rgba(26,22,18,0.06);
+    --shadow-paper:0 1px 0 rgba(0,0,0,0.02), 0 10px 40px rgba(26,22,18,0.10);
+
+    --ease-out-quad:cubic-bezier(0.25,0.46,0.45,0.94);
+    --ease-out-expo:cubic-bezier(0.16,1,0.3,1);
+  }
+
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    background:var(--paper);
+    /* Subtle paper texture — SVG noise baked in as data-URI */
+    background-image:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.16  0 0 0 0 0.13  0 0 0 0 0.10  0 0 0 0.04 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    color:var(--ink-body);
+    min-height:100vh;
+    font-size:15px;
+    line-height:1.55;
+    letter-spacing:0.01em;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* Display typography */
+  .serif{font-family:'Fraunces',Georgia,serif;color:var(--ink);font-weight:500;letter-spacing:-0.01em}
+  .mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+  /* ═════════════════════ MASTHEAD ═════════════════════ */
+  header.masthead{
+    padding:36px 24px 28px;
+    border-bottom:1px double var(--rule);
+    background:var(--paper);
+    position:relative;
+  }
+  header.masthead::before{
+    /* Thin rule inside the double-rule for a pressed-ink feel */
+    content:"";position:absolute;left:0;right:0;bottom:3px;height:1px;background:var(--rule-faint)
+  }
+  .masthead-inner{
+    max-width:1100px;margin:0 auto;
+    display:grid;grid-template-columns:1fr auto;gap:16px;align-items:end
+  }
+  .title-block h1{
+    font-family:'Fraunces',serif;
+    font-weight:550;
+    font-size:clamp(26px,3.4vw,38px);
+    color:var(--ink);
+    letter-spacing:-0.025em;
+    line-height:1;
+    font-variation-settings:'SOFT' 30, 'WONK' 0;
+  }
+  .title-block .brand-line{
+    font-family:'Fraunces',serif;
+    font-style:italic;
+    font-weight:500;
+    font-size:1.35rem;
+    color:var(--accent-green);
+    letter-spacing:-0.005em;
+    margin-top:4px;
+    font-variation-settings:'SOFT' 100, 'WONK' 1;
+    display:inline-flex;
+    align-items:baseline;
+    gap:10px;
+  }
+  .title-block .brand-line::before{
+    content:"";
+    display:inline-block;
+    width:28px;height:1px;
+    background:var(--accent-green);
+    transform:translateY(-6px);
+    opacity:0.6;
+  }
+  .title-block .subtitle{
+    font-family:'Fraunces',serif;
+    font-style:italic;
+    font-size:0.88rem;
+    color:var(--ink-meta);
+    margin-top:10px;
+    font-variation-settings:'SOFT' 50;
+  }
+  .title-block .entry-no{
+    font-family:'JetBrains Mono',monospace;
+    font-size:0.72rem;
+    color:var(--ink-faint);
+    text-transform:uppercase;
+    letter-spacing:0.15em;
+    margin-top:10px;
+  }
+  .endpoint-nav{
+    display:flex;gap:2px;
+    background:var(--paper-deep);
+    padding:3px;border-radius:2px;
+    border:1px solid var(--rule);
+  }
+  .endpoint-nav label{
+    cursor:pointer;padding:7px 14px;
+    font-size:0.78rem;font-weight:500;
+    color:var(--ink-meta);
+    transition:all 180ms var(--ease-out-quad);
+    display:flex;align-items:center;gap:6px;
+    letter-spacing:0.02em;
+  }
+  .endpoint-nav label:hover{color:var(--ink)}
+  .endpoint-nav input[type=radio]{position:absolute;opacity:0;pointer-events:none}
+  .endpoint-nav label.selected{
+    background:var(--paper-light);color:var(--ink);
+    box-shadow:var(--shadow-sm);
+  }
+  .icon-bar{
+    display:flex;gap:16px;margin-top:14px;flex-wrap:wrap;
+    font-family:'JetBrains Mono',monospace;font-size:0.72rem;
+  }
+  .icon-bar a{
+    color:var(--ink-meta);text-decoration:none;
+    display:flex;align-items:center;gap:5px;
+    border-bottom:1px dotted var(--rule);
+    padding-bottom:1px;
+    transition:color 180ms;
+  }
+  .icon-bar a:hover{color:var(--accent-green)}
+
+  /* ═════════════════════ MAIN LAYOUT ═════════════════════ */
+  main{max-width:1100px;margin:0 auto;padding:32px 24px 80px}
+
+  /* ═════════════════════ SPECIMEN MOUNT (UPLOAD) ═════════════════════ */
+  .specimen-mount{
+    position:relative;
+    background:var(--paper-light);
+    border:1px solid var(--rule);
+    border-radius:2px;
+    min-height:260px;
+    padding:44px 32px;
+    text-align:center;
+    cursor:pointer;
+    overflow:hidden;
+    box-shadow:var(--shadow-paper);
+    transition:border-color 240ms var(--ease-out-quad), box-shadow 240ms;
+  }
+  .specimen-mount::before{
+    /* Four corners of "washi tape" — hand-torn tape effect */
+    content:"";position:absolute;inset:0;
+    background-image:
+      linear-gradient(135deg,transparent 38px,var(--accent-ochre-wash) 38px,var(--accent-ochre-wash) 60px,transparent 60px),
+      linear-gradient(225deg,transparent 38px,var(--accent-ochre-wash) 38px,var(--accent-ochre-wash) 60px,transparent 60px),
+      linear-gradient(315deg,transparent 38px,var(--accent-ochre-wash) 38px,var(--accent-ochre-wash) 60px,transparent 60px),
+      linear-gradient(45deg,transparent 38px,var(--accent-ochre-wash) 38px,var(--accent-ochre-wash) 60px,transparent 60px);
+    background-position:top left,top right,bottom right,bottom left;
+    background-size:60px 60px;background-repeat:no-repeat;
+    opacity:0.6;pointer-events:none;
+  }
+  .specimen-mount:hover{border-color:var(--accent-green)}
+  .specimen-mount.dragging{border-color:var(--accent-green);background:var(--accent-green-wash)}
+  .specimen-mount svg.leaf-prompt{
+    width:40px;height:40px;color:var(--accent-green);margin-bottom:14px;stroke-width:1.25
+  }
+  .specimen-mount .prompt{
+    font-family:'Fraunces',serif;font-size:1.25rem;color:var(--ink);letter-spacing:-0.01em
+  }
+  .specimen-mount .prompt-meta{
+    font-size:0.82rem;color:var(--ink-meta);margin-top:6px
+  }
+  input[type=file]{position:absolute;opacity:0;pointer-events:none}
+
+  #preview-mount{display:none;position:relative;padding:24px}
+  #preview-mount img{
+    max-width:100%;max-height:320px;display:block;margin:0 auto;
+    border:1px solid var(--rule);
+    box-shadow:var(--shadow-md);
+  }
+  .preview-controls{margin-top:18px;display:flex;gap:10px;justify-content:center}
+
+  /* Buttons */
+  .btn{
+    font-family:'Inter',sans-serif;
+    padding:9px 20px;border-radius:2px;cursor:pointer;
+    font-size:0.84rem;font-weight:500;letter-spacing:0.02em;
+    border:1px solid var(--rule);background:var(--paper-light);color:var(--ink-body);
+    display:inline-flex;align-items:center;gap:8px;
+    transition:all 180ms var(--ease-out-quad);
+  }
+  .btn:hover{border-color:var(--ink);color:var(--ink);transform:translateY(-1px)}
+  .btn-primary{background:var(--ink);color:var(--paper-light);border-color:var(--ink)}
+  .btn-primary:hover{background:var(--accent-green);border-color:var(--accent-green);color:var(--paper-light)}
+  .btn svg{width:15px;height:15px}
+
+  /* ═════════════════════ FALLING LEAF ANIMATION ═════════════════════ */
+  .leaf-animator{
+    position:fixed;
+    top:80px;right:24px;
+    width:60px;height:60px;
+    pointer-events:none;
+    z-index:100;
+    display:none;
+  }
+  .leaf-animator.active{display:block}
+  .leaf-animator svg{
+    width:100%;height:100%;
+    color:var(--accent-green);
+    transform-origin:50% 10%;
+    animation:leaf-fall 1500ms var(--ease-out-quad) forwards;
+  }
+  @keyframes leaf-fall{
+    0%  {transform:translate(0,0) rotate(0) scale(1);opacity:0}
+    10% {opacity:1}
+    30% {transform:translate(-30px,80px) rotate(120deg) scale(1)}
+    60% {transform:translate(20px,200px) rotate(280deg) scale(0.95)}
+    90% {transform:translate(-10px,360px) rotate(460deg) scale(0.9);opacity:1}
+    100%{transform:translate(0,420px) rotate(480deg) scale(0.88);opacity:0}
+  }
+  .leaf-rustle svg{
+    animation:leaf-rustle 2800ms ease-in-out infinite;
+  }
+  @keyframes leaf-rustle{
+    0%,100% {transform:rotate(-4deg) translateY(0)}
+    50%     {transform:rotate(4deg)  translateY(-6px)}
+  }
+
+  /* ═════════════════════ SPINNER / SKELETON ═════════════════════ */
+  #pending{display:none;margin-top:28px}
+  .skel-line{
+    background:linear-gradient(90deg,var(--paper-deep) 0%,var(--rule-faint) 50%,var(--paper-deep) 100%);
+    background-size:200% 100%;
+    animation:skel-shimmer 1800ms ease-in-out infinite;
+    border-radius:2px;height:14px;margin-bottom:10px;
+  }
+  @keyframes skel-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+  #pending .skel-wide{width:60%;height:32px}
+  #pending .skel-med{width:80%}
+  #pending .skel-narrow{width:40%}
+  #pending .skel-label{font-family:'Fraunces',serif;font-style:italic;color:var(--ink-meta);font-size:0.95rem;margin-bottom:20px;display:flex;align-items:center;gap:8px}
+  #pending .skel-label svg{width:16px;height:16px;animation:rustle-svg 2800ms ease-in-out infinite;transform-origin:50% 80%}
+  @keyframes rustle-svg{0%,100%{transform:rotate(-6deg)}50%{transform:rotate(6deg)}}
+
+  /* ═════════════════════ ERROR ═════════════════════ */
+  #error-box{
+    display:none;margin-top:20px;padding:18px 20px;
+    border-left:4px solid var(--accent-terracotta);
+    background:var(--accent-terracotta-wash);
+    color:#5a2617;
+    font-family:'Fraunces',serif;font-size:0.95rem;
+  }
+  #error-box .err-title{font-weight:600;margin-bottom:4px;font-style:italic}
+
+  /* ═════════════════════ NOTEBOOK PAGE (RESULT) ═════════════════════ */
+  #result{display:none;margin-top:36px}
+  .page{
+    background:var(--paper-light);
+    border:1px solid var(--rule);
+    box-shadow:var(--shadow-paper);
+    position:relative;
+    padding:56px 56px 44px;
+    /* Ruled horizontal lines like a notebook page */
+    background-image:repeating-linear-gradient(
+      to bottom,
+      transparent,
+      transparent 31px,
+      var(--rule-faint) 31px,
+      var(--rule-faint) 32px
+    );
+    background-size:100% 32px;
+    background-position:0 68px;
+  }
+  .page::before{
+    /* Margin rule line on the left */
+    content:"";position:absolute;
+    top:0;bottom:0;left:44px;
+    width:1px;background:var(--accent-terracotta);
+    opacity:0.30;
+  }
+  @media(max-width:720px){
+    .page{padding:32px 24px 28px}
+    .page::before{left:16px}
+  }
+
+  /* Section heading style */
+  .section-head{
+    font-family:'Fraunces',serif;
+    font-size:1.4rem;font-weight:500;
+    color:var(--ink);letter-spacing:-0.015em;
+    padding-bottom:4px;
+    border-bottom:1px solid var(--rule);
+    margin-bottom:16px;
+    display:flex;align-items:baseline;gap:10px;
+    font-variation-settings:'SOFT' 20;
+  }
+  .section-head .count{
+    font-family:'JetBrains Mono',monospace;
+    font-size:0.68rem;color:var(--ink-faint);
+    font-weight:400;letter-spacing:0.12em;text-transform:uppercase;
+    margin-left:auto;
+  }
+  .subsection-head{
+    font-family:'Fraunces',serif;font-style:italic;
+    font-weight:400;font-size:1.05rem;
+    color:var(--ink);margin:28px 0 10px;
+    letter-spacing:-0.005em;
+    display:flex;align-items:center;gap:8px;
+  }
+  .subsection-head svg{width:15px;height:15px;color:var(--ink-meta)}
+
+  /* ─── HERO GRID: specimen + observation ─── */
+  .hero-grid{
+    display:grid;
+    grid-template-columns:1fr 1.1fr;
+    gap:36px;
+    margin-bottom:32px;
+  }
+  @media(max-width:820px){.hero-grid{grid-template-columns:1fr}}
+
+  .specimen-panel{position:relative}
+  .specimen-panel .specimen-img{
+    width:100%;aspect-ratio:1.1/1;object-fit:cover;
+    border:1px solid var(--rule);
+    box-shadow:var(--shadow-md);
+    animation:fadein 400ms var(--ease-out-quad) both;
+  }
+  .specimen-panel .heatmap-img{
+    width:100%;aspect-ratio:1.1/1;object-fit:cover;
+    position:absolute;top:0;left:0;
+    border:1px solid var(--rule);
+    opacity:0;
+    animation:heatmap-reveal 600ms var(--ease-out-expo) 400ms forwards;
+  }
+  @keyframes heatmap-reveal{
+    from{opacity:0;transform:scale(1.01)}
+    to  {opacity:0.82;transform:scale(1)}
+  }
+  .specimen-caption{
+    margin-top:10px;
+    font-family:'Fraunces',serif;font-style:italic;
+    font-size:0.82rem;color:var(--ink-meta);
+    display:flex;justify-content:space-between;
+  }
+  .heatmap-source{
+    font-family:'JetBrains Mono',monospace;font-size:0.7rem;
+    color:var(--ink-faint);letter-spacing:0.08em;
+  }
+
+  /* ─── OBSERVATION PANEL ─── */
+  .observation-panel .tier-stamp-row{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+  .tier-stamp{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:6px 14px;
+    border:1.5px solid var(--ink-meta);
+    font-family:'JetBrains Mono',monospace;
+    font-size:0.82rem;font-weight:600;
+    color:var(--ink);letter-spacing:0.12em;text-transform:uppercase;
+    background:var(--paper-light);
+    position:relative;
+    animation:stamp-in 380ms var(--ease-out-expo) both;
+    /* Slight rotation for that hand-stamped feel */
+    transform:rotate(-2deg);
+  }
+  @keyframes stamp-in{
+    0%  {opacity:0;transform:rotate(-2deg) scale(1.2);filter:blur(2px)}
+    60% {opacity:1;filter:blur(0)}
+    100%{opacity:1;transform:rotate(-2deg) scale(1);filter:blur(0)}
+  }
+  .tier-stamp.tier-1A,.tier-stamp.tier-1B,.tier-stamp.tier-1C{
+    border-color:var(--accent-green);color:var(--accent-green);background:var(--accent-green-wash)
+  }
+  .tier-stamp.tier-2A,.tier-stamp.tier-2B,.tier-stamp.tier-2C{
+    border-color:var(--accent-ochre);color:var(--accent-ochre);background:var(--accent-ochre-wash)
+  }
+  .tier-stamp.tier-3A{border-color:var(--accent-green);color:var(--accent-green);background:var(--accent-green-wash)}
+  .tier-stamp.tier-3B,.tier-stamp.tier-3C{
+    border-color:var(--accent-slate);color:var(--accent-slate);background:var(--accent-slate-wash)
+  }
+  .tier-stamp.tier-4A,.tier-stamp.tier-4B{
+    border-color:var(--accent-terracotta);color:var(--accent-terracotta);background:var(--accent-terracotta-wash)
+  }
+  .tier-stamp.tier-5{
+    border-color:var(--accent-crimson);color:var(--accent-crimson);background:#f8dcdb;
+    animation:stamp-in 380ms var(--ease-out-expo) both, tier5-pulse 1400ms ease-in-out 500ms infinite;
+  }
+  @keyframes tier5-pulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(176,24,32,0.3)}
+    50%    {box-shadow:0 0 0 8px rgba(176,24,32,0)}
+  }
+  .tier-stamp.tier-ROUTER_REJECTED{
+    border-color:var(--accent-ochre);color:var(--accent-ochre);background:var(--accent-ochre-wash)
+  }
+  .conflict-badge{
+    font-family:'JetBrains Mono',monospace;font-size:0.7rem;
+    color:var(--ink-meta);letter-spacing:0.12em;text-transform:uppercase;
+    padding:4px 10px;border:1px solid var(--rule);
+    background:var(--paper);
+  }
+
+  .diagnosis-name{
+    font-family:'Fraunces',serif;
+    font-size:2.2rem;font-weight:500;
+    color:var(--ink);line-height:1.1;letter-spacing:-0.02em;
+    margin:6px 0 14px;
+    font-variation-settings:'SOFT' 40, 'WONK' 1;
+    animation:fadein 500ms var(--ease-out-quad) 200ms both;
+  }
+  .confidence-row{
+    display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;
+    margin-bottom:16px;
+    animation:fadein 500ms var(--ease-out-quad) 260ms both;
+  }
+  .confidence-row .lbl{
+    font-family:'Fraunces',serif;font-style:italic;
+    font-size:0.82rem;color:var(--ink-meta);
+  }
+  .confidence-bar-outer{
+    height:10px;background:var(--paper-deep);
+    border:1px solid var(--rule-faint);border-radius:1px;overflow:hidden;
+  }
+  .confidence-bar-inner{
+    height:100%;background:var(--ink);width:0;
+    transition:width 700ms var(--ease-out-expo);
+  }
+  .confidence-pct{
+    font-family:'JetBrains Mono',monospace;font-weight:500;
+    font-size:0.92rem;color:var(--ink);min-width:52px;text-align:right;
+  }
+
+  .output-message{
+    font-family:'Fraunces',serif;font-size:1.02rem;line-height:1.55;
+    color:var(--ink-body);font-variation-settings:'SOFT' 40;
+    padding:14px 0 6px;
+    border-top:1px dotted var(--rule);
+    animation:fadein 500ms var(--ease-out-quad) 320ms both;
+  }
+  .output-message::before{
+    content:'"';font-size:1.8rem;color:var(--accent-ochre);
+    font-family:'Fraunces',serif;line-height:0;position:relative;top:8px;margin-right:2px;
+  }
+  .output-message::after{
+    content:'"';font-size:1.8rem;color:var(--accent-ochre);
+    font-family:'Fraunces',serif;line-height:0;position:relative;top:8px;margin-left:2px;
+  }
+
+  /* ─── MARGINAL NOTES RAIL ─── */
+  .margin-rail{
+    margin-top:24px;padding:18px 0;
+    border-top:1px dotted var(--rule);
+    border-bottom:1px dotted var(--rule);
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+    gap:18px 24px;
+    animation:fadein 500ms var(--ease-out-quad) 380ms both;
+  }
+  .margin-note{display:flex;align-items:flex-start;gap:10px;min-width:0}
+  .margin-note svg{
+    width:16px;height:16px;color:var(--ink-meta);flex-shrink:0;margin-top:1px;stroke-width:1.5
+  }
+  .margin-note .mn-lbl{
+    font-family:'Fraunces',serif;font-style:italic;font-size:0.76rem;
+    color:var(--ink-meta);line-height:1.2;margin-bottom:2px;
+    letter-spacing:0.01em;
+  }
+  .margin-note .mn-val{
+    font-family:'JetBrains Mono',monospace;font-size:0.82rem;
+    color:var(--ink);font-weight:500;word-break:break-word;
+  }
+  .margin-note .mn-val.muted{color:var(--ink-meta);font-weight:400}
+  .margin-note .mn-val .wash{
+    display:inline-block;padding:1px 8px;border-radius:1px;
+    font-size:0.72rem;letter-spacing:0.04em;font-weight:500;
+  }
+  .wash.near   {background:var(--accent-green-wash);color:var(--accent-green)}
+  .wash.moderate{background:var(--accent-ochre-wash);color:var(--accent-ochre)}
+  .wash.far    {background:var(--accent-terracotta-wash);color:var(--accent-terracotta)}
+  .wash.extreme{background:#e8a99a;color:var(--accent-crimson)}
+  .wash.cold-start{background:var(--accent-slate-wash);color:var(--accent-slate)}
+
+  /* ─── PROSE SECTIONS (treatment / monitoring / differential / retake) ─── */
+  .prose-section{
+    display:none;margin-top:28px;
+    animation:fadein 500ms var(--ease-out-quad) 440ms both;
+  }
+  .prose-section.visible{display:block}
+  .prose-body{
+    font-family:'Fraunces',serif;font-size:0.98rem;line-height:1.65;
+    color:var(--ink-body);white-space:pre-wrap;
+    font-variation-settings:'SOFT' 40;
+    padding:0 4px;
+  }
+  .prose-body.retake{
+    border-left:3px solid var(--accent-ochre);padding-left:18px;background:rgba(184,125,30,0.04);
+  }
+
+  /* ═════════════════════ TECHNICAL APPENDIX ═════════════════════ */
+  .appendix{
+    margin-top:44px;
+    padding-top:28px;border-top:2px double var(--rule);
+    animation:fadein 500ms var(--ease-out-quad) 500ms both;
+  }
+  .appendix-label{
+    font-family:'Fraunces',serif;font-style:italic;
+    text-align:center;font-size:0.9rem;color:var(--ink-meta);
+    letter-spacing:0.08em;margin-bottom:24px;
+  }
+  .appendix-grid{
+    display:grid;grid-template-columns:1fr 1fr;gap:28px;
+  }
+  @media(max-width:820px){.appendix-grid{grid-template-columns:1fr}}
+  .appendix-block{
+    background:var(--paper-light);
+    border:1px solid var(--rule);
+    padding:20px 22px;
+    position:relative;
+  }
+  .appendix-block h3{
+    font-family:'Fraunces',serif;font-size:1rem;font-weight:500;
+    color:var(--ink);margin-bottom:14px;padding-bottom:8px;
+    border-bottom:1px solid var(--rule-faint);
+    display:flex;align-items:center;gap:8px;letter-spacing:-0.01em;
+  }
+  .appendix-block h3 svg{width:14px;height:14px;color:var(--ink-meta)}
+
+  /* Per-signal readout table */
+  .signal-table{width:100%;border-collapse:collapse}
+  .signal-table th,.signal-table td{
+    text-align:left;padding:8px 4px;
+    border-bottom:1px solid var(--rule-faint);
+    font-size:0.84rem;
+  }
+  .signal-table th{
+    font-family:'Fraunces',serif;font-style:italic;font-weight:400;
+    color:var(--ink-meta);font-size:0.78rem;
+  }
+  .signal-table td.signal-name{font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:var(--ink-meta)}
+  .signal-table td.signal-class{font-family:'Fraunces',serif;color:var(--ink)}
+  .signal-table td.signal-prob{font-family:'JetBrains Mono',monospace;text-align:right;color:var(--ink);font-weight:500}
+
+  /* Gate weight meters */
+  .gate-meters{margin-top:4px}
+  .gate-row{display:grid;grid-template-columns:90px 1fr 44px;gap:10px;align-items:center;margin-bottom:8px}
+  .gate-row .g-name{font-family:'JetBrains Mono',monospace;font-size:0.78rem;color:var(--ink-meta)}
+  .gate-row .g-meter-outer{
+    height:8px;background:var(--paper-deep);border:1px solid var(--rule-faint);position:relative
+  }
+  .gate-row .g-meter-inner{
+    height:100%;background:var(--ink);width:0;
+    transition:width 800ms var(--ease-out-expo);
+  }
+  .gate-row .g-meter-outer::after{
+    /* Tick marks every 25% */
+    content:"";position:absolute;inset:0;
+    background:repeating-linear-gradient(to right,
+      transparent 0, transparent calc(25% - 1px),
+      var(--rule) calc(25% - 1px), var(--rule) 25%);
+    pointer-events:none;
+  }
+  .gate-row .g-pct{
+    font-family:'JetBrains Mono',monospace;font-size:0.78rem;text-align:right;
+    color:var(--ink);font-weight:500;
+  }
+
+  /* 9-class probability table */
+  .prob-list{margin-top:4px}
+  .prob-row{display:grid;grid-template-columns:1fr 1fr 44px;gap:8px;align-items:center;padding:4px 0}
+  .prob-row .p-name{font-family:'Fraunces',serif;font-size:0.86rem;color:var(--ink-body)}
+  .prob-row .p-bar-outer{height:4px;background:var(--paper-deep);border-radius:0}
+  .prob-row .p-bar-inner{height:100%;background:var(--accent-slate);width:0;transition:width 700ms var(--ease-out-expo)}
+  .prob-row.top .p-bar-inner{background:var(--accent-green)}
+  .prob-row .p-pct{font-family:'JetBrains Mono',monospace;font-size:0.78rem;text-align:right;color:var(--ink-meta)}
+  .prob-row.top .p-pct{color:var(--ink);font-weight:500}
+  .prob-row.in-conformal .p-name::after{
+    content:" ·";color:var(--accent-green);font-weight:700;margin-left:2px;
+  }
+
+  /* Conformal set chips */
+  .conformal-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .chip{
+    font-family:'JetBrains Mono',monospace;font-size:0.72rem;
+    padding:3px 10px;border:1px solid var(--rule);background:var(--paper);color:var(--ink-body);
+  }
+  .chip.primary{border-color:var(--accent-green);background:var(--accent-green-wash);color:var(--accent-green)}
+
+  /* Routing card */
+  .routing-card{
+    display:none;
+    margin-bottom:28px;padding:18px 22px;
+    background:var(--paper-light);
+    border-left:3px solid var(--accent-slate);
+    animation:fadein 500ms var(--ease-out-quad) both;
+  }
+  .routing-card.visible{display:block}
+  .routing-head{
+    font-family:'Fraunces',serif;font-style:italic;color:var(--ink);
+    font-size:1rem;margin-bottom:10px;display:flex;align-items:center;gap:8px;
+  }
+  .routing-head svg{width:15px;height:15px}
+  .routing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 24px}
+  .routing-grid .r-row{display:flex;justify-content:space-between;font-size:0.86rem;padding:2px 0}
+  .routing-grid .r-row .k{color:var(--ink-meta);font-family:'Fraunces',serif;font-style:italic}
+  .routing-grid .r-row .v{color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:0.82rem;font-weight:500}
+
+  /* Raw JSON (collapsed) */
+  .raw-json-wrap{margin-top:24px}
+  .raw-json-wrap details{
+    background:var(--paper-light);border:1px solid var(--rule);padding:12px 18px;
+  }
+  .raw-json-wrap summary{
+    cursor:pointer;font-family:'Fraunces',serif;font-style:italic;font-size:0.9rem;
+    color:var(--ink);list-style:none;display:flex;align-items:center;gap:8px;
+  }
+  .raw-json-wrap summary::-webkit-details-marker{display:none}
+  .raw-json-wrap summary svg{width:13px;height:13px;transition:transform 220ms}
+  .raw-json-wrap details[open] summary svg{transform:rotate(90deg)}
+  .raw-json-wrap pre{
+    margin-top:12px;padding:14px;background:#1a1612;color:#d4c89b;
+    font-family:'JetBrains Mono',monospace;font-size:0.72rem;line-height:1.5;
+    overflow-x:auto;max-height:400px;
+  }
+
+  /* ═════════════════════ FEEDBACK ("SIGN THIS OBSERVATION") ═════════════════════ */
+  .feedback-section{
+    margin-top:44px;padding-top:24px;border-top:1px solid var(--rule);
+    animation:fadein 500ms var(--ease-out-quad) 600ms both;
+  }
+  .feedback-prompt{
+    font-family:'Fraunces',serif;font-style:italic;font-size:0.95rem;
+    color:var(--ink-meta);margin-bottom:14px;
+  }
+  .feedback-btns{display:flex;gap:12px;flex-wrap:wrap}
+  .thumb-btn{
+    padding:10px 18px;background:var(--paper);border:1px solid var(--rule);
+    color:var(--ink);font-family:'Inter',sans-serif;font-size:0.85rem;font-weight:500;
+    cursor:pointer;display:inline-flex;align-items:center;gap:8px;
+    transition:all 180ms var(--ease-out-quad);
+  }
+  .thumb-btn:hover{border-color:var(--ink)}
+  .thumb-btn.confirm{color:var(--accent-green);border-color:var(--accent-green)}
+  .thumb-btn.dissent{color:var(--accent-ochre);border-color:var(--accent-ochre)}
+  .thumb-btn svg{width:15px;height:15px}
+  .thumb-btn:disabled{opacity:0.4;cursor:default;pointer-events:none}
+
+  #correction-form{display:none;margin-top:14px}
+  select.correction{
+    padding:8px 12px;background:var(--paper-light);
+    font-family:'Fraunces',serif;font-size:0.9rem;
+    color:var(--ink);border:1px solid var(--rule);border-radius:0;
+    max-width:360px;width:100%;
+  }
+  .feedback-thanks{
+    display:none;margin-top:12px;
+    font-family:'Fraunces',serif;font-style:italic;font-size:0.95rem;color:var(--accent-green);
+  }
+
+  /* ═════════════════════ FOOTER (SYSTEM META) ═════════════════════ */
+  .page-footer{
+    margin-top:36px;padding-top:18px;border-top:1px solid var(--rule-faint);
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;
+    font-family:'JetBrains Mono',monospace;font-size:0.72rem;
+    color:var(--ink-faint);letter-spacing:0.04em;
+  }
+  .page-footer .meta-group{display:flex;gap:22px;flex-wrap:wrap}
+  .page-footer .meta-group span b{color:var(--ink-meta);font-weight:500}
+
+  /* Utility */
+  @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .fadein{animation:fadein 500ms var(--ease-out-quad) both}
+  .hidden{display:none !important}
+  .staggered-1{animation-delay:360ms}
+  .staggered-2{animation-delay:420ms}
+  .staggered-3{animation-delay:480ms}
+  .staggered-4{animation-delay:540ms}
+
+  /* ═════════════════════ "WHY THIS TIER?" DECISION TRACE ═════════════════════ */
+  .decision-trace{
+    margin-top:24px;padding:18px 0 4px;
+    border-top:1px dotted var(--rule);
+    border-bottom:1px dotted var(--rule);
+    animation:fadein 500ms var(--ease-out-quad) 440ms both;
+  }
+  .decision-trace-head{
+    font-family:'Fraunces',serif;font-style:italic;
+    font-size:0.88rem;color:var(--ink-meta);margin-bottom:12px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .decision-trace-head svg{width:14px;height:14px}
+  .dt-row{
+    display:grid;grid-template-columns:28px 1fr auto;gap:12px;align-items:start;
+    padding:6px 0;border-bottom:1px dotted var(--rule-faint);
+    font-size:0.82rem;
+  }
+  .dt-row:last-child{border-bottom:none}
+  .dt-row.dt-taken{background:rgba(47,111,62,0.06);padding-left:6px;border-left:2px solid var(--accent-green);padding-right:6px}
+  .dt-row .dt-idx{
+    font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:var(--ink-faint);
+    padding-top:2px;
+  }
+  .dt-row .dt-body{min-width:0}
+  .dt-row .dt-name{
+    font-family:'Fraunces',serif;font-weight:500;color:var(--ink);
+    font-size:0.9rem;margin-bottom:2px;
+  }
+  .dt-row .dt-check{
+    font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:var(--ink-meta);
+    line-height:1.4;
+  }
+  .dt-row .dt-check b{color:var(--ink);font-weight:500}
+  .dt-row .dt-verdict{
+    font-family:'JetBrains Mono',monospace;font-size:0.74rem;
+    padding:3px 10px;border:1px solid var(--rule);
+    display:inline-flex;align-items:center;gap:5px;
+    white-space:nowrap;
+  }
+  .dt-verdict.pass{background:var(--accent-green-wash);color:var(--accent-green);border-color:var(--accent-green)}
+  .dt-verdict.fail{background:var(--paper);color:var(--ink-faint)}
+  .dt-verdict svg{width:11px;height:11px}
+
+  /* ═════════════════════ TAXONOMY TREE ═════════════════════ */
+  .taxo-section{
+    margin-top:22px;animation:fadein 500ms var(--ease-out-quad) 500ms both;
+  }
+  .taxo-tree{
+    font-family:'Fraunces',serif;font-size:0.86rem;color:var(--ink-body);
+    padding:12px 0 6px;
+  }
+  .taxo-root{
+    font-style:italic;color:var(--ink-meta);margin-bottom:6px;font-size:0.78rem;
+    letter-spacing:0.06em;text-transform:uppercase;
+  }
+  .taxo-branch{
+    margin-left:14px;padding-left:18px;position:relative;
+    border-left:1px solid var(--rule-faint);padding-top:4px;
+  }
+  .taxo-node{
+    position:relative;padding:4px 0 4px 16px;display:flex;align-items:center;gap:10px;
+  }
+  .taxo-node::before{
+    content:"";position:absolute;left:0;top:14px;width:12px;height:1px;background:var(--rule-faint);
+  }
+  .taxo-node .t-name{flex:0 0 auto;font-size:0.92rem}
+  .taxo-node .t-bar{
+    flex:1;max-width:180px;height:4px;background:var(--paper-deep);
+    border:1px solid var(--rule-faint);overflow:hidden;
+  }
+  .taxo-node .t-bar-fill{height:100%;background:var(--accent-slate);width:0;
+    transition:width 700ms var(--ease-out-expo)}
+  .taxo-node .t-pct{
+    font-family:'JetBrains Mono',monospace;font-size:0.74rem;
+    color:var(--ink-meta);width:48px;text-align:right;
+  }
+  .taxo-node.predicted{
+    background:var(--accent-green-wash);padding-right:10px;border-radius:1px;
+  }
+  .taxo-node.predicted .t-name{color:var(--accent-green);font-weight:600}
+  .taxo-node.predicted .t-bar-fill{background:var(--accent-green)}
+  .taxo-node.predicted .t-pct{color:var(--accent-green);font-weight:500}
+  .taxo-node.path-parent .t-name::after{content:" ◂";color:var(--accent-green);margin-left:4px}
+  .taxo-crop-label{
+    font-family:'Fraunces',serif;font-style:italic;color:var(--ink);
+    font-size:0.95rem;margin:4px 0 2px 0;display:flex;align-items:center;gap:6px;
+  }
+  .taxo-crop-label.active{color:var(--accent-green)}
+  .taxo-crop-label svg{width:14px;height:14px;color:var(--ink-meta)}
+
+  /* ═════════════════════ PER-SIGNAL × PER-CLASS HEATMAP ═════════════════════ */
+  .heatmap-grid{
+    display:grid;
+    grid-template-columns:110px repeat(9,1fr);
+    gap:2px;margin-top:4px;
+  }
+  .heatmap-grid .h-label-col{
+    font-family:'Fraunces',serif;font-style:italic;font-size:0.76rem;
+    color:var(--ink-meta);text-align:right;padding-right:8px;
+    display:flex;align-items:center;justify-content:flex-end;
+  }
+  .heatmap-grid .h-label-row-wrap{
+    grid-column:2 / -1;
+    display:grid;grid-template-columns:repeat(9,1fr);gap:2px;margin-bottom:4px;
+  }
+  .heatmap-grid .h-class-label{
+    font-family:'JetBrains Mono',monospace;font-size:0.58rem;
+    color:var(--ink-meta);text-align:center;line-height:1.1;
+    padding:0 2px;transform:rotate(-28deg);transform-origin:center top;
+    margin-bottom:4px;
+  }
+  .heatmap-grid .h-cell{
+    aspect-ratio:1/1;min-height:22px;
+    background:var(--paper-deep);position:relative;
+    display:flex;align-items:center;justify-content:center;
+    font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:transparent;
+    transition:color 200ms;
+  }
+  .heatmap-grid .h-cell:hover{color:var(--ink);outline:1px solid var(--ink);z-index:2}
+  .heatmap-grid .h-cell.predicted{outline:1.5px solid var(--accent-green);outline-offset:-1px}
+
+  /* ═════════════════════ MAHALANOBIS BAR CHART ═════════════════════ */
+  .maha-chart{margin-top:4px}
+  .maha-row{
+    display:grid;grid-template-columns:150px 1fr 64px;gap:10px;align-items:center;
+    padding:4px 0;font-size:0.78rem;
+  }
+  .maha-row .m-name{font-family:'Fraunces',serif;color:var(--ink-body)}
+  .maha-row .m-bar-outer{height:6px;background:var(--paper-deep);border:1px solid var(--rule-faint);position:relative}
+  .maha-row .m-bar-inner{height:100%;background:var(--accent-slate);width:0;transition:width 700ms var(--ease-out-expo)}
+  .maha-row.predicted .m-bar-inner{background:var(--accent-green)}
+  .maha-row.beyond-threshold .m-bar-inner{background:var(--accent-terracotta)}
+  .maha-row .m-bar-outer::after{
+    /* Threshold mark */
+    content:"";position:absolute;top:-3px;bottom:-3px;
+    left:var(--thr,50%);width:1px;background:var(--accent-terracotta);
+  }
+  .maha-row .m-val{font-family:'JetBrains Mono',monospace;color:var(--ink);
+    text-align:right;font-size:0.76rem}
+  .maha-caption{
+    font-family:'Fraunces',serif;font-style:italic;font-size:0.74rem;
+    color:var(--ink-meta);margin-top:10px;
+  }
+  .maha-caption .tr-dash{color:var(--accent-terracotta)}
+
+  /* ═════════════════════ SHAP WATERFALL ═════════════════════ */
+  .shap-waterfall{margin-top:8px}
+  .shap-row{
+    display:grid;grid-template-columns:100px 1fr 54px;gap:10px;align-items:center;
+    padding:4px 0;font-size:0.8rem;
+  }
+  .shap-row .s-name{font-family:'JetBrains Mono',monospace;color:var(--ink-meta);font-size:0.72rem}
+  .shap-row .s-bar-outer{
+    position:relative;height:18px;background:var(--paper-deep);
+    border:1px solid var(--rule-faint);
+  }
+  .shap-row .s-bar-inner{
+    position:absolute;left:0;top:0;bottom:0;
+    background:var(--accent-green);width:0;
+    transition:width 800ms var(--ease-out-expo);
+  }
+  /* Bind colour to signal IDENTITY, not DOM position — rows are sorted
+     by normalised contribution, so :nth-child would mis-colour the bars
+     (Round-1 audit fix M). */
+  .shap-row[data-signal="model2"]       .s-bar-inner{background:#4a5a72}  /* Model 2 slate */
+  .shap-row[data-signal="efficientnet"] .s-bar-inner{background:#b87d1e}  /* EN ochre */
+  .shap-row[data-signal="psv"]          .s-bar-inner{background:#2f6f3e}  /* PSV green */
+  .shap-row[data-signal="dinov2_head"]  .s-bar-inner{background:#a84628}  /* DINOv2 terracotta */
+  .shap-row .s-pct{font-family:'JetBrains Mono',monospace;font-size:0.76rem;
+    color:var(--ink);text-align:right;font-weight:500}
+  .shap-total{
+    margin-top:10px;padding-top:10px;border-top:1px solid var(--rule-faint);
+    display:grid;grid-template-columns:100px 1fr 54px;gap:10px;font-size:0.82rem;align-items:center;
+  }
+  .shap-total .s-name{font-family:'Fraunces',serif;font-weight:500;color:var(--ink)}
+  .shap-total .s-pct{font-family:'JetBrains Mono',monospace;color:var(--accent-green);font-weight:600;text-align:right}
+
+  /* ═════════════════════ PSV FEATURE FIRING ═════════════════════ */
+  .psv-firing{margin-top:6px}
+  .psv-row{
+    display:grid;grid-template-columns:190px 1fr 54px;gap:8px;align-items:center;
+    padding:3px 0;font-size:0.76rem;
+  }
+  .psv-row .p-name{
+    font-family:'JetBrains Mono',monospace;font-size:0.68rem;color:var(--ink-body);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .psv-row .p-bar-wrap{
+    position:relative;height:7px;background:transparent;
+    display:flex;align-items:center;
+  }
+  .psv-row .p-bar-center{
+    position:absolute;top:-3px;bottom:-3px;left:50%;width:1px;background:var(--rule);
+  }
+  .psv-row .p-bar-fill{
+    height:100%;background:var(--accent-green);border-radius:0;
+    position:absolute;
+  }
+  .psv-row.negative .p-bar-fill{background:var(--accent-terracotta)}
+  .psv-row .p-val{font-family:'JetBrains Mono',monospace;font-size:0.72rem;
+    color:var(--ink);text-align:right}
+  .psv-row.negative .p-val{color:var(--accent-terracotta)}
+  .psv-caption{
+    font-family:'Fraunces',serif;font-style:italic;font-size:0.72rem;
+    color:var(--ink-meta);margin:8px 0 4px 0;
+  }
+
+  /* ═════════════════════ PIPELINE INSPECTOR ═════════════════════ */
+  .inspector-section{
+    margin:64px 0 40px;padding:32px 0;
+    border-top:2px double var(--rule);
+    border-bottom:2px double var(--rule);
+    position:relative;
+    animation:fadein 600ms var(--ease-out-quad) 700ms both;
+  }
+  .inspector-section::before{
+    content:"";position:absolute;top:4px;left:0;right:0;height:1px;background:var(--rule-faint);
+  }
+  .inspector-head{
+    text-align:center;max-width:880px;margin:0 auto 28px;padding:0 20px;
+  }
+  .inspector-head h2{
+    font-family:'Fraunces',serif;font-weight:500;font-size:1.6rem;color:var(--ink);
+    letter-spacing:-0.015em;font-variation-settings:'SOFT' 30,'WONK' 1;
+  }
+  .inspector-head .sub{
+    font-family:'Fraunces',serif;font-style:italic;color:var(--ink-meta);
+    font-size:0.92rem;margin-top:6px;
+  }
+  .inspector-controls{
+    display:flex;gap:6px;justify-content:center;margin-top:18px;flex-wrap:wrap;
+  }
+  .inspector-controls .btn{
+    font-family:'Inter',sans-serif;padding:7px 14px;
+    font-size:0.8rem;border:1px solid var(--rule);background:var(--paper-light);
+    color:var(--ink-body);display:inline-flex;align-items:center;gap:6px;
+    cursor:pointer;transition:all 180ms var(--ease-out-quad);
+  }
+  .inspector-controls .btn:hover:not(:disabled){border-color:var(--ink);color:var(--ink)}
+  .inspector-controls .btn:disabled{opacity:0.4;cursor:default}
+  .inspector-controls .btn-primary{background:var(--ink);color:var(--paper-light);border-color:var(--ink)}
+  .inspector-controls .btn-primary:hover:not(:disabled){background:var(--accent-green);border-color:var(--accent-green)}
+  .inspector-controls .btn svg{width:14px;height:14px}
+  .inspector-progress{
+    display:inline-flex;align-items:center;gap:8px;font-size:0.74rem;color:var(--ink-meta);
+    font-family:'JetBrains Mono',monospace;padding:0 10px;
+  }
+  .pipe-stage-of{font-family:'Fraunces',serif;font-style:italic;color:var(--ink-meta);}
+
+  /* The pipe itself */
+  .pipe-wrap{
+    position:relative;padding:60px 30px 60px;
+    overflow:hidden;
+  }
+  .pipe-svg{width:100%;height:340px;display:block;overflow:visible}
+
+  .pipe-line{stroke:var(--ink-body);stroke-width:1.2;fill:none}
+  .pipe-line.faint{stroke:var(--rule);stroke-width:0.8;stroke-dasharray:2 4}
+  .pipe-station{
+    fill:var(--paper-light);stroke:var(--ink-body);stroke-width:1.2;
+    cursor:pointer;transition:all 220ms var(--ease-out-quad);
+  }
+  .pipe-station:hover{fill:var(--paper-deep)}
+  .pipe-station.active{fill:var(--accent-green-wash);stroke:var(--accent-green);stroke-width:1.6}
+  .pipe-station.visited{fill:var(--paper-deep);stroke:var(--ink)}
+  .pipe-station-ripple{
+    fill:none;stroke:var(--accent-ochre);stroke-width:1.2;opacity:0;transform-origin:center;
+  }
+  .pipe-station-ripple.active{
+    animation:ripple 900ms var(--ease-out-expo);
+  }
+  @keyframes ripple{
+    0%  {opacity:0;r:12}
+    30% {opacity:0.7}
+    100%{opacity:0;r:40}
+  }
+  .pipe-station-label{
+    font-family:'Fraunces',serif;font-style:italic;fill:var(--ink-meta);
+    font-size:11px;text-anchor:middle;
+    transition:fill 220ms;pointer-events:none;
+  }
+  .pipe-station.active + .pipe-station-label,
+  .pipe-station-label.active{fill:var(--accent-green);font-weight:500}
+  .pipe-station-num{
+    font-family:'JetBrains Mono',monospace;fill:var(--ink-body);
+    font-size:11px;text-anchor:middle;font-weight:500;pointer-events:none;
+  }
+  .pipe-station.active ~ .pipe-station-num,.pipe-station-num.active{fill:var(--accent-green)}
+
+  /* Moving token (leaf) */
+  .pipe-token{
+    fill:var(--accent-green);stroke:var(--ink);stroke-width:0.6;
+    transform-origin:center;transition:transform 120ms linear;
+    filter:drop-shadow(0 1px 2px rgba(26,22,18,0.2));
+    opacity:0;
+  }
+  .pipe-token.visible{opacity:1}
+
+  /* Stage cards that fly out from each station */
+  .pipe-cards-layer{
+    position:relative;margin-top:-120px;padding-top:40px;
+  }
+  .pipe-cards-layer::before{
+    content:"";position:absolute;top:-40px;left:0;right:0;height:40px;
+    background:linear-gradient(to bottom,transparent,var(--paper) 90%);
+    pointer-events:none;
+  }
+  .pipe-cards-grid{
+    display:grid;grid-template-columns:repeat(8,1fr);
+    gap:10px;position:relative;
+  }
+  @media(max-width:960px){
+    .pipe-cards-grid{grid-template-columns:repeat(4,1fr)}
+  }
+  @media(max-width:600px){
+    .pipe-cards-grid{grid-template-columns:repeat(2,1fr)}
+  }
+  .pipe-card{
+    background:var(--paper-light);border:1px solid var(--rule);
+    padding:12px 12px 10px;font-size:0.78rem;line-height:1.4;
+    opacity:0;transform:translateY(8px) scale(0.96);
+    transition:opacity 320ms var(--ease-out-expo),transform 320ms var(--ease-out-expo);
+    position:relative;cursor:pointer;
+    min-height:92px;
+  }
+  .pipe-card.visible{opacity:1;transform:none}
+  .pipe-card:hover{border-color:var(--ink)}
+  .pipe-card.active{border-color:var(--accent-green);background:var(--paper-light);box-shadow:var(--shadow-md)}
+  .pipe-card .pc-step{
+    font-family:'JetBrains Mono',monospace;font-size:0.62rem;color:var(--ink-faint);
+    letter-spacing:0.1em;margin-bottom:4px;
+  }
+  .pipe-card .pc-title{
+    font-family:'Fraunces',serif;font-weight:500;color:var(--ink);font-size:0.88rem;
+    margin-bottom:5px;line-height:1.2;
+  }
+  .pipe-card .pc-summary{color:var(--ink-body);font-size:0.74rem;line-height:1.5}
+  .pipe-card .pc-summary b{color:var(--ink);font-weight:500}
+  .pipe-card .pc-expand{
+    display:none;font-family:'Fraunces',serif;font-style:italic;color:var(--ink-meta);
+    font-size:0.72rem;margin-top:6px;
+  }
+  .pipe-card:hover .pc-expand{display:block}
+
+  /* Expanded detail modal */
+  .pipe-detail-modal{
+    display:none;position:fixed;inset:0;z-index:200;
+    background:rgba(26,22,18,0.55);
+    justify-content:center;align-items:center;padding:20px;
+    animation:fadein 220ms var(--ease-out-quad);
+  }
+  .pipe-detail-modal.visible{display:flex}
+  .pipe-detail-inner{
+    background:var(--paper-light);border:1px solid var(--rule);
+    box-shadow:var(--shadow-paper);max-width:820px;width:100%;max-height:86vh;overflow-y:auto;
+    padding:28px 36px;position:relative;
+  }
+  .pipe-detail-inner .pd-close{
+    position:absolute;top:16px;right:18px;
+    background:transparent;border:none;cursor:pointer;
+    font-family:'JetBrains Mono',monospace;font-size:0.85rem;color:var(--ink-meta);
+    padding:6px 10px;
+  }
+  .pipe-detail-inner .pd-close:hover{color:var(--ink)}
+  .pipe-detail-inner h3{
+    font-family:'Fraunces',serif;font-weight:500;font-size:1.4rem;color:var(--ink);
+    letter-spacing:-0.015em;margin-bottom:4px;
+  }
+  .pipe-detail-inner .pd-sub{
+    font-family:'Fraunces',serif;font-style:italic;color:var(--ink-meta);
+    font-size:0.92rem;margin-bottom:18px;padding-bottom:12px;
+    border-bottom:1px solid var(--rule);
+  }
+  .pipe-detail-body{
+    font-family:'Fraunces',serif;font-size:0.96rem;line-height:1.6;color:var(--ink-body);
+  }
+  .pipe-detail-body .kv{display:grid;grid-template-columns:160px 1fr;gap:6px 16px;margin:10px 0}
+  .pipe-detail-body .kv-k{color:var(--ink-meta);font-style:italic;font-size:0.88rem}
+  .pipe-detail-body .kv-v{color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:0.82rem}
+  .pipe-detail-body hr{border:none;border-top:1px dotted var(--rule);margin:14px 0}
+  .pipe-detail-body .note{color:var(--ink-meta);font-style:italic;font-size:0.84rem}
+  /* Per-stage image visualizations inside detail modal */
+  .stage-img-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:14px 0}
+  .stage-img-cell{display:flex;flex-direction:column;gap:4px;background:var(--paper);border:1px solid var(--rule);padding:8px}
+  .stage-img-cell img{width:100%;height:auto;display:block;border:1px solid var(--rule);background:#000;image-rendering:auto}
+  .stage-img-cell .si-label{font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:var(--ink-meta);text-transform:uppercase;letter-spacing:0.04em}
+  .stage-img-cell .si-caption{font-size:0.74rem;color:var(--ink-body);font-style:italic;line-height:1.4}
+  .stage-mini-heatmap{display:grid;gap:2px;margin:10px 0;font-family:'JetBrains Mono',monospace;font-size:0.66rem}
+  .stage-mini-heatmap .mh-cell{padding:3px 4px;text-align:center;color:#fff;border-radius:2px;min-width:26px}
+  .stage-mini-heatmap .mh-row{display:grid;grid-template-columns:90px repeat(9,1fr);gap:2px;align-items:center}
+  .stage-mini-heatmap .mh-rowlabel{color:var(--ink-meta);font-size:0.7rem;font-style:italic;padding-right:4px;text-align:right}
+  .stage-mini-heatmap .mh-collabel{color:var(--ink-meta);font-size:0.6rem;text-align:center;writing-mode:vertical-rl;transform:rotate(180deg);padding:2px 0;height:60px;line-height:1}
+  .stage-bar-chart{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+  .stage-bar-row{display:grid;grid-template-columns:120px 1fr 60px;gap:8px;align-items:center;font-family:'JetBrains Mono',monospace;font-size:0.74rem}
+  .stage-bar-track{background:var(--paper);border:1px solid var(--rule);height:14px;position:relative;overflow:hidden}
+  .stage-bar-fill{position:absolute;top:0;left:0;bottom:0;background:var(--accent-green)}
+
+  /* ═════════════════════ COLD-START LOADER — GROWING BRANCH + TYPEWRITER ═════════════════════ */
+  #cold-start-loader{
+    display:none;margin:24px auto;max-width:720px;
+    background:var(--paper-light);border:1px solid var(--rule);
+    padding:28px 32px;box-shadow:var(--shadow-paper);
+    animation:fadein 400ms var(--ease-out-quad);
+  }
+  #cold-start-loader.visible{display:block}
+  .cs-head{
+    font-family:'Fraunces',serif;font-style:italic;color:var(--ink);
+    font-size:1.1rem;letter-spacing:-0.005em;margin-bottom:4px;
+    display:flex;align-items:center;gap:10px;
+  }
+  .cs-head svg{width:18px;height:18px;color:var(--accent-green);
+    animation:rustle-svg 2800ms ease-in-out infinite;transform-origin:50% 80%}
+  .cs-sub{font-family:'Fraunces',serif;font-style:italic;color:var(--ink-meta);
+    font-size:0.86rem;margin-bottom:20px;}
+
+  .branch-wrap{
+    position:relative;height:160px;margin:10px -4px 10px;
+  }
+  .branch-svg{width:100%;height:100%;display:block;overflow:visible}
+  .branch-line{stroke:var(--ink);stroke-width:1.4;fill:none;stroke-linecap:round}
+  .branch-bud{
+    fill:var(--paper-deep);stroke:var(--ink-meta);stroke-width:1.2;
+    transform-origin:center;transform-box:fill-box;
+    transition:all 400ms var(--ease-out-expo);
+  }
+  .branch-leaf{
+    fill:var(--accent-green-wash);stroke:var(--accent-green);stroke-width:1.2;
+    opacity:0;transform:scale(0.1);transform-origin:center;transform-box:fill-box;
+    transition:opacity 400ms var(--ease-out-expo),transform 400ms var(--ease-out-expo);
+  }
+  .branch-station.loaded .branch-bud{opacity:0;transform:scale(0.1)}
+  .branch-station.loaded .branch-leaf{opacity:1;transform:scale(1)}
+  .branch-station-label{
+    font-family:'Fraunces',serif;font-style:italic;fill:var(--ink-meta);
+    font-size:11px;text-anchor:middle;transition:fill 300ms;
+  }
+  .branch-station.loaded .branch-station-label{fill:var(--accent-green);font-weight:500}
+
+  /* Lab-journal log — paper, not terminal. Marginalia ledger styled to match
+     the field-notebook aesthetic: cream paper, ruled top line, ink-body text,
+     italic serif timestamps, ochre accents. No black background. */
+  .typewriter-log{
+    background:var(--paper);
+    border-top:1px solid var(--ink);
+    border-bottom:1px solid var(--rule);
+    border-left:none;border-right:none;
+    font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;
+    color:var(--ink-body);
+    padding:14px 6px 18px;max-height:180px;overflow-y:auto;
+    margin-top:18px;position:relative;
+    background-image:repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 23px,
+      rgba(74,52,28,0.05) 23px,
+      rgba(74,52,28,0.05) 24px
+    );
+  }
+  .typewriter-log::before{
+    content:'Field journal — observations';
+    position:absolute;top:-9px;left:14px;background:var(--paper-light);
+    padding:0 8px;font-family:'Fraunces',serif;font-style:italic;
+    font-size:0.74rem;color:var(--ink-meta);letter-spacing:0.02em;
+  }
+  .typewriter-log .log-entry{
+    display:block;margin-bottom:1px;animation:tw-fade 200ms var(--ease-out-quad);
+    padding:0 8px;
+  }
+  .typewriter-log .log-entry .ts{
+    color:var(--ink-faint);font-family:'Fraunces',serif;font-style:italic;
+    font-size:0.76rem;margin-right:6px;
+  }
+  .typewriter-log .log-entry .ok{color:var(--accent-green);font-weight:500}
+  .typewriter-log .log-entry .info{color:var(--ink-body)}
+  .typewriter-log .log-entry .pending{color:var(--accent-ochre);font-style:italic}
+  .typewriter-log .log-entry .prewarm{color:var(--ink-meta);font-style:italic}
+  .typewriter-log .log-caret{
+    display:inline-block;width:7px;height:13px;background:var(--ink);
+    animation:blink 1.2s step-end infinite;vertical-align:-2px;margin-left:8px;
+    opacity:0.6;
+  }
+  @keyframes blink{50%{opacity:0}}
+  @keyframes tw-fade{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:none}}
+
+</style>
+</head>
+<body>
+
+<!-- LUCIDE ICON SPRITE (inlined, only the icons we use) -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="i-leaf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></symbol>
+  <symbol id="i-sprout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"/></symbol>
+  <symbol id="i-microscope" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-network" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.68 3.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4.44 13H2"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></symbol>
+  <symbol id="i-thumbs-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H7V10l4.34-8.68a1.45 1.45 0 0 1 2.64 1l-.98 3.55Z"/></symbol>
+  <symbol id="i-thumbs-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H17v12l-4.34 8.68a1.45 1.45 0 0 1-2.64-1l.98-3.55Z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></symbol>
+  <symbol id="i-file-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-tree" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.8 22 12 16l5.2 6"/><path d="M12 16V4"/><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v0a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4Z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
+  <symbol id="i-ruler" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3 15.3 21.3a1 1 0 0 1-1.4 0L2.7 10.1a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0l11.2 11.2a1 1 0 0 1 0 1.4Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></symbol>
+  <symbol id="i-waterfall" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 16V9"/><path d="M11 16V12"/><path d="M15 16V7"/><path d="M19 16V4"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></symbol>
+  <symbol id="i-skip-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" x2="5" y1="19" y2="5"/></symbol>
+  <symbol id="i-skip-forward" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/></symbol>
+  <symbol id="i-maximize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></symbol>
+  <symbol id="i-wand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8 19 13"/><path d="M15 9h.01"/><path d="M17.8 6.2 19 5"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></symbol>
+  <symbol id="i-split" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.17-2.83L3 3"/><path d="m15 9 6-6"/></symbol>
+  <symbol id="i-funnel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></symbol>
+  <symbol id="i-thermometer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></symbol>
+</svg>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="title-block">
+      <h1>Plant Disease Detection</h1>
+      <div class="brand-line">nanofarm</div>
+      <div class="subtitle">Pathology Journal · Field diagnostic monograph</div>
+      <div class="entry-no">Entry No. <span id="entry-no">—</span> · Session <span id="session-id">—</span></div>
+    </div>
+    <div class="endpoint-nav" role="tablist">
+      <label class="selected" data-ep="/predict/full">
+        <input type="radio" name="ep" value="/predict/full" checked>
+        <svg width="13" height="13"><use href="#i-route"/></svg>
+        Full pipeline
+      </label>
+      <label data-ep="/predict/apin">
+        <input type="radio" name="ep" value="/predict/apin">
+        <svg width="13" height="13"><use href="#i-activity"/></svg>
+        Ensemble only
+      </label>
+      <label data-ep="/predict">
+        <input type="radio" name="ep" value="/predict">
+        <svg width="13" height="13"><use href="#i-leaf"/></svg>
+        Primary only
+      </label>
+    </div>
+  </div>
+  <div class="masthead-inner">
+    <div class="icon-bar">
+      <a href="/docs" target="_blank"><svg width="11" height="11"><use href="#i-file-text"/></svg>/docs</a>
+      <a href="/health" target="_blank"><svg width="11" height="11"><use href="#i-gauge"/></svg>/health</a>
+      <a href="/apin/info" target="_blank"><svg width="11" height="11"><use href="#i-microscope"/></svg>/apin/info</a>
+      <a href="/feedback/stats" target="_blank"><svg width="11" height="11"><use href="#i-clipboard"/></svg>/feedback/stats</a>
+      <a href="/feedback/retrain/history" target="_blank"><svg width="11" height="11"><use href="#i-refresh"/></svg>/retrain/history</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="upload-wrap">
+    <div class="specimen-mount" id="upload-area" tabindex="0">
+      <svg class="leaf-prompt"><use href="#i-leaf"/></svg>
+      <div class="prompt">Paste specimen here</div>
+      <div class="prompt-meta">Drag &amp; drop or click · JPEG / PNG / WebP · single leaf preferred</div>
+      <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp">
+    </div>
+    <div id="preview-mount" class="specimen-mount" style="padding:24px">
+      <img id="preview-img" alt="specimen preview">
+      <div class="preview-controls">
+        <button id="change-btn" class="btn"><svg><use href="#i-refresh"/></svg>Change photo</button>
+        <button id="resubmit-btn" class="btn btn-primary"><svg><use href="#i-activity"/></svg>Re-examine</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="error-box"><div class="err-title">Observation interrupted.</div><div id="error-msg"></div></div>
+
+  <!-- Falling-leaf animator (absolutely-positioned, top-right) -->
+  <div id="leaf-animator" class="leaf-animator">
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" opacity="0.85"/>
+      <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" stroke="#1a1612" stroke-width="0.6" fill="none"/>
+    </svg>
+  </div>
+
+  <!-- Pending skeleton (warm-path: models already loaded) -->
+  <div id="pending">
+    <div class="skel-label">
+      <svg><use href="#i-leaf"/></svg>
+      <em>Examining specimen — running four signals in parallel…</em>
+    </div>
+    <div class="skel-line skel-wide"></div>
+    <div class="skel-line skel-med"></div>
+    <div class="skel-line skel-med"></div>
+    <div class="skel-line skel-narrow"></div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       COLD-START LOADER — growing branch + lab-journal typewriter
+       Appears on first request if any of the 5 models aren't loaded yet.
+       Polls GET /warmup/status every 1500ms. Each leaf bud transforms into
+       a leaf as its model reports loaded; the typewriter log appends a new
+       line each time state changes. When all 5 are loaded, fades out.
+       ════════════════════════════════════════════════════════════════════ -->
+  <div id="cold-start-loader">
+    <div class="cs-head">
+      <svg><use href="#i-leaf"/></svg>
+      <span>Warming the field microscope…</span>
+    </div>
+    <div class="cs-sub">First-time startup loads five models (~2–3 minutes). Subsequent diagnoses run in under 2 seconds.</div>
+
+    <!-- Growing branch SVG -->
+    <div class="branch-wrap">
+      <svg class="branch-svg" viewBox="0 0 800 180" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <!--
+          Hand-drawn ink-style branch: a main stem from lower-left to upper-right
+          with 5 side twigs, each ending in a bud that unfurls into a leaf as its
+          model loads. Control points tweaked for organic asymmetry (not perfect arcs).
+        -->
+        <path class="branch-line" d="M 30 160 C 100 150, 180 140, 260 130 C 340 120, 460 105, 560 92 C 640 82, 720 74, 780 68" />
+
+        <!-- 5 side twigs from main branch up to bud positions -->
+        <path class="branch-line" d="M 140 144 C 140 128, 138 112, 130 96" />
+        <path class="branch-line" d="M 270 128 C 280 110, 292 96, 296 78" />
+        <path class="branch-line" d="M 400 114 C 394 100, 388 80, 398 60" />
+        <path class="branch-line" d="M 540 94  C 548 80, 562 66, 574 50" />
+        <path class="branch-line" d="M 680 76  C 672 60, 670 44, 680 28" />
+
+        <!-- Station 1 — Router -->
+        <g class="branch-station" data-bud="router">
+          <circle class="branch-bud" cx="130" cy="96" r="5"/>
+          <path class="branch-leaf" d="M 130 96 Q 124 84 114 86 Q 108 94 120 104 Q 132 108 130 96 Z"/>
+          <text x="130" y="118" class="branch-station-label">Router</text>
+        </g>
+
+        <!-- Station 2 — Model 2 -->
+        <g class="branch-station" data-bud="model2">
+          <circle class="branch-bud" cx="296" cy="78" r="5"/>
+          <path class="branch-leaf" d="M 296 78 Q 288 66 278 70 Q 274 80 288 88 Q 302 90 296 78 Z"/>
+          <text x="296" y="100" class="branch-station-label">Model 2</text>
+        </g>
+
+        <!-- Station 3 — EfficientNet -->
+        <g class="branch-station" data-bud="efficientnet">
+          <circle class="branch-bud" cx="398" cy="60" r="5"/>
+          <path class="branch-leaf" d="M 398 60 Q 392 48 380 52 Q 378 62 390 70 Q 406 72 398 60 Z"/>
+          <text x="398" y="82" class="branch-station-label">EfficientNet</text>
+        </g>
+
+        <!-- Station 4 — PSV -->
+        <g class="branch-station" data-bud="psv">
+          <circle class="branch-bud" cx="574" cy="50" r="5"/>
+          <path class="branch-leaf" d="M 574 50 Q 568 38 556 42 Q 554 54 566 62 Q 582 64 574 50 Z"/>
+          <text x="574" y="72" class="branch-station-label">PSV</text>
+        </g>
+
+        <!-- Station 5 — DINOv2 -->
+        <g class="branch-station" data-bud="dinov2">
+          <circle class="branch-bud" cx="680" cy="28" r="5"/>
+          <path class="branch-leaf" d="M 680 28 Q 674 16 662 20 Q 660 30 672 38 Q 688 40 680 28 Z"/>
+          <text x="680" y="50" class="branch-station-label">DINOv2</text>
+        </g>
+      </svg>
+    </div>
+
+    <!-- Lab-journal typewriter log -->
+    <div class="typewriter-log" id="typewriter-log">
+      <span class="log-entry"><span class="ts">[00:00:00]</span> <span class="info">Opening the field microscope…</span></span>
+      <span class="log-caret"></span>
+    </div>
+  </div>
+
+  <!-- Routing card -->
+  <div id="routing-card" class="routing-card">
+    <div class="routing-head">
+      <svg><use href="#i-route"/></svg>
+      <em>Crop router — pre-diagnostic triage</em>
+    </div>
+    <div class="routing-grid" id="routing-content"></div>
+  </div>
+
+  <!-- Notebook page with the diagnosis -->
+  <article id="result" aria-live="polite">
+    <div class="page">
+      <!-- Hero: specimen left, observation right -->
+      <div class="hero-grid">
+        <div class="specimen-panel">
+          <img id="hero-specimen" class="specimen-img" alt="specimen">
+          <img id="hero-heatmap" class="heatmap-img" alt="" style="display:none">
+          <div class="specimen-caption">
+            <span>Specimen · <span id="specimen-time" class="mono">—</span></span>
+            <span class="heatmap-source" id="heatmap-source"></span>
+          </div>
+        </div>
+
+        <div class="observation-panel">
+          <div class="tier-stamp-row">
+            <span id="tier-stamp" class="tier-stamp">—</span>
+            <span id="conflict-badge" class="conflict-badge">—</span>
+          </div>
+          <h2 id="diagnosis-name" class="diagnosis-name">—</h2>
+          <div class="confidence-row">
+            <span class="lbl">Confidence</span>
+            <div class="confidence-bar-outer"><div id="conf-bar" class="confidence-bar-inner"></div></div>
+            <span id="conf-pct" class="confidence-pct">—</span>
+          </div>
+          <p id="output-message" class="output-message">—</p>
+        </div>
+      </div>
+
+      <!-- "Why this tier?" decision trace -->
+      <section class="decision-trace" id="decision-trace-section" style="display:none">
+        <div class="decision-trace-head">
+          <svg><use href="#i-wand"/></svg>
+          <em>Why was this tier emitted? — condition-by-condition trace</em>
+        </div>
+        <div id="decision-trace-body"></div>
+      </section>
+
+      <!-- Class taxonomy tree with prediction path highlighted -->
+      <section class="taxo-section" id="taxo-section" style="display:none">
+        <h4 class="subsection-head"><svg><use href="#i-tree"/></svg>Classification hierarchy</h4>
+        <div class="taxo-tree" id="taxo-tree"></div>
+      </section>
+
+      <!-- Marginal notes (uncertainty / OOD / multiplier / stage / quality / cold-start / failed signals) -->
+      <div class="margin-rail" id="margin-rail"></div>
+
+      <!-- Prose sections: treatment / monitoring / differential / retake -->
+      <section id="treatment-section" class="prose-section">
+        <h4 class="subsection-head"><svg><use href="#i-clipboard"/></svg>Treatment protocol</h4>
+        <div id="treatment-body" class="prose-body"></div>
+      </section>
+
+      <section id="monitoring-section" class="prose-section">
+        <h4 class="subsection-head"><svg><use href="#i-sprout"/></svg>Monitoring schedule</h4>
+        <div id="monitoring-body" class="prose-body"></div>
+      </section>
+
+      <section id="differential-section" class="prose-section">
+        <h4 class="subsection-head"><svg><use href="#i-activity"/></svg>Differential note</h4>
+        <div id="differential-body" class="prose-body"></div>
+      </section>
+
+      <section id="retake-section" class="prose-section">
+        <h4 class="subsection-head"><svg><use href="#i-eye"/></svg>Re-photograph guidance</h4>
+        <div id="retake-body" class="prose-body retake"></div>
+      </section>
+
+      <!-- Technical appendix — always visible, scannable -->
+      <section class="appendix">
+        <div class="appendix-label">— Technical appendix —</div>
+
+        <div class="appendix-grid">
+          <div class="appendix-block">
+            <h3><svg><use href="#i-activity"/></svg>Per-signal readout</h3>
+            <table class="signal-table" id="signal-table">
+              <thead><tr><th>Signal</th><th>Predicted</th><th style="text-align:right">Top p</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="appendix-block">
+            <h3><svg><use href="#i-sliders"/></svg>MoE gate weights</h3>
+            <div class="gate-meters" id="gate-meters"></div>
+          </div>
+
+          <div class="appendix-block">
+            <h3><svg><use href="#i-microscope"/></svg>All 9 class probabilities</h3>
+            <div class="prob-list" id="prob-list"></div>
+            <div style="margin-top:14px;font-family:'Fraunces',serif;font-style:italic;font-size:0.78rem;color:var(--ink-meta)">
+              Classes in conformal prediction set (≈95% coverage) marked with <strong style="color:var(--accent-green)">·</strong>
+            </div>
+          </div>
+
+          <div class="appendix-block">
+            <h3><svg><use href="#i-flag"/></svg>Conformal prediction set</h3>
+            <div class="conformal-chips" id="conformal-chips"></div>
+          </div>
+
+          <!-- NEW: Mahalanobis distance to every class prototype -->
+          <div class="appendix-block">
+            <h3><svg><use href="#i-ruler"/></svg>Mahalanobis distance — all prototypes</h3>
+            <div class="maha-chart" id="maha-chart"></div>
+            <div class="maha-caption">
+              <span class="tr-dash">—</span> threshold marks the OOD boundary.
+              Predicted class highlighted in green; classes beyond threshold in terracotta.
+            </div>
+          </div>
+
+          <!-- NEW: SHAP-style signal contribution waterfall -->
+          <div class="appendix-block">
+            <h3><svg><use href="#i-waterfall"/></svg>Signal contribution to predicted class</h3>
+            <div class="shap-waterfall" id="shap-waterfall"></div>
+            <div class="maha-caption" style="margin-top:12px">
+              Per-signal attribution — gate_weight × reliability × signal_probability for the predicted class, normalised to 100%.
+            </div>
+          </div>
+        </div>
+
+        <!-- NEW: 4×9 per-signal per-class heatmap (full-width row) -->
+        <div class="appendix-block" id="heatmap-block" style="margin-top:16px">
+          <h3><svg><use href="#i-grid"/></svg>Per-signal × per-class probability heatmap</h3>
+          <div id="heatmap-container"></div>
+          <div class="maha-caption" style="margin-top:12px">
+            Each row is one signal's 9-class output. Darker = higher probability.
+            Predicted class column outlined in green. Hover a cell to read its value.
+          </div>
+        </div>
+
+        <!-- NEW: PSV feature firing for predicted class (full-width row) -->
+        <div class="appendix-block" id="psv-firing-block" style="margin-top:16px;display:none">
+          <h3><svg><use href="#i-zap"/></svg>PSV feature firing · <span id="psv-firing-class" style="font-weight:400;font-style:italic;color:var(--ink-meta)"></span></h3>
+          <div class="psv-caption">Top positive contributors (green) push the decision toward this class; negative (terracotta) push away.</div>
+          <div class="psv-firing" id="psv-firing-list"></div>
+        </div>
+
+        <div class="raw-json-wrap">
+          <details>
+            <summary><svg><use href="#i-chevron-right"/></svg>Raw response (JSON)</summary>
+            <pre id="raw-json"></pre>
+          </details>
+        </div>
+      </section>
+
+      <!-- Feedback — "sign this observation" -->
+      <section class="feedback-section">
+        <div class="subsection-head" style="margin-top:0"><svg><use href="#i-clipboard"/></svg><em>Sign this observation</em></div>
+        <p class="feedback-prompt">Was this diagnosis correct, in your judgement?</p>
+        <div class="feedback-btns">
+          <button id="thumb-up" class="thumb-btn confirm"><svg><use href="#i-thumbs-up"/></svg>Confirm</button>
+          <button id="thumb-down" class="thumb-btn dissent"><svg><use href="#i-thumbs-down"/></svg>Dissent</button>
+        </div>
+        <div id="correction-form">
+          <p style="margin:12px 0 6px;font-family:'Fraunces',serif;font-style:italic;color:var(--ink-meta)">Correct diagnosis:</p>
+          <select id="correction-select" class="correction"><option value="">— select canonical class —</option></select>
+          <div style="margin-top:10px"><button id="submit-correction" class="btn btn-primary">Submit correction</button></div>
+        </div>
+        <div id="feedback-thanks" class="feedback-thanks">— signed.</div>
+      </section>
+
+      <!-- Footer with system meta -->
+      <div class="page-footer">
+        <div class="meta-group">
+          <span><b>Processed</b> <span id="proc-time">—</span> ms</span>
+          <span><b>Disease stage (PSV F08)</b> <span id="disease-stage">—</span></span>
+        </div>
+        <div class="meta-group">
+          <span><b>APIN</b> v1.8</span>
+          <span><b>Endpoint</b> <span id="footer-endpoint">—</span></span>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PIPELINE INSPECTOR
+       Interactive walkthrough of the full router-to-APIN pipeline. A token
+       (leaf) travels through the pipe from left to right; at each station
+       the station glows (ripple), the card below/above fades in, and the
+       stage-of counter advances. Controls: Play / Pause / Prev / Next /
+       Replay. Click any station or card to expand full detail in a modal.
+       Station 4 (Signals) shows a fork-and-merge visual: the pipe splits
+       into 4 parallel tracks and merges back before station 5 (Fusion).
+       ════════════════════════════════════════════════════════════════════ -->
+  <section class="inspector-section" id="inspector-section" style="display:none">
+    <div class="inspector-head">
+      <h2>Pipeline inspector</h2>
+      <div class="sub">
+        Watch the specimen flow through the full APIN pipeline — router, gate zero,
+        preprocessing, four parallel signals, fusion, calibration, and tier decision.
+      </div>
+      <div class="inspector-controls">
+        <button class="btn" id="pipe-replay" title="Replay from start"><svg><use href="#i-refresh"/></svg>Replay</button>
+        <button class="btn" id="pipe-prev" title="Previous stage"><svg><use href="#i-skip-back"/></svg>Prev</button>
+        <button class="btn btn-primary" id="pipe-play" title="Play / Pause"><svg id="pipe-play-icon"><use href="#i-play"/></svg><span id="pipe-play-label">Play</span></button>
+        <button class="btn" id="pipe-next" title="Next stage">Next<svg><use href="#i-skip-forward"/></svg></button>
+        <span class="inspector-progress">
+          <span class="pipe-stage-of">stage</span>
+          <b id="pipe-stage-n">0</b>
+          <span class="pipe-stage-of">of</span>
+          <b id="pipe-stage-total">8</b>
+        </span>
+      </div>
+    </div>
+
+    <div class="pipe-wrap">
+      <!--
+        SVG layout coordinates:
+        viewBox 0 0 1000 340
+        Main pipe: y=80, x from 40 to 960
+        8 stations evenly spaced — x = 60, 185, 310, 435, 560, 685, 810, 920
+        At station 4 (signals, x=435), pipe forks into 4 tracks
+        Tracks re-merge before station 5 (x=560)
+      -->
+      <svg class="pipe-svg" viewBox="0 0 1000 200" preserveAspectRatio="none" aria-hidden="true">
+        <!-- Entry: from upload area to station 1 -->
+        <path class="pipe-line" d="M 20 100 L 60 100" />
+
+        <!-- Straight segments from station 1 → 2 → 3 → fork-start -->
+        <path class="pipe-line" d="M 60 100 L 185 100 L 310 100 L 410 100" />
+
+        <!-- Fork: split into 4 parallel tracks centered at station 4 -->
+        <path class="pipe-line" d="M 410 100 Q 435 100 445 60  L 525 60  Q 535 60 540 100" />
+        <path class="pipe-line" d="M 410 100 Q 435 100 445 80  L 525 80  Q 535 80 540 100" />
+        <path class="pipe-line" d="M 410 100 Q 435 100 445 120 L 525 120 Q 535 120 540 100" />
+        <path class="pipe-line" d="M 410 100 Q 435 100 445 140 L 525 140 Q 535 140 540 100" />
+
+        <!-- Merge point + continue to station 5..8 -->
+        <path class="pipe-line" d="M 540 100 L 560 100 L 685 100 L 810 100 L 920 100" />
+
+        <!-- Exit -->
+        <path class="pipe-line" d="M 920 100 L 980 100" />
+
+        <!-- 4 signal labels on the fork tracks (station 4 detail) -->
+        <text x="485" y="54"  class="pipe-station-label" text-anchor="middle" style="font-size:9px">Model 2</text>
+        <text x="485" y="74"  class="pipe-station-label" text-anchor="middle" style="font-size:9px">EfficientNet</text>
+        <text x="485" y="114" class="pipe-station-label" text-anchor="middle" style="font-size:9px">PSV</text>
+        <text x="485" y="134" class="pipe-station-label" text-anchor="middle" style="font-size:9px">DINOv2</text>
+
+        <!-- Stations (rendered as groups so ripple + label stay with circle) -->
+        <!-- station 1: Router -->
+        <g data-station="1"><circle class="pipe-station" cx="60"  cy="100" r="10"/><circle class="pipe-station-ripple" cx="60"  cy="100" r="12"/></g>
+        <text x="60"  y="100" class="pipe-station-num" dy="3" data-num-for="1">1</text>
+        <text x="60"  y="130" class="pipe-station-label" data-label-for="1">Router</text>
+
+        <!-- station 2: Gate Zero -->
+        <g data-station="2"><circle class="pipe-station" cx="185" cy="100" r="10"/><circle class="pipe-station-ripple" cx="185" cy="100" r="12"/></g>
+        <text x="185" y="100" class="pipe-station-num" dy="3" data-num-for="2">2</text>
+        <text x="185" y="130" class="pipe-station-label" data-label-for="2">Gate Zero</text>
+
+        <!-- station 3: Preprocessing -->
+        <g data-station="3"><circle class="pipe-station" cx="310" cy="100" r="10"/><circle class="pipe-station-ripple" cx="310" cy="100" r="12"/></g>
+        <text x="310" y="100" class="pipe-station-num" dy="3" data-num-for="3">3</text>
+        <text x="310" y="130" class="pipe-station-label" data-label-for="3">Preprocessing</text>
+
+        <!-- station 4: 4-signal parallel (at fork intersection) -->
+        <g data-station="4"><circle class="pipe-station" cx="435" cy="100" r="12"/><circle class="pipe-station-ripple" cx="435" cy="100" r="12"/></g>
+        <text x="435" y="100" class="pipe-station-num" dy="3" data-num-for="4">4</text>
+        <text x="435" y="166" class="pipe-station-label" data-label-for="4">4 Signals (parallel)</text>
+
+        <!-- station 5: Fusion -->
+        <g data-station="5"><circle class="pipe-station" cx="560" cy="100" r="10"/><circle class="pipe-station-ripple" cx="560" cy="100" r="12"/></g>
+        <text x="560" y="100" class="pipe-station-num" dy="3" data-num-for="5">5</text>
+        <text x="560" y="130" class="pipe-station-label" data-label-for="5">Fusion</text>
+
+        <!-- station 6: Calibration -->
+        <g data-station="6"><circle class="pipe-station" cx="685" cy="100" r="10"/><circle class="pipe-station-ripple" cx="685" cy="100" r="12"/></g>
+        <text x="685" y="100" class="pipe-station-num" dy="3" data-num-for="6">6</text>
+        <text x="685" y="130" class="pipe-station-label" data-label-for="6">Calibration</text>
+
+        <!-- station 7: Decision -->
+        <g data-station="7"><circle class="pipe-station" cx="810" cy="100" r="10"/><circle class="pipe-station-ripple" cx="810" cy="100" r="12"/></g>
+        <text x="810" y="100" class="pipe-station-num" dy="3" data-num-for="7">7</text>
+        <text x="810" y="130" class="pipe-station-label" data-label-for="7">Tier decision</text>
+
+        <!-- station 8: Output -->
+        <g data-station="8"><circle class="pipe-station" cx="920" cy="100" r="10"/><circle class="pipe-station-ripple" cx="920" cy="100" r="12"/></g>
+        <text x="920" y="100" class="pipe-station-num" dy="3" data-num-for="8">8</text>
+        <text x="920" y="130" class="pipe-station-label" data-label-for="8">Output</text>
+
+        <!-- Moving token (leaf). Moves along an invisible motion path. -->
+        <g id="pipe-token" class="pipe-token">
+          <path d="M -6 -8 Q 0 -12 6 -8 Q 8 -2 4 4 Q 0 8 -4 4 Q -8 -2 -6 -8 Z"/>
+          <path d="M 0 -8 L 0 4" stroke="#1a1612" stroke-width="0.6" fill="none"/>
+        </g>
+      </svg>
+
+      <!-- Cards layer — one card per station (8 cards) -->
+      <div class="pipe-cards-layer">
+        <div class="pipe-cards-grid" id="pipe-cards-grid">
+          <div class="pipe-card" data-station="1">
+            <div class="pc-step">STAGE 01</div>
+            <div class="pc-title">Router</div>
+            <div class="pc-summary" id="pc-summary-1">—</div>
+            <div class="pc-expand">click to expand ↗</div>
+          </div>
+          <div class="pipe-card" data-station="2">
+            <div class="pc-step">STAGE 02</div>
+            <div class="pc-title">Gate Zero</div>
+            <div class="pc-summary" id="pc-summary-2">—</div>
+            <div class="pc-expand">click to expand ↗</div>
+          </div>
+          <div class="pipe-card" data-station="3">
+            <div class="pc-step">STAGE 03</div>
+            <div class="pc-title">Preprocessing</div>
+            <div class="pc-summary" id="pc-summary-3">—</div>
+            <div class="pc-expand">click to expand ↗</div>
+          </div>
+          <div class="pipe-card" data-station="4">
+            <div class="pc-step">STAGE 04</div>
+            <div class="pc-title">4 Signals · parallel</div>
+            <div class="pc-summary" id="pc-summary-4">—</div>
+            <div class="pc-expand">click to expand ↗</div>
+          </div>
+          <div class="pipe-card" data-station="5">
+            <div class="pc-step">STAGE 05</div>
+            <div class="pc-title">Fusion (R × Gate × MLP)</div>
+            <div class="pc-summary" id="pc-summary-5">—</div>
+            <div class="pc-expand">click to expand ↗</div>
+          </div>
+          <div class="pipe-card" data-station="6">
+            <div class="pc-step">STAGE 06</div>
+            <div class="pc-title">Calibration</div>
+            <div class="pc-summary" id="pc-summary-6">—</div>
+            <div class="pc-expand">click to expand ↗</div>
+          </div>
+          <div class="pipe-card" data-station="7">
+            <div class="pc-step">STAGE 07</div>
+            <div class="pc-title">Tier decision</div>
+            <div class="pc-summary" id="pc-summary-7">—</div>
+            <div class="pc-expand">click to expand ↗</div>
+          </div>
+          <div class="pipe-card" data-station="8">
+            <div class="pc-step">STAGE 08</div>
+            <div class="pc-title">Output</div>
+            <div class="pc-summary" id="pc-summary-8">—</div>
+            <div class="pc-expand">click to expand ↗</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Expanded detail modal — populated on demand -->
+  <div class="pipe-detail-modal" id="pipe-detail-modal" onclick="if(event.target===this)this.classList.remove('visible')">
+    <div class="pipe-detail-inner">
+      <button class="pd-close" id="pipe-detail-close">close ✕</button>
+      <h3 id="pipe-detail-title">—</h3>
+      <div class="pd-sub" id="pipe-detail-sub">—</div>
+      <div class="pipe-detail-body" id="pipe-detail-body">—</div>
+    </div>
+  </div>
+</main>
+
+<script>
+const CLASSES=['okra_yvmv','okra_powdery_mildew','okra_cercospora','okra_enation','okra_healthy',
+               'brassica_black_rot','brassica_downy_mildew','brassica_alternaria','brassica_healthy'];
+const SIGNAL_LABELS={S1_M2:'Model 2',S2_EN:'EfficientNet',S3_PSV:'PSV',S4_DINOv2:'DINOv2'};
+const SIGNAL_KEY_MAP={model2:'S1_M2',efficientnet:'S2_EN',psv:'S3_PSV',dinov2_head:'S4_DINOv2'};
+
+const $=id=>document.getElementById(id);
+const $$=sel=>document.querySelectorAll(sel);
+let lastFile=null,lastResult=null;
+
+// ─── Entry number / session id ───────────────────────────────
+function randId(n){return Array.from({length:n},()=>'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random()*36)]).join('')}
+$('session-id').textContent=randId(6);
+
+// ─── Endpoint radio logic ───────────────────────────────
+$$('input[name=ep]').forEach(r=>{
+  r.addEventListener('change',()=>{
+    $$('.endpoint-nav label').forEach(l=>l.classList.toggle('selected',l.querySelector('input').checked));
+  });
+});
+
+// ─── Upload handling ───────────────────────────────
+const upArea=$('upload-area'),fileInput=$('file-input');
+upArea.addEventListener('click',()=>fileInput.click());
+upArea.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')fileInput.click()});
+upArea.addEventListener('dragover',e=>{e.preventDefault();upArea.classList.add('dragging')});
+upArea.addEventListener('dragleave',()=>upArea.classList.remove('dragging'));
+upArea.addEventListener('drop',e=>{
+  e.preventDefault();upArea.classList.remove('dragging');
+  if(e.dataTransfer.files[0])loadFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change',()=>{if(fileInput.files[0])loadFile(fileInput.files[0])});
+$('change-btn').addEventListener('click',reset);
+$('resubmit-btn').addEventListener('click',()=>{if(lastFile)runInference(lastFile)});
+
+function loadFile(f){
+  lastFile=f;
+  const url=URL.createObjectURL(f);
+  $('preview-img').src=url;
+  $('upload-area').style.display='none';
+  $('preview-mount').style.display='block';
+  runInference(f);
+}
+function reset(){
+  lastFile=null;lastResult=null;
+  $('preview-mount').style.display='none';
+  $('upload-area').style.display='block';
+  $('error-box').style.display='none';
+  $('pending').style.display='none';
+  $('result').style.display='none';
+  $('routing-card').classList.remove('visible');
+  fileInput.value='';
+}
+
+function triggerLeafFall(){
+  const la=$('leaf-animator');
+  la.classList.remove('active','leaf-rustle');
+  void la.offsetWidth;
+  la.classList.add('active');
+  // After the fall, switch to rustle while waiting
+  setTimeout(()=>la.classList.add('leaf-rustle'),1500);
+}
+function stopLeafFall(){
+  const la=$('leaf-animator');
+  la.classList.remove('active','leaf-rustle');
+}
+
+async function runInference(f){
+  triggerLeafFall();
+  $('pending').style.display='block';
+  $('result').style.display='none';
+  $('error-box').style.display='none';
+  $('routing-card').classList.remove('visible');
+  // Round-4 audit fix: dismiss any open pipeline-card detail modal so it
+  // doesn't sit on top of the new inference's result with stale content.
+  const _modal = $('pipe-detail-modal');
+  if (_modal) _modal.classList.remove('visible');
+
+  const ep=document.querySelector('input[name=ep]:checked').value;
+  const fd=new FormData();fd.append('file',f);
+
+  try{
+    const r=await fetch(ep,{method:'POST',body:fd});
+    const text=await r.text();
+    let d;try{d=JSON.parse(text)}catch{throw new Error(`${r.status} — ${text.slice(0,200)}`)}
+    if(!r.ok)throw new Error(d.detail||`HTTP ${r.status}`);
+    lastResult=d;
+    $('pending').style.display='none';
+    stopLeafFall();
+    render(d,ep);
+  }catch(e){
+    $('error-msg').textContent=e.message;
+    $('error-box').style.display='block';
+    $('pending').style.display='none';
+    stopLeafFall();
+    // Round-1 fix T + Round-2 fix: hide ALL stale-data UI from a previous
+    // successful run so the error doesn't appear alongside results that
+    // implicitly belong to a different image. Includes routing card.
+    const prev = $('result'); if (prev) prev.style.display='none';
+    const ins = $('inspector-section'); if (ins) ins.style.display='none';
+    const routingCard = $('routing-card');
+    if (routingCard) routingCard.classList.remove('visible');
+    if (typeof pipePause === 'function') { try { pipePause(); } catch{} }
+  }
+}
+
+// ─── Rendering ─────────────────────────────
+function render(d,ep){
+  $('result').style.display='block';
+  $('footer-endpoint').textContent=ep;
+  $('entry-no').textContent=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+  $('specimen-time').textContent=new Date().toLocaleTimeString();
+
+  // Routing card
+  if(ep==='/predict/full' && d.routing){
+    $('routing-card').classList.add('visible');
+    const r=d.routing;
+    const rows=[
+      ['Detected crop',r.router_crop||'(router unavailable)'],
+      ['Router confidence',(r.router_confidence*100).toFixed(1)+'%'],
+      ['Forwarded to APIN',r.router_handled?'Yes (okra/brassica)':'No (out of scope)'],
+      r.low_router_confidence?['⚠ Low confidence','APIN ran anyway']:null,
+    ].filter(Boolean);
+    $('routing-content').innerHTML=rows.map(([k,v])=>
+      `<div class="r-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('');
+  }
+
+  // Handle ROUTER_REJECTED (tomato/chilli)
+  if(d.tier==='ROUTER_REJECTED'){
+    $('tier-stamp').textContent='Out of scope';
+    $('tier-stamp').className='tier-stamp tier-ROUTER_REJECTED';
+    $('conflict-badge').textContent='ROUTER';
+    $('diagnosis-name').textContent='No APIN diagnosis produced';
+    $('conf-bar').style.width='0%';
+    $('conf-pct').textContent='—';
+    $('output-message').textContent=d.message||'Specialist for this crop is not yet deployed.';
+    $('margin-rail').innerHTML='';
+    ['treatment','monitoring','differential','retake'].forEach(s=>$(s+'-section').classList.remove('visible'));
+    $('hero-specimen').src=$('preview-img').src;
+    $('hero-heatmap').style.display='none';
+    ['signal-table','gate-meters','prob-list','conformal-chips'].forEach(id=>$(id).innerHTML=id==='signal-table'?'<thead><tr><th>Signal</th><th>Predicted</th><th style=\"text-align:right\">Top p</th></tr></thead><tbody></tbody>':'');
+    $('raw-json').textContent=JSON.stringify(d,null,2);
+    $('result').scrollIntoView({behavior:'smooth',block:'start'});
+    return;
+  }
+
+  // Specimen + heatmap
+  $('hero-specimen').src=$('preview-img').src;
+  if(d.gradcam_b64_png){
+    $('hero-heatmap').src='data:image/png;base64,'+d.gradcam_b64_png;
+    $('hero-heatmap').style.display='block';
+    $('heatmap-source').textContent=`heatmap · ${d.gradcam_source_signal||'unknown'}`;
+  }else{
+    $('hero-heatmap').style.display='none';
+    $('heatmap-source').textContent='';
+  }
+
+  // Tier stamp + diagnosis
+  const tier=d.tier||'?';
+  const stamp=$('tier-stamp');
+  stamp.textContent='Tier '+tier;
+  stamp.className='tier-stamp tier-'+tier;
+  $('conflict-badge').textContent=d.conflict_type?`Conflict ${d.conflict_type}`:'';
+  $('diagnosis-name').textContent=titleCase(d.diagnosis||'unknown');
+  const c=d.confidence||0;
+  $('conf-bar').style.width='0%';
+  requestAnimationFrame(()=>{setTimeout(()=>{$('conf-bar').style.width=(c*100)+'%'},50)});
+  $('conf-pct').textContent=(c*100).toFixed(1)+'%';
+  $('output-message').textContent=d.output_message||'';
+
+  // Marginal notes
+  const qf=d.quality_flags||{};
+  const bucket=qf.ood_distance_bucket||'—';
+  const margin=[
+    ['i-eye','Aleatoric (image)',
+     ((d.uncertainty_aleatoric||0)*100).toFixed(0)+'% entropy'],
+    ['i-network','Epistemic (model)',
+     ((d.uncertainty_epistemic||0)*100).toFixed(0)+'% signal σ'],
+    ['i-scan','Mahalanobis distance',
+     `${(d.mahalanobis_distance||0).toFixed(2)} &nbsp;<span class="wash ${bucket}">${bucket}</span>${d.is_ood?' &nbsp;<strong style="color:var(--accent-terracotta)">OOD</strong>':''}`],
+    ['i-sliders','Adaptive multiplier',
+     qf.adaptive_multiplier||'1.0'],
+    ['i-sprout','Disease stage · PSV F08',
+     qf.disease_stage_index!==undefined?qf.disease_stage_index.toFixed(3):'(no PSV)'],
+    ['i-flag','Cold-start downgrade',
+     d.cold_start_tier_downgraded?'<span class="wash cold-start">applied</span>':'no'],
+    ['i-alert','Failed signals',
+     (d.failed_signals||[]).length?d.failed_signals.join(', '):'none'],
+    ['i-activity','Quality flags',
+     formatQualityFlags(qf)||'none'],
+  ];
+  $('margin-rail').innerHTML=margin.map(([icon,lbl,val])=>
+    `<div class="margin-note">
+      <svg><use href="#${icon}"/></svg>
+      <div>
+        <div class="mn-lbl">${lbl}</div>
+        <div class="mn-val">${val}</div>
+      </div>
+    </div>`).join('');
+
+  // Prose sections
+  setProse('treatment',d.treatment_recommendation);
+  setProse('monitoring',d.monitoring_guidance);
+  setProse('differential',d.differential_guidance);
+  setProse('retake',d.retake_guidance);
+
+  // Per-signal table
+  const sigPreds=d.signal_predictions||{};
+  $('signal-table').querySelector('tbody').innerHTML=Object.entries(sigPreds).map(([s,info])=>{
+    const lbl=SIGNAL_LABELS[SIGNAL_KEY_MAP[s]]||s;
+    return `<tr>
+      <td class="signal-name">${lbl}</td>
+      <td class="signal-class">${info.argmax?titleCase(info.argmax):'—'}</td>
+      <td class="signal-prob">${((info.top_prob||0)*100).toFixed(1)}%</td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="3" style="padding:14px;color:var(--ink-meta);font-style:italic">No signals available</td></tr>';
+
+  // Gate meters
+  const gw=d.gate_weights||{};
+  $('gate-meters').innerHTML=Object.entries(gw).map(([k,w])=>{
+    const lbl=SIGNAL_LABELS[k]||k;
+    const pct=(w*100).toFixed(1);
+    return `<div class="gate-row">
+      <span class="g-name">${lbl}</span>
+      <div class="g-meter-outer"><div class="g-meter-inner" data-w="${w}"></div></div>
+      <span class="g-pct">${pct}%</span>
+    </div>`;
+  }).join('');
+  // Animate gate meters in next frame
+  requestAnimationFrame(()=>{setTimeout(()=>{
+    document.querySelectorAll('.g-meter-inner').forEach(el=>{
+      el.style.width=(parseFloat(el.dataset.w)*100)+'%';
+    });
+  },80)});
+
+  // 9-class probability list
+  const probs=d.all_class_probabilities||{};
+  const conformalSet=new Set(d.conformal_prediction_set||[]);
+  const topCls=d.diagnosis;
+  const sortedProbs=Object.entries(probs).sort((a,b)=>b[1]-a[1]);
+  $('prob-list').innerHTML=sortedProbs.map(([n,p])=>{
+    const isTop=n===topCls;
+    const inConf=conformalSet.has(n);
+    return `<div class="prob-row ${isTop?'top':''} ${inConf?'in-conformal':''}">
+      <span class="p-name">${titleCase(n)}</span>
+      <div class="p-bar-outer"><div class="p-bar-inner" data-w="${p}"></div></div>
+      <span class="p-pct">${(p*100).toFixed(1)}%</span>
+    </div>`;
+  }).join('');
+  requestAnimationFrame(()=>{setTimeout(()=>{
+    document.querySelectorAll('.p-bar-inner').forEach(el=>{
+      el.style.width=(parseFloat(el.dataset.w)*100)+'%';
+    });
+  },120)});
+
+  // Conformal set chips
+  const conformalArr=d.conformal_prediction_set||[];
+  $('conformal-chips').innerHTML=conformalArr.length
+    ? conformalArr.map((c,i)=>`<span class="chip ${i===0?'primary':''}">${titleCase(c)}</span>`).join('')
+    : '<span style="font-family:\'Fraunces\',serif;font-style:italic;color:var(--ink-meta);font-size:0.86rem">Empty set — very confident / very uncertain</span>';
+
+  // Raw JSON
+  $('raw-json').textContent=JSON.stringify(d,null,2);
+
+  // Footer meta
+  $('proc-time').textContent=(d.processing_time_ms||0).toFixed(0);
+  $('disease-stage').textContent=qf.disease_stage_index!==undefined?qf.disease_stage_index.toFixed(3):'(no PSV)';
+
+  // Reset feedback UI
+  $('correction-form').style.display='none';
+  $('feedback-thanks').style.display='none';
+  $('thumb-up').disabled=false;$('thumb-down').disabled=false;
+
+  $('result').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function setProse(kind,val){
+  const section=$(kind+'-section');
+  const body=$(kind+'-body');
+  if(val&&val.trim()){
+    body.textContent=val;
+    section.classList.add('visible');
+  }else section.classList.remove('visible');
+}
+function titleCase(s){
+  if(!s)return'';
+  return s.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+}
+function formatQualityFlags(qf){
+  const skip=['adaptive_multiplier','ood_distance_bucket','disease_stage_index'];
+  return Object.entries(qf).filter(([k])=>!skip.includes(k))
+    .map(([k,v])=>`${k}=${v}`).join(', ');
+}
+
+// ─── Feedback ─────────────────────────────
+$('thumb-up').addEventListener('click',async()=>{
+  if(!lastResult)return;
+  await fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({is_correct:true,predicted_class:lastResult.diagnosis})});
+  $('feedback-thanks').style.display='block';
+  $('thumb-up').disabled=true;$('thumb-down').disabled=true;
+});
+$('thumb-down').addEventListener('click',()=>{
+  const sel=$('correction-select');
+  sel.innerHTML='<option value="">— select canonical class —</option>'+
+    CLASSES.map(c=>`<option value="${c}">${titleCase(c)}</option>`).join('');
+  $('correction-form').style.display='block';
+});
+$('submit-correction').addEventListener('click',async()=>{
+  const correct=$('correction-select').value;
+  if(!correct){alert('Please select the correct class');return}
+  if(!lastResult)return;
+  try{
+    const r=await fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({is_correct:false,correct_class:correct,predicted_class:lastResult.diagnosis})});
+    if(!r.ok){const d=await r.json();throw new Error(d.detail||'Error')}
+    $('correction-form').style.display='none';
+    $('feedback-thanks').style.display='block';
+    $('thumb-up').disabled=true;$('thumb-down').disabled=true;
+  }catch(e){alert('Feedback error: '+e.message)}
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// RESEARCH WIDGETS — renderers hooked into the existing render() flow
+// ═══════════════════════════════════════════════════════════════════════
+
+// Extend the existing render() to also render the six new widgets + show
+// the pipeline inspector. We do this via monkey-patch instead of editing
+// the original render to keep the diff localised and reversible.
+const _origRender = render;
+render = function(d, ep){
+  _origRender(d, ep);
+  try {
+    renderDecisionTrace(d);
+    renderTaxonomyTree(d);
+    renderMahalanobisChart(d);
+    renderSignalHeatmap(d);
+    renderShapWaterfall(d);
+    renderPsvFiring(d);
+    renderPipelineInspector(d, ep);
+  } catch(e) {
+    console.error('Extended render failed:', e);
+  }
+};
+
+// ─── 1. "Why this tier?" decision trace ───────────────────────────────
+function renderDecisionTrace(d){
+  const trace = d.decision_trace || [];
+  const section = $('decision-trace-section');
+  const body = $('decision-trace-body');
+  if (!trace.length || d.tier === 'ROUTER_REJECTED') {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  body.innerHTML = trace.map(t => {
+    const taken = t.passed && t.tier_if_taken === d.tier ? ' dt-taken' : '';
+    const verdictCls = t.passed ? 'pass' : 'fail';
+    const verdictIcon = t.passed ? 'i-check' : 'i-x';
+    const verdictText = t.passed ? 'taken' : 'not taken';
+    return `<div class="dt-row${taken}">
+      <div class="dt-idx">${String(t.step).padStart(2,'0')}</div>
+      <div class="dt-body">
+        <div class="dt-name">${escapeHtml(t.name)} <span style="color:var(--ink-faint);font-family:'JetBrains Mono',monospace;font-size:0.7rem">→ ${t.tier_if_taken}</span></div>
+        <div class="dt-check"><b>${escapeHtml(String(t.check))}</b> · observed <b>${escapeHtml(String(t.value))}</b> vs ${escapeHtml(String(t.threshold))}</div>
+      </div>
+      <div class="dt-verdict ${verdictCls}"><svg><use href="#${verdictIcon}"/></svg>${verdictText}</div>
+    </div>`;
+  }).join('');
+}
+
+// ─── 2. Class taxonomy tree ───────────────────────────────────────────
+function renderTaxonomyTree(d){
+  const section = $('taxo-section');
+  const container = $('taxo-tree');
+  if (d.tier === 'ROUTER_REJECTED' || !d.all_class_probabilities) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  const probs = d.all_class_probabilities || {};
+  const predicted = d.diagnosis;
+  const OKRA = ['okra_yvmv','okra_powdery_mildew','okra_cercospora','okra_enation','okra_healthy'];
+  const BRASSICA = ['brassica_black_rot','brassica_downy_mildew','brassica_alternaria','brassica_healthy'];
+  const okraMax = Math.max(...OKRA.map(c => probs[c] || 0));
+  const brMax   = Math.max(...BRASSICA.map(c => probs[c] || 0));
+  const okraActive = predicted && predicted.startsWith('okra_');
+  const brActive = predicted && predicted.startsWith('brassica_');
+
+  function renderGroup(classes, active){
+    return classes.map(c => {
+      const p = probs[c] || 0;
+      const pct = (p * 100).toFixed(1);
+      const isPred = c === predicted;
+      const cls = isPred ? 'predicted' : '';
+      return `<div class="taxo-node ${cls}">
+        <span class="t-name">${titleCase(c)}</span>
+        <div class="t-bar"><div class="t-bar-fill" data-w="${p}" style="width:0"></div></div>
+        <span class="t-pct">${pct}%</span>
+      </div>`;
+    }).join('');
+  }
+
+  container.innerHTML = `
+    <div class="taxo-root">plant · leaf · disease</div>
+    <div class="taxo-branch">
+      <div class="taxo-crop-label${okraActive?' active':''}"><svg><use href="#i-leaf"/></svg>okra &nbsp;<span style="color:var(--ink-meta);font-size:0.78rem;font-family:'JetBrains Mono',monospace">max ${(okraMax*100).toFixed(1)}%</span></div>
+      <div class="taxo-branch">${renderGroup(OKRA, okraActive)}</div>
+      <div class="taxo-crop-label${brActive?' active':''}" style="margin-top:10px"><svg><use href="#i-sprout"/></svg>brassica &nbsp;<span style="color:var(--ink-meta);font-size:0.78rem;font-family:'JetBrains Mono',monospace">max ${(brMax*100).toFixed(1)}%</span></div>
+      <div class="taxo-branch">${renderGroup(BRASSICA, brActive)}</div>
+    </div>`;
+  requestAnimationFrame(()=>setTimeout(()=>{
+    document.querySelectorAll('.t-bar-fill').forEach(el=>{
+      el.style.width = (parseFloat(el.dataset.w) * 100) + '%';
+    });
+  }, 120));
+}
+
+// ─── 3. Mahalanobis distance to every class prototype ─────────────────
+function renderMahalanobisChart(d){
+  const container = $('maha-chart');
+  // Round-1 fix O: ROUTER_REJECTED short-circuit — OOD analysis is not
+  // applicable because inference never reached the MLP.
+  if (d.tier === 'ROUTER_REJECTED') {
+    container.innerHTML = '<div style="color:var(--ink-meta);font-style:italic;font-size:0.82rem">OOD analysis not applicable — image was classified as an out-of-scope crop before APIN ran.</div>';
+    return;
+  }
+  const perClass = d.per_class_mahalanobis || {};
+  const keys = Object.keys(perClass);
+  if (keys.length === 0) {
+    container.innerHTML = '<div style="color:var(--ink-meta);font-style:italic;font-size:0.82rem">OOD detector unavailable for this image.</div>';
+    return;
+  }
+  // Round-1 fix K: read threshold from the live /warmup/status payload
+  // (stashed on window._apinOodThreshold during initial check + polling)
+  // instead of hardcoding. Fall back to 34.53 if unavailable.
+  const threshold = (typeof window._apinOodThreshold === 'number')
+    ? window._apinOodThreshold : 34.53;
+  const maxVal = Math.max(...Object.values(perClass), threshold * 1.2);
+  const thrPct = (threshold / maxVal) * 100;
+  container.innerHTML = keys.map(cls => {
+    const dist = perClass[cls];
+    const pctOfMax = (dist / maxVal) * 100;
+    const isPred = cls === d.diagnosis;
+    const beyond = dist > threshold;
+    const cssCls = [isPred ? 'predicted' : '', beyond ? 'beyond-threshold' : ''].filter(Boolean).join(' ');
+    return `<div class="maha-row ${cssCls}" style="--thr:${thrPct.toFixed(2)}%">
+      <span class="m-name">${titleCase(cls)}${isPred?' <span style="font-size:0.7rem;color:var(--accent-green);font-family:\'JetBrains Mono\',monospace">◂ predicted</span>':''}</span>
+      <div class="m-bar-outer"><div class="m-bar-inner" data-w="${pctOfMax}" style="width:0"></div></div>
+      <span class="m-val">${dist.toFixed(2)}</span>
+    </div>`;
+  }).join('');
+  requestAnimationFrame(()=>setTimeout(()=>{
+    document.querySelectorAll('#maha-chart .m-bar-inner').forEach(el=>{
+      el.style.width = parseFloat(el.dataset.w) + '%';
+    });
+  }, 140));
+}
+
+// ─── 4. Per-signal × per-class heatmap (4×9) ──────────────────────────
+function renderSignalHeatmap(d){
+  const container = $('heatmap-container');
+  const dist = d.per_signal_full_distributions || {};
+  const sigNames = Object.keys(dist);
+  if (sigNames.length === 0) {
+    container.innerHTML = '<div style="color:var(--ink-meta);font-style:italic;font-size:0.82rem">No per-signal distributions available.</div>';
+    return;
+  }
+  const predIdx = CLASSES.indexOf(d.diagnosis);
+  const shortNames = {model2:'Model 2', efficientnet:'EfficientNet', psv:'PSV', dinov2_head:'DINOv2'};
+
+  // Header row with rotated class labels
+  let html = '<div class="heatmap-grid">';
+  html += '<div class="h-label-col" style="opacity:0"></div>';
+  html += '<div class="h-label-row-wrap">';
+  CLASSES.forEach(c=>{
+    html += `<div class="h-class-label">${c.replace(/_/g,' ')}</div>`;
+  });
+  html += '</div>';
+
+  // 4 rows × 9 cells
+  sigNames.forEach(sig=>{
+    html += `<div class="h-label-col">${shortNames[sig]||sig}</div>`;
+    const arr = dist[sig] || [];
+    arr.forEach((p, idx)=>{
+      const v = Math.max(0, Math.min(1, p));
+      // Use a brown-to-green sepia-ish scale for readability on paper
+      const bg = heatmapColor(v);
+      const predCls = (idx === predIdx) ? ' predicted' : '';
+      html += `<div class="h-cell${predCls}" style="background:${bg}" title="${shortNames[sig]||sig} · ${CLASSES[idx]} · ${(v*100).toFixed(1)}%">${(v*100).toFixed(0)}</div>`;
+    });
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+function heatmapColor(v){
+  // v in [0,1]: blend paper → ink-green, darker at higher probabilities
+  // low = paper_deep (#e9e2d1), high = #1a3a24 (dark botanical green)
+  const lo = [233, 226, 209];
+  const hi = [26, 58, 36];
+  const mix = lo.map((c,i)=> Math.round(c + (hi[i]-c) * v));
+  return `rgb(${mix[0]}, ${mix[1]}, ${mix[2]})`;
+}
+
+// ─── 5. SHAP-style signal contribution waterfall ──────────────────────
+function renderShapWaterfall(d){
+  const container = $('shap-waterfall');
+  const sc = d.signal_contributions || {};
+  const keys = Object.keys(sc);
+  if (keys.length === 0) {
+    container.innerHTML = '<div style="color:var(--ink-meta);font-style:italic;font-size:0.82rem">No signal-attribution data.</div>';
+    return;
+  }
+  const shortNames = {model2:'Model 2', efficientnet:'EfficientNet', psv:'PSV', dinov2_head:'DINOv2'};
+  // Sort by normalised contribution descending for readability
+  const sorted = keys.map(k => ({name:k, ...sc[k]})).sort((a,b)=>b.normalised_pct - a.normalised_pct);
+  let html = '';
+  sorted.forEach(s=>{
+    const pct = Math.max(0, s.normalised_pct);
+    // data-signal must be set so the CSS [data-signal="..."] selectors
+    // colour each bar by signal identity rather than DOM position (fix M).
+    html += `<div class="shap-row" data-signal="${s.name}">
+      <span class="s-name">${shortNames[s.name]||s.name}</span>
+      <div class="s-bar-outer"><div class="s-bar-inner" data-w="${pct}" style="width:0"></div></div>
+      <span class="s-pct">${pct.toFixed(1)}%</span>
+    </div>`;
+  });
+  const total = sorted.reduce((a,s)=>a+s.normalised_pct, 0);
+  html += `<div class="shap-total">
+    <span class="s-name">Toward ${titleCase(d.diagnosis||'')}</span>
+    <div></div>
+    <span class="s-pct">${total.toFixed(0)}%</span>
+  </div>`;
+  container.innerHTML = html;
+  requestAnimationFrame(()=>setTimeout(()=>{
+    document.querySelectorAll('#shap-waterfall .s-bar-inner').forEach(el=>{
+      el.style.width = parseFloat(el.dataset.w) + '%';
+    });
+  }, 160));
+}
+
+// ─── 6. PSV feature firing ────────────────────────────────────────────
+function renderPsvFiring(d){
+  const block = $('psv-firing-block');
+  const container = $('psv-firing-list');
+  const firing = d.psv_feature_firing || [];
+  if (!firing.length) {
+    block.style.display = 'none';
+    return;
+  }
+  block.style.display = 'block';
+  $('psv-firing-class').textContent = 'for ' + titleCase(d.diagnosis || '');
+  // Max |contribution| for scaling
+  const maxAbs = Math.max(...firing.map(f=>Math.abs(f.contribution)), 1e-6);
+  container.innerHTML = firing.map(f=>{
+    const absFrac = Math.abs(f.contribution) / maxAbs;
+    const widthPct = Math.max(2, absFrac * 48);  // half-bar max 48% of container
+    const isNeg = f.contribution < 0;
+    const leftOrRight = isNeg
+      ? `right:50%; width:${widthPct}%;`
+      : `left:50%; width:${widthPct}%;`;
+    return `<div class="psv-row ${isNeg?'negative':''}">
+      <span class="p-name" title="${f.name}">${f.name}</span>
+      <div class="p-bar-wrap">
+        <div class="p-bar-center"></div>
+        <div class="p-bar-fill" style="${leftOrRight}"></div>
+      </div>
+      <span class="p-val">${f.contribution > 0 ? '+' : ''}${f.contribution.toFixed(3)}</span>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PIPELINE INSPECTOR — interactive walkthrough
+// ═══════════════════════════════════════════════════════════════════════
+
+// Station x-coordinates in SVG viewBox (0-1000). Must match the <circle>
+// cx values placed in the HTML above.
+const PIPE_STATION_X = [60, 185, 310, 435, 560, 685, 810, 920];
+const PIPE_N_STAGES = 8;
+const PIPE_DWELL_MS = 900;    // pause at each station
+const PIPE_TRAVEL_MS = 350;   // travel time between stations
+
+let pipeState = {
+  data: null, ep: null,
+  stage: 0,                   // 0 = not started, 1..8 = at station N
+  playing: false,
+  timer: null,
+  rafHandle: null,            // Round-1 fix C: cancellable RAF for token motion
+  autoReplayTimer: null,      // Round-6 fix: trackable end-of-sequence replay setTimeout
+  cardContent: {},
+};
+
+function renderPipelineInspector(d, ep){
+  pipeState.data = d;
+  pipeState.ep = ep;
+  pipeState.stage = 0;
+  pipeState.playing = false;
+  $('inspector-section').style.display = 'block';
+  $('pipe-stage-total').textContent = PIPE_N_STAGES;
+  // Precompute summaries for each card
+  buildPipeCardContent(d, ep);
+  // Reset visual state
+  resetPipeVisual();
+  // Auto-play the animation once on first render
+  setTimeout(()=> pipePlay(), 300);
+}
+
+function resetPipeVisual(){
+  pipeState.stage = 0;
+  $('pipe-stage-n').textContent = '0';
+  document.querySelectorAll('.pipe-station').forEach(s=>s.classList.remove('active','visited'));
+  document.querySelectorAll('.pipe-station-ripple').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.pipe-station-label').forEach(l=>l.classList.remove('active'));
+  document.querySelectorAll('.pipe-card').forEach(c=>c.classList.remove('visible','active'));
+  const tok = $('pipe-token');
+  tok.classList.remove('visible');
+  tok.setAttribute('transform', `translate(20, 100)`);
+  stopPipeTimer();
+}
+
+function stopPipeTimer(){
+  if (pipeState.timer){ clearTimeout(pipeState.timer); pipeState.timer = null; }
+  // Round-1 fix C: also cancel any in-flight token animation RAF so a
+  // stale motion callback doesn't fire after the user pauses / replays.
+  if (pipeState.rafHandle){
+    cancelAnimationFrame(pipeState.rafHandle);
+    pipeState.rafHandle = null;
+  }
+  // Round-6 fix: cancel the auto-replay setTimeout queued by pipePlay()'s
+  // end-of-sequence branch. Without this, a user clicking Replay within
+  // 200ms of the animation completing naturally would have BOTH the
+  // explicit replay AND the implicit auto-replay fire, double-advancing
+  // stations.
+  if (pipeState.autoReplayTimer){
+    clearTimeout(pipeState.autoReplayTimer);
+    pipeState.autoReplayTimer = null;
+  }
+}
+
+function setPipePlayIcon(playing){
+  $('pipe-play-icon').innerHTML = `<use href="#${playing ? 'i-pause' : 'i-play'}"/>`;
+  $('pipe-play-label').textContent = playing ? 'Pause' : 'Play';
+}
+
+function pipePlay(){
+  if (pipeState.stage >= PIPE_N_STAGES){ // at end → replay
+    resetPipeVisual();
+    // Round-6 fix: store the handle on pipeState so stopPipeTimer can
+    // cancel it. Previously the handle was discarded, so a Replay click
+    // within 200 ms of natural completion would race this auto-replay.
+    pipeState.autoReplayTimer = setTimeout(()=>{
+      pipeState.autoReplayTimer = null;
+      pipePlay();
+    }, 200);
+    return;
+  }
+  pipeState.playing = true;
+  setPipePlayIcon(true);
+  advancePipeStage();
+}
+
+function pipePause(){
+  pipeState.playing = false;
+  setPipePlayIcon(false);
+  stopPipeTimer();
+}
+
+// Round-5 audit fix: rapid double-clicks of Replay used to queue two
+// independent setTimeout(pipePlay, 200) callbacks. Both would fire,
+// each calling advancePipeStage, and the dwell-timer setTimeout inside
+// the surviving RAF callback would queue twice — the animation then
+// ran at 2x speed and skipped stations. Cancel any pending replay
+// timeout before scheduling a new one.
+let _pipeReplayTimer = null;
+function pipeReplay(){
+  pipePause();
+  if (_pipeReplayTimer){ clearTimeout(_pipeReplayTimer); _pipeReplayTimer = null; }
+  resetPipeVisual();
+  _pipeReplayTimer = setTimeout(()=>{ _pipeReplayTimer = null; pipePlay(); }, 200);
+}
+
+function pipeStep(delta){
+  pipePause();
+  const target = Math.max(0, Math.min(PIPE_N_STAGES, pipeState.stage + delta));
+  if (target === pipeState.stage) return;
+  // Rebuild state from scratch to reach target
+  resetPipeVisual();
+  for (let i = 1; i <= target; i++){
+    markStageAt(i, false);
+  }
+  pipeState.stage = target;
+  $('pipe-stage-n').textContent = String(target);
+  // Place token at that station
+  const x = PIPE_STATION_X[target-1] || 20;
+  $('pipe-token').classList.add('visible');
+  $('pipe-token').setAttribute('transform', `translate(${x}, 100)`);
+}
+
+function advancePipeStage(){
+  if (!pipeState.playing) return;
+  const next = pipeState.stage + 1;
+  if (next > PIPE_N_STAGES){
+    pipePause();
+    return;
+  }
+  // Animate token from current position to station `next`
+  const fromX = next === 1 ? 20 : PIPE_STATION_X[next-2];
+  const toX = PIPE_STATION_X[next-1];
+  animateTokenTo(fromX, toX, ()=>{
+    markStageAt(next, true);
+    pipeState.stage = next;
+    $('pipe-stage-n').textContent = String(next);
+    pipeState.timer = setTimeout(()=>{
+      if (pipeState.playing) advancePipeStage();
+    }, PIPE_DWELL_MS);
+  });
+}
+
+function animateTokenTo(fromX, toX, cb){
+  // Round-1 fix C: store the RAF handle on pipeState so stopPipeTimer
+  // (called by pause / replay / pipeStep) can cancel it. Without this,
+  // a mid-flight animation would continue firing even after the user
+  // navigates elsewhere, corrupting the visual state on replay.
+  const token = $('pipe-token');
+  token.classList.add('visible');
+  const start = performance.now();
+  const dur = PIPE_TRAVEL_MS;
+  // Tag this animation so the callback knows whether it's still current
+  const myToken = {};
+  pipeState.currentAnim = myToken;
+  function step(now){
+    if (pipeState.currentAnim !== myToken) return;  // cancelled
+    const t = Math.min(1, (now - start) / dur);
+    const e = 1 - (1-t)*(1-t);
+    const x = fromX + (toX - fromX) * e;
+    token.setAttribute('transform', `translate(${x}, 100)`);
+    if (t < 1) {
+      pipeState.rafHandle = requestAnimationFrame(step);
+    } else {
+      pipeState.rafHandle = null;
+      pipeState.currentAnim = null;
+      cb();
+    }
+  }
+  pipeState.rafHandle = requestAnimationFrame(step);
+}
+
+function markStageAt(n, animateRipple){
+  // Activate station n (circle ring)
+  const prevActive = document.querySelectorAll('.pipe-station.active');
+  prevActive.forEach(s=>{ s.classList.remove('active'); s.classList.add('visited'); });
+  const g = document.querySelector(`g[data-station="${n}"]`);
+  if (g){
+    const circle = g.querySelector('.pipe-station');
+    const ripple = g.querySelector('.pipe-station-ripple');
+    if (circle) circle.classList.add('active');
+    if (ripple && animateRipple){
+      ripple.classList.remove('active');
+      void ripple.offsetWidth;  // force reflow to restart animation
+      ripple.classList.add('active');
+    }
+  }
+  // Activate label + num
+  document.querySelectorAll(`[data-label-for="${n}"]`).forEach(el=>el.classList.add('active'));
+  document.querySelectorAll(`[data-num-for="${n}"]`).forEach(el=>el.classList.add('active'));
+  // Reveal card
+  const card = document.querySelector(`.pipe-card[data-station="${n}"]`);
+  if (card) card.classList.add('visible');
+}
+
+function pvImg(d, key){
+  const pv = d.pipeline_visualizations || {};
+  return pv[key] ? `data:image/png;base64,${pv[key]}` : null;
+}
+function stageImgCell(src, label, caption){
+  if(!src) return '';
+  return `<div class="stage-img-cell"><img src="${src}" alt="${label}"><div class="si-label">${label}</div><div class="si-caption">${caption}</div></div>`;
+}
+function buildPipeCardContent(d, ep){
+  const qf = d.quality_flags || {};
+  const routing = d.routing || {};
+  const previewSrc = ($('preview-img') && $('preview-img').src) || null;
+  pipeState.cardContent = {
+    1: {
+      title: 'Router — Crop classification',
+      summary: routing.router_crop
+        ? `Detected <b>${routing.router_crop}</b> at ${(routing.router_confidence*100).toFixed(1)}% · ${routing.router_handled ? 'forwarded to APIN' : 'out of scope'}`
+        : (ep === '/predict/full' ? 'Router unavailable' : 'Router skipped (direct APIN call)'),
+      detail: (routing.router_crop
+        ? `<div class="stage-img-grid">${stageImgCell(previewSrc,'input','Original image as uploaded — what the router actually saw')}</div>
+           <div class="kv">
+             <div class="kv-k">Detected crop</div><div class="kv-v">${routing.router_crop}</div>
+             <div class="kv-k">Confidence</div><div class="kv-v">${(routing.router_confidence*100).toFixed(2)}%</div>
+             <div class="kv-k">Forwarded to APIN</div><div class="kv-v">${routing.router_handled}</div>
+             <div class="kv-k">Low-confidence flag</div><div class="kv-v">${routing.low_router_confidence}</div>
+           </div>
+           <p class="note">Router is a frozen DINOv2 backbone + trained head (F1 0.9862, 4 classes). On low confidence the image falls through to APIN regardless — farmer intent overrides.</p>`
+        : `<div class="stage-img-grid">${stageImgCell(previewSrc,'input','Original image as uploaded — direct APIN call, router not used')}</div>
+           <p class="note">The router stage is only active on <code>/predict/full</code>. This request used <code>${ep}</code>, so routing was skipped.</p>`),
+    },
+    2: {
+      title: 'Gate Zero — Pre-check',
+      summary: d.tier==='4A' && d.is_ood===false
+        ? 'Image hard-rejected before inference'
+        : `blur ${(qf.blur_score||0).toFixed ? (qf.blur_score||0).toFixed(0) : '—'} · exposure ${qf.mild_exposure_issue?'mild':'ok'} · leaf coverage ${qf.leaf_fraction ? (qf.leaf_fraction*100).toFixed(0)+'%' : 'ok'}`,
+      detail: `<p>What Gate Zero actually computed from this image:</p>
+        <div class="stage-img-grid">
+          ${stageImgCell(pvImg(d,'gate_zero_lap'),'laplacian edge map','Sharpness signal — bright pixels = high local variance. Blur check passes when variance ≥ threshold.')}
+          ${stageImgCell(pvImg(d,'gate_zero_lab_l'),'LAB-L luminance','Exposure signal — uniform mid-grey = balanced. Very dark / very bright fails the exposure check.')}
+          ${stageImgCell(pvImg(d,'gate_zero_leaf_mask'),'HSV green mask','Leaf coverage — green-tinted pixels are classified as leaf; coverage % drives the hard-reject decision.')}
+        </div>
+        <div class="kv">
+          <div class="kv-k">Blur score (Laplacian var)</div><div class="kv-v">pass</div>
+          <div class="kv-k">Exposure (LAB-L mean)</div><div class="kv-v">pass</div>
+          <div class="kv-k">Leaf fraction</div><div class="kv-v">pass</div>
+          <div class="kv-k">Quality flags</div><div class="kv-v">${Object.keys(qf).filter(k=>!['adaptive_multiplier','ood_distance_bucket','disease_stage_index'].includes(k)).map(k=>`${k}=${qf[k]}`).join(', ') || 'none'}</div>
+        </div>
+        <p class="note">Gate Zero is a sub-10ms pre-check. Hard rejects emit tier 4A without touching the neural models.</p>`,
+    },
+    3: {
+      title: 'Preprocessing — Two branches',
+      summary: 'Branch A: LAB-CLAHE @ 384/224 · Branch B: RGB per-channel CLAHE @ 224',
+      detail: `<p>Two independent preprocessing branches actually applied to this image:</p>
+        <div class="stage-img-grid">
+          ${stageImgCell(pvImg(d,'preproc_lab_clahe'),'Branch A — LAB-CLAHE','Luminance-only contrast equalisation in LAB space. Colour relationships preserved; shadows lifted, highlights compressed. Feeds Model 2, DINOv2, PSV.')}
+          ${stageImgCell(pvImg(d,'preproc_rgb_clahe'),'Branch B — RGB-CLAHE','Per-channel contrast equalisation in RGB. More aggressive — can shift colour casts. Recreates the EfficientNet training distribution. Feeds EfficientNet only.')}
+        </div>
+        <div class="kv">
+          <div class="kv-k">Branch A</div><div class="kv-v">LAB-CLAHE (L channel) · resize 384 (M2) / 224 (DINOv2) · ImageNet norm</div>
+          <div class="kv-k">Used by</div><div class="kv-v">Model 2 · DINOv2 head · PSV</div>
+          <div class="kv-k">Branch B</div><div class="kv-v">RGB per-channel CLAHE · resize 224 · ImageNet norm</div>
+          <div class="kv-k">Used by</div><div class="kv-v">EfficientNet (FPN + FiLM head)</div>
+        </div>
+        <p class="note">Compare the two branches above against the original — visible differences explain why each signal sees a slightly different image.</p>`,
+    },
+    4: {
+      title: '4 Signals — parallel forward pass',
+      summary: `M2: ${sigShort(d,'model2')} · EN: ${sigShort(d,'efficientnet')} · PSV: ${sigShort(d,'psv')} · DINO: ${sigShort(d,'dinov2_head')}`,
+      detail: buildSignalsDetail(d),
+    },
+    5: {
+      title: 'Fusion — R × Gate × MLP',
+      summary: `Gate: ${fmtGate(d)} · 36-dim input → 128 → 64 → 32 → 9 logits`,
+      detail: buildFusionDetail(d),
+    },
+    6: {
+      title: 'Calibration',
+      summary: `Per-class temperature scaling · conformal set (${(d.conformal_prediction_set||[]).length} classes @ 95% coverage)`,
+      detail: buildCalibrationDetail(d),
+    },
+    7: {
+      title: 'Tier decision',
+      summary: `Tier <b>${d.tier||'—'}</b> · ${d.decision_trace ? d.decision_trace.length : 0} conditions evaluated · adaptive multiplier ${qf.adaptive_multiplier||'1.0'}`,
+      detail: buildTierDetail(d),
+    },
+    8: {
+      title: 'Output',
+      summary: `${titleCase(d.diagnosis||'—')} · ${((d.confidence||0)*100).toFixed(1)}% · conflict ${d.conflict_type||'—'}`,
+      detail: buildOutputDetail(d),
+    },
+  };
+  // Populate card summaries
+  for (let i = 1; i <= PIPE_N_STAGES; i++){
+    const el = $('pc-summary-'+i);
+    if (el) el.innerHTML = pipeState.cardContent[i].summary;
+  }
+}
+
+function sigShort(d, signalKey){
+  const info = (d.signal_predictions || {})[signalKey];
+  if (!info) return 'off';
+  return `${(info.top_prob*100).toFixed(0)}%`;
+}
+function fmtGate(d){
+  const gw = d.gate_weights || {};
+  return Object.entries(gw).map(([k,v])=>`${k.replace('S1_','').replace('S2_','').replace('S3_','').replace('S4_','')} ${(v*100).toFixed(0)}%`).join(' · ');
+}
+function buildSignalsDetail(d){
+  const dist = d.per_signal_full_distributions || {};
+  const shortNames = {model2:'Model 2', efficientnet:'EfficientNet', psv:'PSV', dinov2_head:'DINOv2'};
+  const classes = ['okra_yvmv','okra_powdery_mildew','okra_cercospora','okra_enation','okra_healthy','brassica_black_rot','brassica_downy_mildew','brassica_alternaria','brassica_healthy'];
+  const shortCls = ['o.yvmv','o.pmd','o.cer','o.ena','o.hlt','b.bro','b.dmd','b.alt','b.hlt'];
+  let s = '<p>What each of the 4 signals actually output for this image — the 4×9 probability matrix:</p>';
+  if (Object.keys(dist).length){
+    s += '<div class="stage-mini-heatmap">';
+    s += '<div class="mh-row"><div class="mh-rowlabel">signal ↓ / class →</div>' + shortCls.map(c=>`<div class="mh-collabel">${c}</div>`).join('') + '</div>';
+    Object.entries(dist).forEach(([sig, arr])=>{
+      const max = Math.max(...arr);
+      s += `<div class="mh-row"><div class="mh-rowlabel">${shortNames[sig]||sig}</div>`;
+      arr.forEach((p,i)=>{
+        const intensity = Math.min(1, p);
+        const bg = `rgba(47,111,62,${0.15 + intensity*0.75})`;
+        const isTop = (p===max) ? 'border:1.5px solid var(--ink)' : '';
+        s += `<div class="mh-cell" style="background:${bg};${isTop}">${(p*100).toFixed(0)}</div>`;
+      });
+      s += '</div>';
+    });
+    s += '</div>';
+  }
+  s += '<p class="note">Bordered cell = that signal\'s argmax. Disagreement across rows is what drives the conflict-detection logic downstream.</p>';
+  return s;
+}
+function buildFusionDetail(d){
+  const gw = d.gate_weights || {};
+  const sc = d.signal_contributions || {};
+  let s = '<p>Gate weights actually assigned to each signal for this image (MoE softmax over 4 experts):</p>';
+  if (Object.keys(gw).length){
+    s += '<div class="stage-bar-chart">';
+    Object.entries(gw).forEach(([k,v])=>{
+      const pct = (v*100);
+      s += `<div class="stage-bar-row"><div>${k}</div><div class="stage-bar-track"><div class="stage-bar-fill" style="width:${pct.toFixed(1)}%"></div></div><div>${pct.toFixed(1)}%</div></div>`;
+    });
+    s += '</div>';
+  }
+  s += '<div class="kv">';
+  s += '<div class="kv-k">1. Reliability matrix</div><div class="kv-v">4×9 per-signal-per-class empirical accuracy; modulates each 9-dim signal block</div>';
+  s += '<div class="kv-k">2. MoE gate</div><div class="kv-v">' + Object.entries(gw).map(([k,v])=>`${k} ${(v*100).toFixed(1)}%`).join(' · ') + '</div>';
+  s += '<div class="kv-k">3. Stacking MLP</div><div class="kv-v">36 → 128 → 64 → 32 → 9 (BatchNorm + GELU + Dropout 0.35)</div>';
+  s += '</div>';
+  if (Object.keys(sc).length){
+    s += '<hr><p>SHAP-style attribution toward predicted class — what each signal actually contributed:</p>';
+    s += '<div class="stage-bar-chart">';
+    Object.entries(sc).forEach(([k,v])=>{
+      s += `<div class="stage-bar-row"><div>${k}</div><div class="stage-bar-track"><div class="stage-bar-fill" style="width:${v.normalised_pct.toFixed(1)}%"></div></div><div>${v.normalised_pct.toFixed(1)}%</div></div>`;
+    });
+    s += '</div>';
+  }
+  return s;
+}
+function buildCalibrationDetail(d){
+  const conf = d.conformal_prediction_set || [];
+  const probs = d.all_class_probabilities || {};
+  let s = '<p>Calibrated 9-class probability distribution actually produced for this image:</p>';
+  if (Object.keys(probs).length){
+    const sorted = Object.entries(probs).sort((a,b)=>b[1]-a[1]);
+    const max = sorted[0][1];
+    s += '<div class="stage-bar-chart">';
+    sorted.forEach(([cls,p])=>{
+      const pct = p*100;
+      const inSet = conf.includes(cls);
+      const fillColor = inSet ? 'var(--accent-green)' : 'var(--ink-faint)';
+      s += `<div class="stage-bar-row"><div>${titleCase(cls)}${inSet?' ✓':''}</div><div class="stage-bar-track"><div class="stage-bar-fill" style="width:${pct.toFixed(1)}%;background:${fillColor}"></div></div><div>${pct.toFixed(1)}%</div></div>`;
+    });
+    s += '</div>';
+    s += '<p class="note">Green bars = inside the 95% conformal prediction set. Bars with no green = excluded. Total green-bar coverage is what guarantees the 95% promise.</p>';
+  }
+  s += '<div class="kv">';
+  s += '<div class="kv-k">Temperature scaling</div><div class="kv-v">Per-class T[9] applied before final softmax — corrects over-confidence</div>';
+  s += '<div class="kv-k">Conformal set size</div><div class="kv-v">' + conf.length + ' / 9 classes</div>';
+  s += '<div class="kv-k">Target coverage</div><div class="kv-v">95% · held-out measurement 96.3%</div>';
+  s += '</div>';
+  return s;
+}
+function buildTierDetail(d){
+  const trace = d.decision_trace || [];
+  let s = '<p>The tier ladder is evaluated top-to-bottom. The first condition that passes determines the tier. Full trace:</p>';
+  s += '<div class="kv">';
+  trace.forEach(t=>{
+    const verdict = t.passed ? '<b style="color:var(--accent-green)">taken</b>' : '<span style="color:var(--ink-faint)">—</span>';
+    s += `<div class="kv-k">${t.step}. ${t.name}</div><div class="kv-v">${t.check} · ${t.value} vs ${t.threshold} · ${verdict}</div>`;
+  });
+  s += '</div>';
+  s += `<hr><p class="note">Adaptive multiplier: <b>${(d.quality_flags||{}).adaptive_multiplier||'1.0'}</b> (quality × agreement × source-distance) · Cold-start downgrade applied: <b>${d.cold_start_tier_downgraded}</b></p>`;
+  return s;
+}
+function buildOutputDetail(d){
+  const cam = d.gradcam_b64_png ? `data:image/png;base64,${d.gradcam_b64_png}` : null;
+  const previewSrc = ($('preview-img') && $('preview-img').src) || null;
+  let imgs = '';
+  if (cam || previewSrc){
+    imgs = `<div class="stage-img-grid">
+      ${stageImgCell(previewSrc,'original','The image as the user uploaded it')}
+      ${stageImgCell(cam,'GradCAM++ overlay','Where the gate-weighted top signal looked to make this prediction. Bright = high attribution. Source signal: ' + (d.gradcam_source_signal||'—'))}
+    </div>`;
+  }
+  return `${imgs}<div class="kv">
+    <div class="kv-k">Tier</div><div class="kv-v"><b>${d.tier}</b></div>
+    <div class="kv-k">Diagnosis</div><div class="kv-v"><b>${titleCase(d.diagnosis||'—')}</b></div>
+    <div class="kv-k">Confidence</div><div class="kv-v">${((d.confidence||0)*100).toFixed(2)}%</div>
+    <div class="kv-k">Conflict type</div><div class="kv-v">${d.conflict_type||'—'}</div>
+    <div class="kv-k">Aleatoric uncertainty</div><div class="kv-v">${((d.uncertainty_aleatoric||0)*100).toFixed(1)}%</div>
+    <div class="kv-k">Epistemic uncertainty</div><div class="kv-v">${((d.uncertainty_epistemic||0)*100).toFixed(1)}%</div>
+    <div class="kv-k">Mahalanobis (min)</div><div class="kv-v">${(d.mahalanobis_distance||0).toFixed(2)} · ${(d.quality_flags||{}).ood_distance_bucket||'—'}</div>
+    <div class="kv-k">Processing time</div><div class="kv-v">${(d.processing_time_ms||0).toFixed(0)} ms</div>
+  </div>
+  <hr><p class="note">${escapeHtml(d.output_message||'—')}</p>`;
+}
+
+// Control wiring
+$('pipe-play').addEventListener('click', ()=>{
+  if (pipeState.playing) pipePause();
+  else pipePlay();
+});
+$('pipe-replay').addEventListener('click', pipeReplay);
+$('pipe-prev').addEventListener('click', ()=> pipeStep(-1));
+$('pipe-next').addEventListener('click', ()=> pipeStep(1));
+
+// Card + station click → open detail modal
+document.addEventListener('click', (ev)=>{
+  const card = ev.target.closest('.pipe-card');
+  if (card){
+    const n = parseInt(card.dataset.station, 10);
+    openPipeDetail(n);
+    return;
+  }
+  const g = ev.target.closest('[data-station]');
+  if (g && g.tagName === 'g'){
+    const n = parseInt(g.dataset.station, 10);
+    openPipeDetail(n);
+  }
+});
+function openPipeDetail(n){
+  const c = pipeState.cardContent[n];
+  if (!c) return;
+  $('pipe-detail-title').innerHTML = c.title;
+  $('pipe-detail-sub').innerHTML = `Stage ${n} of ${PIPE_N_STAGES}`;
+  $('pipe-detail-body').innerHTML = c.detail;
+  $('pipe-detail-modal').classList.add('visible');
+  // Highlight the active card
+  document.querySelectorAll('.pipe-card').forEach(c=>c.classList.remove('active'));
+  const card = document.querySelector(`.pipe-card[data-station="${n}"]`);
+  if (card) card.classList.add('active');
+}
+$('pipe-detail-close').addEventListener('click', ()=>{
+  $('pipe-detail-modal').classList.remove('visible');
+  document.querySelectorAll('.pipe-card').forEach(c=>c.classList.remove('active'));
+});
+document.addEventListener('keydown', (ev)=>{
+  if (ev.key === 'Escape'){
+    $('pipe-detail-modal').classList.remove('visible');
+  }
+});
+
+// Helper: HTML escape
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// COLD-START LOADER — growing branch + typewriter + /warmup/status polling
+// ═══════════════════════════════════════════════════════════════════════
+let warmupPollTimer = null;
+let warmupStart = null;
+let warmupPrev = null;   // previous state snapshot for diff-logging
+
+function startWarmupPolling(){
+  // Show loader if it isn't already
+  $('cold-start-loader').classList.add('visible');
+  $('pending').style.display = 'none';
+  warmupStart = Date.now();
+  warmupPrev = null;
+  // Reset typewriter
+  const log = $('typewriter-log');
+  log.innerHTML = `<span class="log-entry"><span class="ts">${fmtTs()}</span> <span class="info">Opening the field microscope…</span></span><span class="log-caret"></span>`;
+  // Reset branch buds — but mark them all as un-loaded so we can re-detect the
+  // initial pre-warm state on the very first poll. The poller uses
+  // `warmupPrev === null` as the initial-poll signal.
+  document.querySelectorAll('.branch-station').forEach(s=>s.classList.remove('loaded'));
+  pollWarmup();
+}
+
+function stopWarmupPolling(){
+  if (warmupPollTimer){ clearTimeout(warmupPollTimer); warmupPollTimer = null; }
+  warmupStart = null;
+  warmupPrev = null;
+  $('cold-start-loader').classList.remove('visible');
+}
+
+function fmtTs(){
+  const d = new Date();
+  return `[${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}]`;
+}
+
+function appendTwLog(kind, text){
+  const log = $('typewriter-log');
+  const caret = log.querySelector('.log-caret');
+  const entry = document.createElement('span');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="ts">${fmtTs()}</span> <span class="${kind}">${escapeHtml(text)}</span>`;
+  log.insertBefore(entry, caret);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function pollWarmup(){
+  try {
+    const r = await fetch('/warmup/status');
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const s = await r.json();
+    // Round-1 fix K: stash live OOD threshold so the Mahalanobis chart
+    // reads the backend value instead of a hardcoded 34.53.
+    if (typeof s.ood_threshold === 'number') {
+      window._apinOodThreshold = s.ood_threshold;
+    }
+    // Diff-log: emit a line for each model that transitioned false→true
+    const keys = ['router_loaded','model2_loaded','efficientnet_loaded','psv_ready','dinov2_loaded'];
+    const labels = {
+      router_loaded: 'Router',
+      model2_loaded: 'Model 2',
+      efficientnet_loaded: 'EfficientNet',
+      psv_ready: 'PSV',
+      dinov2_loaded: 'DINOv2',
+    };
+    const budKeys = {
+      router_loaded: 'router',
+      model2_loaded: 'model2',
+      efficientnet_loaded: 'efficientnet',
+      psv_ready: 'psv',
+      dinov2_loaded: 'dinov2',
+    };
+    // First poll: distinguish pre-warm models (loaded BEFORE this session
+    // ever opened the page — e.g. the server was started with --preload long
+    // before the user arrived) from genuine in-session transitions. Logging
+    // pre-warm items as "loaded (0.0s)" was deceptive — the user saw the
+    // loader appear and immediately every branch reported instant load.
+    const isInitialPoll = (warmupPrev === null);
+    keys.forEach(k=>{
+      if (s[k] && (warmupPrev === null || !warmupPrev[k])) {
+        const bud = document.querySelector(`.branch-station[data-bud="${budKeys[k]}"]`);
+        if (bud) bud.classList.add('loaded');
+        if (isInitialPoll) {
+          // Pre-warm — label honestly, no fake 0.0s timer.
+          appendTwLog('prewarm', `· ${labels[k]} already warm`);
+        } else {
+          const dur = warmupStart ? ((Date.now() - warmupStart)/1000).toFixed(1) : '—';
+          appendTwLog('ok', `✓ ${labels[k]} loaded (${dur}s)`);
+        }
+      } else if (isInitialPoll && !s[k]) {
+        // Pending on first poll — record what we're waiting on.
+        appendTwLog('pending', `… ${labels[k]} warming`);
+      }
+    });
+    warmupPrev = s;
+    if (s.all_ready){
+      appendTwLog('ok', 'APIN fully warm · ready to diagnose');
+      setTimeout(()=>{
+        $('cold-start-loader').classList.remove('visible');
+      }, 1400);
+      warmupPollTimer = null;
+      return;
+    }
+    // Round-2 fix: if the 4 APIN signals + PSV are warm but the router is
+    // still unloaded after 30s of waiting, dismiss the loader anyway. The
+    // router is optional (only used for /predict/full) and may never load
+    // if its checkpoint or imports are missing. /predict/apin and /predict
+    // are usable without it — don't block the user forever.
+    if (s.apin_ready && warmupStart && (Date.now() - warmupStart) > 30000) {
+      appendTwLog('info', 'APIN ensemble warm · router still loading (use /predict/apin to skip routing)');
+      setTimeout(()=>{
+        $('cold-start-loader').classList.remove('visible');
+      }, 1400);
+      warmupPollTimer = null;
+      return;
+    }
+    warmupPollTimer = setTimeout(pollWarmup, 1500);
+  } catch(e) {
+    appendTwLog('pending', '… still warming ('+e.message+')');
+    warmupPollTimer = setTimeout(pollWarmup, 2500);
+  }
+}
+
+// Check warmup on page load; start loader if not ready
+(async function initialWarmupCheck(){
+  try {
+    const r = await fetch('/warmup/status');
+    if (!r.ok) return;
+    const s = await r.json();
+    // Stash threshold immediately — the Mahalanobis chart may render
+    // before pollWarmup ever runs (e.g. server already warm on page load).
+    if (typeof s.ood_threshold === 'number') {
+      window._apinOodThreshold = s.ood_threshold;
+    }
+    if (!s.all_ready){
+      startWarmupPolling();
+    }
+  } catch(e) {
+    // Server likely not up yet — silently ignore; next upload will surface it
+  }
+})();
+
+// Integrate warmup check into the inference flow: if user uploads and
+// not all_ready, show the cold-start loader instead of the skeleton.
+const _origRunInference = runInference;
+runInference = async function(f){
+  // Fast pre-check: if not warm, show loader first
+  try {
+    const r = await fetch('/warmup/status');
+    if (r.ok){
+      const s = await r.json();
+      // Round-2 fix: stash the threshold here too (not just in
+      // initialWarmupCheck and pollWarmup). On a fast user interaction,
+      // this fetch may complete before initialWarmupCheck does, and
+      // renderMahalanobisChart would otherwise fall back to the
+      // hardcoded 34.53 even though the backend exposes the real value.
+      if (typeof s.ood_threshold === 'number') {
+        window._apinOodThreshold = s.ood_threshold;
+      }
+      if (!s.all_ready){
+        startWarmupPolling();
+        // Still submit the inference — the server will queue it until
+        // models are loaded. The response comes back after warming.
+      }
+    }
+  } catch {}
+  return _origRunInference(f);
+};
+</script>
+</body>
+</html>

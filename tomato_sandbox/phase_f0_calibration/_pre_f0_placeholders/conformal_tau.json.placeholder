@@ -1,7 +1,0 @@
-{
-  "tau": 0.42,
-  "alpha": 0.10,
-  "n_calibration": 40,
-  "calibration_timestamp": "pre-F.0-placeholder",
-  "comment": "Placeholder tau — replace with real F.0 calibration output. tau=0.42 matches spec S20.3 /info endpoint example."
-}

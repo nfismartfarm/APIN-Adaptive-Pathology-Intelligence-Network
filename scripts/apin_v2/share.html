@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared Specimen · APIN v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#fbf9f3; --paper-deep:#e9e2d1; --paper-edge:#c7bca9;
+  --ink:#1a1612; --ink-soft:#5a5246;
+  --accent-green:#2f6f3e; --accent-ochre:#b87d1e; --accent-crimson:#b01820;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#f4efe6;color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;
+  min-height:100vh;
+  display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+  padding:48px 20px;
+}
+[hidden]{display:none !important}
+.share-sheet{
+  background:var(--paper);
+  border:1px solid var(--paper-edge);
+  border-radius:14px;
+  max-width:680px;width:100%;
+  padding:36px 40px;
+  position:relative;
+  box-shadow:0 6px 28px rgba(26,22,18,0.10);
+}
+.share-sheet::before{
+  content:'';position:absolute;top:-10px;left:50%;transform:translateX(-50%) rotate(-1.5deg);
+  width:90px;height:18px;
+  background:repeating-linear-gradient(45deg,#e8d9b8 0 6px,#e0cea3 6px 12px);
+  opacity:0.92;border-radius:1px;
+}
+.brand{
+  text-align:center;font-family:'Fraunces',serif;font-style:italic;
+  font-size:12.5px;color:var(--ink-soft);margin-bottom:8px;
+  letter-spacing:0.04em;
+}
+h1{
+  font-family:'Fraunces',serif;font-weight:500;font-size:30px;
+  letter-spacing:-0.01em;color:var(--ink);text-align:center;
+  font-variation-settings:'SOFT' 30,'WONK' 0;
+  line-height:1.2;
+}
+.sub{
+  font-family:'Fraunces',serif;font-style:italic;font-size:14px;
+  color:var(--ink-soft);text-align:center;margin-top:6px;margin-bottom:24px;
+}
+.viewer{
+  display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;
+}
+.viewer .photo{
+  aspect-ratio:1;background:#dfe7d3;border:1px solid var(--paper-edge);
+  border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-size:56px;overflow:hidden;position:relative;
+}
+.viewer .photo img{
+  width:100%;height:100%;object-fit:cover;display:block;
+}
+/* Pre-upgrade honest placeholder (shared specimens predating image storage) */
+.viewer .photo.photo-empty{
+  background:repeating-linear-gradient(45deg,#e7e1d3 0 6px,#ddd4be 6px 12px);
+  flex-direction:column;color:var(--ink-soft);
+  font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+}
+.viewer .photo.photo-empty .photo-empty-icon{font-size:36px;opacity:0.55;margin-bottom:4px;}
+.viewer .photo.photo-empty .photo-empty-text{font-size:12px;line-height:1.2;text-align:center;}
+.viewer .heatmap.photo-empty{
+  background:radial-gradient(circle at 40% 45%,#c44a2a 0%,#d97f3c 18%,#e9a85b 34%,#d0bb6a 50%,#80b070 68%,#3a6f4a 88%);
+}
+.facts{
+  border:1px dashed var(--paper-edge);background:#fdfcf7;
+  border-radius:8px;padding:16px 18px;margin-bottom:14px;
+}
+.facts h2{
+  font-family:'Inter';font-size:10.5px;font-weight:700;
+  text-transform:uppercase;letter-spacing:0.1em;color:var(--accent-green);
+  margin-bottom:8px;
+}
+.facts .row{
+  display:flex;justify-content:space-between;padding:5px 0;
+  font-size:13px;border-bottom:1px dashed rgba(199,188,169,0.45);
+}
+.facts .row:last-child{border-bottom:none}
+.facts .lbl{font-family:'Fraunces',serif;font-style:italic;color:var(--ink-soft)}
+.facts .val{font-family:'JetBrains Mono',monospace;color:var(--ink)}
+.share-note{
+  margin-top:14px;font-family:'Fraunces',serif;font-style:italic;
+  font-size:12px;color:var(--ink-soft);text-align:center;
+}
+.error-state{
+  text-align:center;padding:60px 24px;
+}
+.error-state h1{margin-bottom:8px}
+.error-state p{font-family:'Fraunces',serif;font-style:italic;color:var(--ink-soft);font-size:14px}
+.cta{
+  margin-top:18px;display:flex;justify-content:center;gap:10px;
+}
+.cta a{
+  font-family:'Inter',sans-serif;font-size:13px;
+  background:var(--accent-green);color:#fff;
+  padding:8px 18px;border-radius:6px;text-decoration:none;
+}
+.cta a:hover{background:#1f5a30}
+</style>
+</head>
+<body>
+<div class="share-sheet">
+  <div class="brand">Pathology Journal — Public View</div>
+
+  <div id="content"><p class="sub" style="text-align:center;">loading shared specimen…</p></div>
+</div>
+
+<script>
+// Extract the share token from the URL pathname client-side. Doing it
+// here (instead of having the server template-inject it into this JS
+// string) closes off a reflected-XSS surface — a crafted token containing
+// quotes/script tags can never escape the JS string literal because it
+// never reaches one. The token is also bounded to [A-Za-z0-9_-] which is
+// the alphabet that `secrets.token_urlsafe(32)` produces; if a tampered
+// URL contains anything else we treat the share as invalid.
+const TOKEN = (() => {
+  const m = window.location.pathname.match(/^\/share\/([A-Za-z0-9_-]{1,128})\/?$/);
+  return m ? m[1] : "";
+})();
+const $ = s => document.querySelector(s);
+const escapeHtml = (s) => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+function prettyClass(s){
+  return !s ? "—" : s.replace(/_/g," ").replace(/\b\w/g, c => c.toUpperCase());
+}
+function fmtDate(iso){
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-IN",{day:"2-digit",month:"long",year:"numeric"});
+  } catch(_){ return iso.slice(0,10); }
+}
+function cropIcon(crop){
+  const c = (crop || "").toLowerCase();
+  return c === "okra" ? "🌿" : c === "brassica" ? "🥬"
+       : c === "tomato" ? "🍅" : c === "chilli" ? "🌶" : "📷";
+}
+
+async function load(){
+  const mount = $("#content");
+  try {
+    const r = await fetch(`/share/${encodeURIComponent(TOKEN)}/data`);
+    if (!r.ok){
+      const j = await r.json().catch(()=>({}));
+      mount.innerHTML = `
+        <div class="error-state">
+          <h1>Link not available</h1>
+          <p>${escapeHtml(j.detail || "The share link is invalid, revoked, or expired.")}</p>
+          <div class="cta">
+            <a href="/">go to the prediction site</a>
+          </div>
+        </div>
+      `;
+      return;
+    }
+    const p = await r.json();
+    const cls = prettyClass(p.predicted_class);
+    const date = fmtDate(p.created_at);
+    const tier = (p.tier || "").replace(/_/g," ").toLowerCase() || "untiered";
+    const conf = p.confidence != null ? Number(p.confidence).toFixed(3) : "—";
+    const label = p.share && p.share.label ? p.share.label : "Shared specimen";
+    mount.innerHTML = `
+      <h1>${escapeHtml(cls)}</h1>
+      <div class="sub">${escapeHtml(label)} · ${escapeHtml(date)}</div>
+
+      <div class="viewer">
+        ${(() => {
+          // PHASE 3.5 — render the real shared specimen image / heatmap.
+          // /share/{token}/image and /heatmap are public binary routes
+          // (no auth) that 404 for tokens whose underlying prediction
+          // predates image storage.  We use the data payload's
+          // has_image / has_heatmap flags (when the server provides them)
+          // to skip the network round-trip for those rows.
+          const photo = (p.has_image !== false)
+            ? `<div class="photo"><img src="/share/${encodeURIComponent(TOKEN)}/image" alt="leaf specimen"
+                 onerror="this.parentElement.classList.add('photo-empty');
+                          this.outerHTML='<span class=&quot;photo-empty-icon&quot;>'+cropIcon(${JSON.stringify(p.crop || '')})+'</span><span class=&quot;photo-empty-text&quot;>image not captured</span>';"></div>`
+            : `<div class="photo photo-empty">
+                 <span class="photo-empty-icon">${escapeHtml(cropIcon(p.crop))}</span>
+                 <span class="photo-empty-text">image not captured</span>
+               </div>`;
+          const heat = (p.has_heatmap !== false)
+            ? `<div class="photo heatmap"><img src="/share/${encodeURIComponent(TOKEN)}/heatmap" alt="Grad-CAM heatmap"
+                 onerror="this.parentElement.classList.add('photo-empty');
+                          this.outerHTML='<span class=&quot;photo-empty-icon&quot;>⬚</span><span class=&quot;photo-empty-text&quot;>heatmap not captured</span>';"></div>`
+            : `<div class="photo heatmap photo-empty">
+                 <span class="photo-empty-icon">⬚</span>
+                 <span class="photo-empty-text">heatmap not captured</span>
+               </div>`;
+          return photo + heat;
+        })()}
+      </div>
+
+      <div class="facts">
+        <h2>Reading</h2>
+        <div class="row"><span class="lbl">crop</span><span class="val">${escapeHtml((p.crop || "—").toUpperCase())}</span></div>
+        <div class="row"><span class="lbl">tier</span><span class="val">${escapeHtml(tier)}</span></div>
+        <div class="row"><span class="lbl">confidence</span><span class="val">${escapeHtml(conf)}</span></div>
+        <div class="row"><span class="lbl">recorded</span><span class="val">${escapeHtml(date)}</span></div>
+      </div>
+
+      <div class="share-note">
+        public read-only view — Phase-3 share link · ${escapeHtml((p.share && p.share.view_count) || 0)} view${((p.share && p.share.view_count) === 1) ? "" : "s"}<br>
+        <a href="/" style="color:var(--accent-green);">visit the prediction site</a>
+      </div>
+    `;
+  } catch(e){
+    mount.innerHTML = `
+      <div class="error-state">
+        <h1>Network error</h1>
+        <p>Could not reach the server.</p>
+        <div class="cta"><a href="/">go to the prediction site</a></div>
+      </div>
+    `;
+  }
+}
+load();
+</script>
+</body>
+</html>

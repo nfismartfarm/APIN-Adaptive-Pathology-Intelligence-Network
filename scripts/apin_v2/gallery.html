@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gallery · APIN v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#fbf9f3; --paper-deep:#e9e2d1; --paper-edge:#c7bca9;
+  --ink:#1a1612; --ink-soft:#5a5246;
+  --accent-green:#2f6f3e; --accent-ochre:#b87d1e; --accent-crimson:#b01820;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#f4efe6;color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+[hidden]{display:none !important}
+.page{max-width:1240px;margin:0 auto;padding:28px 24px 60px;}
+.back-link{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:'Fraunces',serif;font-style:italic;font-size:14px;
+  color:var(--accent-green);text-decoration:none;margin-bottom:12px;
+}
+.back-link:hover{text-decoration:underline}
+h1{
+  font-family:'Fraunces',serif;font-weight:500;font-size:32px;
+  letter-spacing:-0.015em;font-variation-settings:'SOFT' 30,'WONK' 0;
+}
+.sub{
+  font-family:'Fraunces',serif;font-style:italic;font-size:15px;
+  color:var(--ink-soft);margin-top:4px;margin-bottom:22px;
+}
+.toolbar{
+  display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:20px;
+}
+.toolbar select, .toolbar button{
+  font-family:'Inter',sans-serif;font-size:13px;padding:7px 12px;
+  border:1px solid var(--paper-edge);border-radius:6px;background:#fff;
+  color:var(--ink);cursor:pointer;
+}
+.toolbar select:focus{outline:none;border-color:var(--accent-green)}
+.toolbar .toggle.active{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.toolbar .count{
+  margin-left:auto;
+  font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-soft);
+}
+.gallery-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(170px, 1fr));
+  gap:18px;
+}
+.polaroid{
+  background:#fdfcf7;
+  border:1px solid var(--paper-edge);
+  border-radius:3px;
+  padding:10px 10px 12px;
+  box-shadow:0 1px 4px rgba(26,22,18,0.10);
+  transform:rotate(var(--tilt, -1deg));
+  transition:transform .25s cubic-bezier(.16,1,.3,1), box-shadow .25s;
+  cursor:pointer;
+  position:relative;
+}
+.polaroid:nth-child(4n)  { --tilt: 1.6deg; }
+.polaroid:nth-child(4n+1){ --tilt: -1.2deg; }
+.polaroid:nth-child(4n+2){ --tilt: 0.8deg; }
+.polaroid:nth-child(4n+3){ --tilt: -0.4deg; }
+.polaroid:hover{
+  transform:rotate(0) translateY(-4px);
+  box-shadow:0 8px 16px rgba(26,22,18,0.18);
+}
+.polaroid::before{
+  content:'';position:absolute;top:-6px;right:14px;
+  width:38px;height:9px;
+  background:repeating-linear-gradient(45deg,#e8d9b8 0 4px,#e0cea3 4px 8px);
+  opacity:0.85;border-radius:1px;transform:rotate(-6deg);
+}
+.polaroid .image{
+  aspect-ratio:1;
+  background:#dfe7d3;
+  border-radius:2px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:54px;color:var(--ink);margin-bottom:8px;
+  overflow:hidden;position:relative;
+}
+.polaroid .image img{
+  width:100%;height:100%;object-fit:cover;display:block;
+}
+/* Honest pre-upgrade placeholder — paper texture, italic caption.
+   Never an emoji-as-photo. */
+.polaroid .image.photo-empty{
+  background:repeating-linear-gradient(45deg,#e7e1d3 0 6px,#ddd4be 6px 12px);
+  flex-direction:column;color:var(--ink-soft);
+  font-family:'Fraunces',serif;font-style:italic;font-size:12px;
+  text-align:center;padding:6px;
+}
+.polaroid .image.photo-empty .photo-empty-icon{ font-size:32px;opacity:0.55;margin-bottom:4px;}
+.polaroid .image.photo-empty .photo-empty-text{ font-size:11px;line-height:1.2; }
+/* Heatmap colored gradient is now ONLY for rows lacking a real heatmap */
+.polaroid .image.heatmap.photo-empty{
+  background:radial-gradient(circle at 40% 45%,#c44a2a 0%,#d97f3c 18%,#e9a85b 34%,#d0bb6a 50%,#80b070 68%,#3a6f4a 88%);
+}
+.polaroid .label{
+  font-family:'Fraunces',serif;font-style:italic;font-size:12.5px;
+  text-align:center;color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.polaroid .date{
+  font-family:'JetBrains Mono',monospace;font-size:10px;
+  text-align:center;color:var(--ink-soft);margin-top:2px;
+}
+.empty-state{
+  text-align:center;padding:60px 24px;
+  font-family:'Fraunces',serif;font-style:italic;
+  font-size:16px;color:var(--ink-soft);
+}
+.dev-banner{
+  margin:0 0 14px;padding:10px 14px;
+  border:1px dashed var(--accent-ochre);background:#fff7e8;
+  color:#7a4a0a;border-radius:6px;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:0.01em;
+}
+.load-more-row{
+  text-align:center;margin-top:26px;
+}
+.btn-load-more{
+  background:#fff;color:var(--ink);
+  border:1px solid var(--ink);
+  font-family:'Inter',sans-serif;font-size:13px;font-weight:500;
+  padding:9px 20px;border-radius:6px;cursor:pointer;
+  transition:background .15s, color .15s;
+}
+.btn-load-more:hover{background:var(--ink);color:var(--paper)}
+</style>
+</head>
+<body>
+<div class="page">
+  <a class="back-link" href="/dashboard">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+      <path d="M10 3 L 4 8 L 10 13"/>
+    </svg>
+    back to journal
+  </a>
+  <h1>Gallery</h1>
+  <p class="sub">every leaf you've pressed into the journal — in pictures</p>
+
+  <div id="dev-banner" class="dev-banner" hidden></div>
+
+  <div class="toolbar">
+    <select id="crop-filter">
+      <option value="">all crops</option>
+      <option value="okra">okra</option>
+      <option value="brassica">brassica</option>
+      <option value="tomato">tomato</option>
+      <option value="chilli">chilli</option>
+    </select>
+    <button class="toggle active" id="mode-photo" data-mode="photo">Photo</button>
+    <button class="toggle" id="mode-heatmap" data-mode="heatmap">Heatmap</button>
+    <span class="count" id="count">—</span>
+  </div>
+
+  <div class="gallery-grid" id="grid"></div>
+  <div id="empty" class="empty-state" hidden>no specimens match</div>
+  <div class="load-more-row" id="load-more-row" hidden>
+    <button class="btn-load-more" id="load-more">load more →</button>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const escapeHtml = (s) => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+function prettyClass(s){
+  return !s ? "—" : s.replace(/_/g," ").replace(/\b\w/g, c => c.toUpperCase());
+}
+function fmtDate(iso){
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
+  } catch(_){ return iso.slice(0,10); }
+}
+function cropIcon(crop){
+  const c = (crop || "").toLowerCase();
+  return c === "okra" ? "🌿" : c === "brassica" ? "🥬"
+       : c === "tomato" ? "🍅" : c === "chilli" ? "🌶" : "📷";
+}
+
+let state = { mode: "photo", crop: "", page: 1, pageSize: 24, total: 0 };
+
+async function load(append=false){
+  const q = new URLSearchParams();
+  q.set("page", state.page);
+  q.set("page_size", state.pageSize);
+  if (state.crop) q.set("crop", state.crop);
+  let payload = null;
+  try {
+    const r = await fetch("/dashboard/history/data?" + q.toString(),{credentials:"include"});
+    if (r.ok) payload = await r.json();
+  } catch(e){}
+  if (!payload){
+    $("#grid").innerHTML = "<div class='empty-state'>Could not load gallery — is the server running?</div>";
+    return;
+  }
+  // Dev banner
+  if (payload._dev_fallback){
+    $("#dev-banner").hidden = false;
+    $("#dev-banner").textContent = "Dev mode — showing data for user '" + payload._dev_fallback.username + "'.";
+  }
+
+  const rows = payload.results || [];
+  state.total = payload.total || 0;
+  $("#count").textContent = `${state.total} total · showing ${(state.page-1)*state.pageSize + rows.length}`;
+
+  const grid = $("#grid");
+  if (!append) grid.innerHTML = "";
+
+  if (!rows.length && !append){
+    $("#empty").hidden = false;
+    $("#load-more-row").hidden = true;
+    return;
+  }
+  $("#empty").hidden = true;
+
+  rows.forEach(p => {
+    const div = document.createElement("div");
+    div.className = "polaroid";
+    div.dataset.predictionId = p.id;
+    // PHASE 3.5 — render real image/heatmap or honest pre-upgrade placeholder.
+    // Endpoints are owner-gated; pre-upgrade rows (has_image:false) skip
+    // the <img> and render the dashed paper placeholder instead.
+    const isHeatmapMode = state.mode === "heatmap";
+    const hasBytes = isHeatmapMode ? (p.has_heatmap !== false) : (p.has_image !== false);
+    const endpoint = `/dashboard/predictions/${p.id}/${isHeatmapMode ? "heatmap" : "image"}`;
+    const imgClass = isHeatmapMode ? "image heatmap" : "image";
+    const tile = hasBytes
+      ? `<div class="${imgClass}">
+           <img src="${endpoint}" alt="" loading="lazy" decoding="async"
+                onerror="this.parentElement.classList.add('photo-empty');
+                         this.outerHTML='<span class=&quot;photo-empty-icon&quot;>'+(${isHeatmapMode}?'\\u2b1a':'\\ud83d\\udcf7')+'</span><span class=&quot;photo-empty-text&quot;>'+(${isHeatmapMode}?'heatmap':'image')+' not captured</span>';">
+         </div>`
+      : `<div class="${imgClass} photo-empty">
+           <span class="photo-empty-icon">${isHeatmapMode ? '⬚' : '📷'}</span>
+           <span class="photo-empty-text">${isHeatmapMode ? 'heatmap' : 'image'} not captured</span>
+         </div>`;
+    div.innerHTML = `
+      ${tile}
+      <div class="label">${escapeHtml(prettyClass(p.predicted_class))}</div>
+      <div class="date">${escapeHtml(fmtDate(p.created_at))}</div>
+    `;
+    div.addEventListener("click", () => {
+      // Open Signal Vote modal on the dashboard
+      window.location.href = `/dashboard?openPrediction=${p.id}`;
+    });
+    grid.appendChild(div);
+  });
+
+  // Load-more visibility
+  const shown = (state.page) * state.pageSize;
+  if (shown < state.total){
+    $("#load-more-row").hidden = false;
+  } else {
+    $("#load-more-row").hidden = true;
+  }
+}
+
+$("#crop-filter").addEventListener("change", () => {
+  state.crop = $("#crop-filter").value;
+  state.page = 1;
+  load(false);
+});
+document.querySelectorAll(".toggle").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".toggle").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    state.mode = b.dataset.mode;
+    state.page = 1;
+    load(false);
+  });
+});
+$("#load-more").addEventListener("click", () => {
+  state.page += 1;
+  load(true);
+});
+
+load(false);
+</script>
+</body>
+</html>

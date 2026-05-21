@@ -1,8 +1,0 @@
-{
-  "tau": 0.0,
-  "n_chilli": 0,
-  "n_tomato": 203,
-  "youden_tau_informational": 0.4,
-  "method": "percentile_95_tomato_v1",
-  "computed_at": "2026-05-04T09:38:13.848709+00:00"
-}

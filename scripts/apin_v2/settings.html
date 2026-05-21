@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings · APIN v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#fbf9f3; --paper-deep:#e9e2d1; --paper-edge:#c7bca9;
+  --ink:#1a1612; --ink-soft:#5a5246;
+  --accent-green:#2f6f3e; --accent-ochre:#b87d1e; --accent-crimson:#b01820;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#f4efe6;color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+[hidden]{display:none !important}
+.page{max-width:780px;margin:0 auto;padding:28px 24px 60px;}
+.back-link{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:'Fraunces',serif;font-style:italic;font-size:14px;
+  color:var(--accent-green);text-decoration:none;margin-bottom:12px;
+}
+.back-link:hover{text-decoration:underline}
+h1{
+  font-family:'Fraunces',serif;font-weight:500;font-size:32px;
+  letter-spacing:-0.015em;font-variation-settings:'SOFT' 30,'WONK' 0;
+}
+.sub{
+  font-family:'Fraunces',serif;font-style:italic;font-size:15px;
+  color:var(--ink-soft);margin-top:4px;margin-bottom:24px;
+}
+.section{
+  background:var(--paper);
+  border:1px solid var(--paper-edge);
+  border-radius:10px;
+  padding:22px 26px;
+  margin-bottom:18px;
+  position:relative;
+  box-shadow:0 1px 2px rgba(26,22,18,0.05);
+}
+.section::before{
+  content:'';position:absolute;top:-8px;right:36px;
+  width:50px;height:16px;
+  background:repeating-linear-gradient(45deg,#e8d9b8 0 5px,#e0cea3 5px 10px);
+  opacity:0.85;border-radius:1px;transform:rotate(-2deg);
+}
+.section h2{
+  font-family:'Fraunces',serif;font-weight:500;font-size:18px;
+  letter-spacing:-0.005em;color:var(--ink);
+  font-variation-settings:'SOFT' 30,'WONK' 0;
+  margin-bottom:10px;
+}
+.section .sub-h{
+  font-family:'Fraunces',serif;font-style:italic;font-size:12.5px;
+  color:var(--ink-soft);margin-bottom:14px;
+}
+.theme-row{
+  display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;
+}
+.theme-card{
+  width:140px;
+  padding:14px;
+  border:1.5px solid var(--paper-edge);
+  border-radius:8px;
+  cursor:pointer;
+  text-align:center;
+  transition:border-color .15s, transform .15s;
+}
+.theme-card.cream    { background:#fbf9f3; }
+.theme-card.parchment{ background:#f1e8d1; }
+.theme-card.ledger   { background:#e8e4d0; }
+.theme-card.notebook { background:#fefcf3; }
+.theme-card .swatch{
+  width:48px;height:48px;border-radius:50%;margin:0 auto 8px;
+  background:#9bbf9d;border:1px solid var(--paper-edge);
+}
+.theme-card.parchment .swatch{background:#c3b072}
+.theme-card.ledger .swatch{background:#7a8f7a}
+.theme-card.notebook .swatch{background:#cfdcc0}
+.theme-card .name{
+  font-family:'Fraunces',serif;font-size:13px;font-weight:500;
+  color:var(--ink);
+}
+.theme-card .meta{
+  font-family:'JetBrains Mono',monospace;font-size:10px;
+  color:var(--ink-soft);margin-top:2px;
+}
+.theme-card.active{
+  border-color:var(--ink);border-width:2px;
+  transform:translateY(-2px);
+}
+.dev-banner{
+  margin:0 0 14px;padding:10px 14px;
+  border:1px dashed var(--accent-ochre);background:#fff7e8;
+  color:#7a4a0a;border-radius:6px;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:0.01em;
+}
+.info-row{
+  display:flex;justify-content:space-between;padding:6px 0;
+  border-bottom:1px dashed var(--paper-edge);
+}
+.info-row:last-child{border-bottom:none}
+.info-row .lbl{font-family:'Fraunces',serif;font-style:italic;color:var(--ink-soft);font-size:13px}
+.info-row .val{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--ink)}
+.note{
+  font-family:'Fraunces',serif;font-style:italic;font-size:12px;
+  color:var(--ink-soft);margin-top:10px;
+}
+.btn{
+  font-family:'Inter',sans-serif;font-size:13px;font-weight:500;
+  padding:7px 14px;border-radius:6px;cursor:pointer;
+  border:1px solid var(--ink);background:#fff;color:var(--ink);
+  transition:background .15s, color .15s;text-decoration:none;display:inline-block;
+}
+.btn:hover{background:var(--ink);color:var(--paper)}
+.btn.danger{color:var(--accent-crimson);border-color:var(--accent-crimson)}
+.btn.danger:hover{background:var(--accent-crimson);color:#fff}
+.share-mini{
+  display:grid;grid-template-columns:1fr 70px 70px;gap:10px;align-items:center;
+  padding:8px 10px;background:#fdfcf7;
+  border:1px solid var(--paper-edge);border-radius:5px;margin-bottom:6px;
+  font-size:12px;
+}
+.share-mini .pid{font-family:'JetBrains Mono',monospace;color:var(--ink-soft)}
+</style>
+</head>
+<body>
+<div class="page">
+  <a class="back-link" href="/dashboard">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+      <path d="M10 3 L 4 8 L 10 13"/>
+    </svg>
+    back to journal
+  </a>
+  <h1>Settings</h1>
+  <p class="sub">small choices about how your journal looks and behaves</p>
+
+  <div id="dev-banner" class="dev-banner" hidden></div>
+
+  <!-- ── Theme picker ─────────────────────────────────────────────── -->
+  <section class="section">
+    <h2>Paper theme</h2>
+    <div class="sub-h">choose the cream that suits today's light</div>
+    <div class="theme-row">
+      <button class="theme-card cream"     data-theme="cream">
+        <div class="swatch"></div>
+        <div class="name">Cream</div>
+        <div class="meta">default</div>
+      </button>
+      <button class="theme-card parchment" data-theme="parchment">
+        <div class="swatch"></div>
+        <div class="name">Parchment</div>
+        <div class="meta">warm yellow</div>
+      </button>
+      <button class="theme-card ledger"    data-theme="ledger">
+        <div class="swatch"></div>
+        <div class="name">Ledger</div>
+        <div class="meta">muted sage</div>
+      </button>
+      <button class="theme-card notebook"  data-theme="notebook">
+        <div class="swatch"></div>
+        <div class="name">Notebook</div>
+        <div class="meta">bright cream</div>
+      </button>
+    </div>
+    <p class="note">Theme is saved to localStorage and applied across all dashboard pages.</p>
+  </section>
+
+  <!-- ── Account info ─────────────────────────────────────────────── -->
+  <section class="section">
+    <h2>Account</h2>
+    <div class="sub-h">your collector record</div>
+    <div class="info-row"><span class="lbl">display name</span><span class="val" id="acct-name">—</span></div>
+    <div class="info-row"><span class="lbl">username</span><span class="val" id="acct-user">—</span></div>
+    <div class="info-row"><span class="lbl">accession</span><span class="val" id="acct-id">—</span></div>
+    <div class="info-row"><span class="lbl">member since</span><span class="val" id="acct-since">—</span></div>
+    <div class="info-row"><span class="lbl">specimens recorded</span><span class="val" id="acct-count">—</span></div>
+    <p class="note">Profile editing arrives in a later phase. For now this is read-only.</p>
+  </section>
+
+  <!-- ── Share-link management mini ──────────────────────────────── -->
+  <section class="section">
+    <h2>Share links</h2>
+    <div class="sub-h">manage public URLs you've generated — revoke at any time</div>
+    <div id="shares-mini-mount"></div>
+    <div id="shares-mini-empty" class="note" hidden>You haven't created any share links yet.</div>
+    <p class="note" style="margin-top:14px;">
+      Create new share links from <a href="/dashboard/reports" style="color:var(--accent-green)">Reports &amp; Exports</a>.
+    </p>
+  </section>
+
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const escapeHtml = (s) => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+
+// ── Paper theme picker ─────────────────────────────────────────────
+const THEMES = {
+  cream:     { body:"#f4efe6", paper:"#fbf9f3", paperDeep:"#e9e2d1" },
+  parchment: { body:"#ece0c1", paper:"#f5ecd1", paperDeep:"#e0d2a8" },
+  ledger:    { body:"#e2e0d3", paper:"#eee8d0", paperDeep:"#d2cdaa" },
+  notebook:  { body:"#f7f1de", paper:"#fefcf3", paperDeep:"#ecdfb6" },
+};
+function applyTheme(name){
+  // Code-review fix #6: harden `name` BEFORE any DOM use. Without this,
+  // a tampered localStorage value like 'cream"] *[style="' would throw
+  // a SyntaxError inside the querySelector below — caught by nothing,
+  // so the whole applyTheme run aborts and the active-marker breaks.
+  if (!THEMES[name]) name = "cream";
+  const t = THEMES[name];
+  document.body.style.background = t.body;
+  // Mark active
+  document.querySelectorAll(".theme-card").forEach(c => c.classList.remove("active"));
+  const el = document.querySelector(`.theme-card[data-theme="${name}"]`);
+  if (el) el.classList.add("active");
+  // Persist
+  try { localStorage.setItem("apin_theme", name); } catch(_){}
+}
+document.querySelectorAll(".theme-card").forEach(c => {
+  c.addEventListener("click", () => applyTheme(c.dataset.theme));
+});
+applyTheme((function(){ try { return localStorage.getItem("apin_theme") || "cream"; } catch(_){ return "cream"; } })());
+
+// ── Account info ───────────────────────────────────────────────────
+async function loadAccount(){
+  try {
+    const r = await fetch("/dashboard/data",{credentials:"include"});
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j._dev_fallback){
+      $("#dev-banner").hidden = false;
+      $("#dev-banner").textContent = "Dev mode — showing data for user '" + j._dev_fallback.username + "'.";
+    }
+    const u = j.user || {};
+    $("#acct-name").textContent  = u.display_name || "—";
+    $("#acct-user").textContent  = "@" + (u.username || "—");
+    $("#acct-id").textContent    = "№ " + String(u.id ?? "----").padStart(4,"0");
+    $("#acct-since").textContent = (u.created_at || "—").slice(0,10);
+    $("#acct-count").textContent = (j.hero && j.hero.total_predictions) || 0;
+  } catch(e){}
+}
+loadAccount();
+
+// ── Share-link mini-list ───────────────────────────────────────────
+async function loadShares(){
+  try {
+    const r = await fetch("/dashboard/shares",{credentials:"include"});
+    const j = await r.json();
+    const items = j.results || [];
+    const mount = $("#shares-mini-mount");
+    mount.innerHTML = "";
+    if (!items.length){
+      $("#shares-mini-empty").hidden = false;
+      return;
+    }
+    $("#shares-mini-empty").hidden = true;
+    items.forEach(s => {
+      const row = document.createElement("div");
+      row.className = "share-mini";
+      const label = s.label || "(no label)";
+      row.innerHTML = `
+        <div>
+          <strong style="font-family:'Fraunces';">${escapeHtml(label)}</strong>
+          <span class="pid"> · #${String(s.prediction_id).padStart(4,"0")} · ${escapeHtml((s.created_at||"").slice(0,10))} · views ${s.view_count||0}</span>
+        </div>
+        <div class="pid">${s.revoked_at ? "revoked" : "active"}</div>
+        <div>${s.revoked_at ? "" : `<button class="btn danger" data-revoke="${s.id}">Revoke</button>`}</div>
+      `;
+      mount.appendChild(row);
+    });
+    mount.querySelectorAll("[data-revoke]").forEach(b => {
+      b.addEventListener("click", async () => {
+        if (!confirm("Revoke this share link?")) return;
+        await fetch(`/dashboard/shares/${b.dataset.revoke}`,{method:"DELETE",credentials:"include"});
+        loadShares();
+      });
+    });
+  } catch(e){}
+}
+loadShares();
+</script>
+</body>
+</html>

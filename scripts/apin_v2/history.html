@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field History · APIN v2</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* Phase-1 Field History page. Shares visual language with dashboard.html
+   but keeps its own scope so a future restyle of either is independent. */
+
+:root{
+  --paper:        #fbf9f3;
+  --paper-light:  #fdfcf7;
+  --paper-edge:   #c7bca9;
+  --ink:          #1a1612;
+  --ink-soft:     #5a5246;
+  --accent-green: #2f6f3e;
+  --accent-ochre: #b87d1e;
+  --accent-crimson:#b01820;
+  --accent-slate: #4a5a72;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:#f4efe6;
+  color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;
+  font-size:14px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+[hidden]{display:none !important}
+
+.page{
+  max-width:1180px;
+  margin:0 auto;
+  padding:28px 24px 60px;
+}
+
+/* ── Top bar with back-link + title + counts ───────────────────────── */
+.topbar{
+  display:flex; align-items:flex-start; justify-content:space-between;
+  gap:18px;
+  margin-bottom:18px;
+}
+.back-link{
+  display:inline-flex; align-items:center; gap:8px;
+  font-family:'Fraunces',serif;
+  font-style:italic;
+  font-size:14px;
+  color:var(--accent-green);
+  text-decoration:none;
+}
+.back-link:hover{ text-decoration:underline; }
+.back-link svg{ width:16px; height:16px; }
+.title-block h1{
+  font-family:'Fraunces',serif;
+  font-weight:500;
+  font-size:32px;
+  letter-spacing:-0.015em;
+  font-variation-settings:'SOFT' 30,'WONK' 0;
+  color:var(--ink);
+  line-height:1.1;
+}
+.title-block .subtitle{
+  font-family:'Fraunces',serif;
+  font-style:italic;
+  font-size:15px;
+  color:var(--ink-soft);
+  margin-top:4px;
+}
+.counts-block{
+  text-align:right;
+  font-family:'JetBrains Mono',monospace;
+  font-size:13px;
+  color:var(--ink-soft);
+  letter-spacing:0.02em;
+}
+.counts-block strong{
+  color:var(--ink);
+  font-weight:600;
+}
+
+/* ── Dev-mode amber banner — only shown when API tagged the response ── */
+.dev-banner{
+  margin:0 0 14px;
+  padding:10px 14px;
+  border:1px dashed var(--accent-ochre);
+  background:#fff7e8;
+  color:#7a4a0a;
+  border-radius:6px;
+  font-family:'JetBrains Mono',monospace;
+  font-size:11.5px;
+  letter-spacing:0.01em;
+}
+
+/* ── Filter toolbar ────────────────────────────────────────────────── */
+.toolbar{
+  background:var(--paper);
+  border:1px solid var(--paper-edge);
+  border-radius:10px;
+  padding:14px 18px;
+  margin-bottom:18px;
+  display:grid;
+  grid-template-columns:1.4fr 1fr 1fr 1fr 1fr 1fr auto;
+  gap:10px;
+  align-items:end;
+  box-shadow:0 1px 2px rgba(26,22,18,0.05);
+}
+.toolbar label{
+  display:flex; flex-direction:column; gap:4px;
+  font-family:'Inter',sans-serif;
+  font-size:10.5px;
+  font-weight:600;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  color:var(--ink-soft);
+}
+.toolbar input,
+.toolbar select{
+  font-family:'Inter',sans-serif;
+  font-size:13px;
+  color:var(--ink);
+  background:#fff;
+  border:1px solid var(--paper-edge);
+  border-radius:6px;
+  padding:7px 10px;
+  outline:none;
+  transition:border-color .15s;
+}
+.toolbar input:focus,
+.toolbar select:focus{
+  border-color:var(--accent-green);
+}
+.toolbar .btn-row{
+  display:flex; gap:6px;
+  align-self:end;
+}
+.btn{
+  font-family:'Inter',sans-serif;
+  font-size:12.5px;
+  font-weight:500;
+  padding:8px 14px;
+  border-radius:6px;
+  border:1px solid var(--ink);
+  background:#fff;
+  color:var(--ink);
+  cursor:pointer;
+  text-decoration:none;
+  white-space:nowrap;
+  transition:background .15s, color .15s;
+}
+.btn:hover{ background:var(--ink); color:var(--paper); }
+.btn.primary{ background:var(--accent-green); color:#fff; border-color:var(--accent-green); }
+.btn.primary:hover{ background:#1f5a30; border-color:#1f5a30; }
+.btn.ghost{ border-color:var(--paper-edge); color:var(--ink-soft); }
+.btn.ghost:hover{ background:var(--paper-edge); color:var(--ink); }
+
+.export-menu{
+  position:relative;
+  display:inline-block;
+}
+.export-menu .dropdown{
+  position:absolute; right:0; top:100%;
+  margin-top:6px;
+  background:var(--paper);
+  border:1px solid var(--paper-edge);
+  border-radius:6px;
+  box-shadow:0 4px 14px rgba(26,22,18,0.12);
+  min-width:180px;
+  padding:6px 0;
+  display:none;
+  z-index:50;
+}
+.export-menu.open .dropdown{ display:block; }
+.export-menu .dropdown a{
+  display:block;
+  padding:8px 14px;
+  font-size:13px;
+  color:var(--ink);
+  text-decoration:none;
+}
+.export-menu .dropdown a:hover{ background:var(--paper-edge); }
+
+/* ── Filter chips (shows what filters are currently active) ──────── */
+.active-filters{
+  display:flex; flex-wrap:wrap; gap:8px;
+  margin-bottom:14px;
+}
+.chip{
+  font-family:'Inter',sans-serif;
+  font-size:11.5px;
+  background:var(--paper);
+  border:1px solid var(--paper-edge);
+  border-radius:14px;
+  padding:4px 10px 4px 12px;
+  color:var(--ink);
+  display:inline-flex; align-items:center; gap:6px;
+}
+.chip .close{
+  cursor:pointer;
+  font-weight:600;
+  color:var(--ink-soft);
+  font-size:12px;
+}
+.chip .close:hover{ color:var(--accent-crimson); }
+.chip-clear{
+  font-family:'Fraunces',serif;
+  font-style:italic;
+  font-size:12px;
+  color:var(--accent-green);
+  text-decoration:underline;
+  cursor:pointer;
+  background:none;
+  border:none;
+  padding:4px 6px;
+}
+
+/* ── Result list — ledger view ─────────────────────────────────────── */
+.results{
+  background:var(--paper);
+  border:1px solid var(--paper-edge);
+  border-radius:10px;
+  padding:12px 0;
+  box-shadow:0 1px 2px rgba(26,22,18,0.05);
+}
+.row{
+  display:grid;
+  grid-template-columns:60px 1fr 130px 130px 90px 50px;
+  gap:12px;
+  align-items:center;
+  padding:12px 18px;
+  border-bottom:1px dashed var(--paper-edge);
+  position:relative;
+  transition:background .12s;
+}
+.row:last-child{ border-bottom:none; }
+.row:hover{ background:#fdfcf7; }
+.row .thumb{
+  width:42px; height:42px;
+  border-radius:6px;
+  background:#e8d9b8;
+  display:flex; align-items:center; justify-content:center;
+  font-size:18px;
+  overflow:hidden;
+  flex-shrink:0;
+}
+.row .thumb .row-thumb-img{
+  width:100%; height:100%; object-fit:cover; display:block;
+}
+.row .what{
+  display:flex; flex-direction:column; gap:2px;
+}
+.row .what .class{
+  font-family:'Fraunces',serif;
+  font-size:15px;
+  font-weight:500;
+  color:var(--ink);
+  font-variation-settings:'SOFT' 30,'WONK' 0;
+}
+.row .what .meta{
+  font-family:'Inter',sans-serif;
+  font-size:11px;
+  color:var(--ink-soft);
+}
+.row .when{
+  font-family:'JetBrains Mono',monospace;
+  font-size:11.5px;
+  color:var(--ink-soft);
+  letter-spacing:0.01em;
+}
+.row .tier{
+  font-family:'Inter',sans-serif;
+  font-size:10.5px;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:0.06em;
+  padding:3px 8px;
+  border-radius:4px;
+  text-align:center;
+  white-space:nowrap;
+}
+.tier-FIELD{ background:#dff0e0; color:#2f6f3e; }
+.tier-LAB  { background:#fff3d8; color:#a06a14; }
+.tier-UNC  { background:#eee5d4; color:#5a5246; }
+.tier-OOD  { background:#f4d8d6; color:#9a1812; }
+.row .conf{
+  font-family:'JetBrains Mono',monospace;
+  font-size:13.5px;
+  font-weight:600;
+  color:var(--ink);
+}
+.row .id{
+  font-family:'JetBrains Mono',monospace;
+  font-size:10.5px;
+  color:var(--ink-soft);
+  text-align:right;
+}
+/* Every 5th row gets a washi-tape corner */
+.row:nth-child(5n)::after{
+  content:'';
+  position:absolute;
+  top:0; right:18px;
+  width:32px; height:6px;
+  background:repeating-linear-gradient(45deg,#e8d9b8 0 5px,#e0cea3 5px 10px);
+  opacity:0.7;
+}
+
+/* ── Empty / loading states ──────────────────────────────────────── */
+.empty{
+  padding:40px;
+  text-align:center;
+  font-family:'Fraunces',serif;
+  font-style:italic;
+  font-size:15px;
+  color:var(--ink-soft);
+}
+.loading{
+  padding:40px;
+  text-align:center;
+  font-family:'Fraunces',serif;
+  font-style:italic;
+  font-size:14px;
+  color:var(--ink-soft);
+}
+
+/* ── Pagination ──────────────────────────────────────────────────── */
+.pagination{
+  display:flex; justify-content:center; align-items:center; gap:8px;
+  margin-top:18px;
+  font-family:'JetBrains Mono',monospace;
+  font-size:13px;
+  color:var(--ink-soft);
+}
+.pagination button{
+  background:#fff;
+  border:1px solid var(--paper-edge);
+  border-radius:6px;
+  width:34px; height:34px;
+  cursor:pointer;
+  font-family:'JetBrains Mono',monospace;
+  font-size:12.5px;
+  color:var(--ink);
+  transition:background .15s, color .15s, border-color .15s;
+}
+.pagination button:hover:not(:disabled){
+  background:var(--ink); color:var(--paper); border-color:var(--ink);
+}
+.pagination button:disabled{ opacity:0.4; cursor:not-allowed; }
+.pagination .page-indicator{
+  padding:0 10px;
+  font-style:normal;
+  font-family:'Fraunces',serif;
+}
+
+@media (max-width:900px){
+  .toolbar{ grid-template-columns: 1fr 1fr; }
+  .toolbar .btn-row{ grid-column: 1 / -1; justify-content:flex-end; }
+  .row{ grid-template-columns: 50px 1fr 90px; gap:8px; }
+  .row .when, .row .id{ display:none; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="topbar">
+    <div>
+      <a class="back-link" href="/dashboard">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <path d="M10 3 L 4 8 L 10 13"/>
+        </svg>
+        back to journal
+      </a>
+      <div class="title-block" style="margin-top:6px;">
+        <h1>Field History</h1>
+        <div class="subtitle">every leaf you've ever logged</div>
+      </div>
+    </div>
+    <div class="counts-block">
+      <div><strong id="cnt-filtered">—</strong> matching</div>
+      <div>of <strong id="cnt-total">—</strong> total</div>
+      <div style="margin-top:4px; font-size:11px;">page <strong id="cnt-page">1</strong> of <strong id="cnt-pages">1</strong></div>
+    </div>
+  </div>
+
+  <div id="dev-banner" class="dev-banner" hidden></div>
+
+  <!-- ── Filter toolbar ──────────────────────────────────────────────── -->
+  <form class="toolbar" id="filter-form" autocomplete="off">
+    <label>Search
+      <input type="text" name="q" id="f-q" placeholder="e.g. early blight" maxlength="60">
+    </label>
+    <label>Crop
+      <select name="crop" id="f-crop">
+        <option value="">all crops</option>
+        <option value="okra">okra</option>
+        <option value="brassica">brassica</option>
+        <option value="tomato">tomato</option>
+        <option value="chilli">chilli</option>
+      </select>
+    </label>
+    <label>Disease
+      <select name="disease" id="f-disease">
+        <option value="">all diseases</option>
+      </select>
+    </label>
+    <label>Tier
+      <select name="tier" id="f-tier">
+        <option value="">all tiers</option>
+        <option value="FIELD_GRADE">field grade</option>
+        <option value="LAB_GRADE">lab grade</option>
+        <option value="UNCERTAIN">uncertain</option>
+        <option value="OOD">out-of-distribution</option>
+      </select>
+    </label>
+    <label>From
+      <input type="date" name="from" id="f-from">
+    </label>
+    <label>To
+      <input type="date" name="to" id="f-to">
+    </label>
+    <div class="btn-row">
+      <select name="sort" id="f-sort" style="font-family:'Inter',sans-serif; font-size:12.5px; padding:8px 10px; border-radius:6px; border:1px solid var(--paper-edge);">
+        <option value="newest">newest first</option>
+        <option value="oldest">oldest first</option>
+        <option value="highest">highest confidence</option>
+        <option value="lowest">lowest confidence</option>
+      </select>
+      <button type="submit" class="btn primary">Apply</button>
+      <button type="button" class="btn ghost" id="reset-btn">Reset</button>
+      <div class="export-menu" id="export-menu">
+        <button type="button" class="btn" id="export-toggle">⤓ Export ▾</button>
+        <div class="dropdown">
+          <a id="export-csv"  href="/dashboard/history/export.csv">Download CSV</a>
+          <a id="export-json" href="/dashboard/history/export.json">Download JSON</a>
+        </div>
+      </div>
+    </div>
+  </form>
+
+  <!-- ── Active-filter chips ─────────────────────────────────────────── -->
+  <div class="active-filters" id="active-filters" hidden></div>
+
+  <!-- ── Results ────────────────────────────────────────────────────── -->
+  <div class="results">
+    <div class="loading" id="results-loading">Loading the journal…</div>
+    <div class="empty"   id="results-empty"   hidden>no predictions match these filters</div>
+    <div id="results-list"></div>
+  </div>
+
+  <!-- ── Pagination ─────────────────────────────────────────────────── -->
+  <div class="pagination" id="pagination" hidden>
+    <button id="pg-first" title="first page">⏮</button>
+    <button id="pg-prev"  title="previous page">‹</button>
+    <span class="page-indicator">page <span id="pg-current">1</span> of <span id="pg-total">1</span></span>
+    <button id="pg-next"  title="next page">›</button>
+    <button id="pg-last"  title="last page">⏭</button>
+  </div>
+
+</div>
+
+<script>
+const $ = sel => document.querySelector(sel);
+
+// ── State (mirrored to URL query params) ─────────────────────────────
+const state = {
+  q: "", crop: "", disease: "", tier: "",
+  from: "", to: "", sort: "newest",
+  page: 1, page_size: 25,
+};
+
+function parseQS(){
+  const u = new URLSearchParams(window.location.search);
+  for (const k of Object.keys(state)){
+    const v = u.get(k);
+    if (v != null) state[k] = isNaN(Number(v)) || k.length > 2 ? v : Number(v);
+  }
+  // Coerce numeric fields explicitly
+  state.page      = Math.max(1, parseInt(u.get("page") || "1", 10));
+  state.page_size = Math.max(1, Math.min(100, parseInt(u.get("page_size") || "25", 10)));
+}
+function syncQS(){
+  const u = new URLSearchParams();
+  for (const [k, v] of Object.entries(state)){
+    if (v === "" || v == null) continue;
+    if (k === "page" && v === 1) continue;
+    if (k === "page_size" && v === 25) continue;
+    if (k === "sort" && v === "newest") continue;
+    u.set(k, String(v));
+  }
+  const qs = u.toString();
+  const target = window.location.pathname + (qs ? "?" + qs : "");
+  history.replaceState(null, "", target);
+
+  // Update export links too so they include the same filters
+  $("#export-csv").href  = "/dashboard/history/export.csv"  + (qs ? "?" + qs : "");
+  $("#export-json").href = "/dashboard/history/export.json" + (qs ? "?" + qs : "");
+}
+function applyStateToForm(){
+  $("#f-q").value       = state.q;
+  $("#f-crop").value    = state.crop;
+  $("#f-disease").value = state.disease;
+  $("#f-tier").value    = state.tier;
+  $("#f-from").value    = state.from;
+  $("#f-to").value      = state.to;
+  $("#f-sort").value    = state.sort;
+}
+
+// ── Render helpers ──────────────────────────────────────────────────
+function tierLabel(t){
+  if (!t) return "—";
+  const map = {
+    "FIELD_GRADE": ["FIELD", "tier-FIELD"],
+    "LAB_GRADE":   ["LAB",   "tier-LAB"  ],
+    "UNCERTAIN":   ["UNC",   "tier-UNC"  ],
+    "OOD":         ["OOD",   "tier-OOD"  ],
+  };
+  const [label, cls] = map[(t||"").toUpperCase()] || ["—", "tier-UNC"];
+  return `<span class="tier ${cls}">${label}</span>`;
+}
+function fmtDate(iso){
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    const mon = d.toLocaleString("en-IN", {month:"short"});
+    return `${String(d.getDate()).padStart(2,"0")} ${mon} · ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  } catch(_) { return iso; }
+}
+function prettyClass(s){
+  if (!s) return "—";
+  return s.replace(/_/g, " ").replace(/\b\w/g, m => m.toUpperCase());
+}
+function escapeHtml(s){
+  return String(s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+// ── Fetch + render ──────────────────────────────────────────────────
+async function load(){
+  $("#results-loading").hidden = false;
+  $("#results-empty").hidden = true;
+  $("#results-list").innerHTML = "";
+  $("#pagination").hidden = true;
+
+  const qs = new URLSearchParams();
+  for (const [k,v] of Object.entries(state)){
+    if (v === "" || v == null) continue;
+    qs.set(k, String(v));
+  }
+  let res;
+  try {
+    res = await fetch("/dashboard/history/data?" + qs.toString(), {credentials:"include"});
+  } catch(e) {
+    $("#results-loading").textContent = "Network error — is the server running?";
+    return;
+  }
+  if (!res.ok){
+    $("#results-loading").textContent = "Couldn't load history (HTTP " + res.status + ").";
+    return;
+  }
+  const payload = await res.json();
+
+  // Dev banner
+  if (payload._dev_fallback){
+    const b = $("#dev-banner");
+    b.hidden = false;
+    b.textContent =
+      "Dev mode — showing data for user '" + payload._dev_fallback.username +
+      "'. Auth disabled on /dashboard/history/data.";
+  }
+
+  // Counts header
+  $("#cnt-filtered").textContent = payload.total.toLocaleString();
+  $("#cnt-total").textContent    = payload.total_unfiltered.toLocaleString();
+  $("#cnt-page").textContent     = payload.page;
+  $("#cnt-pages").textContent    = payload.n_pages;
+
+  // Disease dropdown — populate from available_filters on first load
+  const dx = $("#f-disease");
+  if (dx.options.length <= 1){
+    const cur = state.disease;
+    payload.available_filters.diseases.forEach(d => {
+      const o = document.createElement("option");
+      o.value = d;
+      o.textContent = prettyClass(d);
+      dx.appendChild(o);
+    });
+    dx.value = cur; // restore previously-selected value if any
+  }
+
+  // Results
+  $("#results-loading").hidden = true;
+  const list = $("#results-list");
+  list.innerHTML = "";
+  if (!payload.results.length){
+    $("#results-empty").hidden = false;
+  } else {
+    payload.results.forEach(r => {
+      const row = document.createElement("div");
+      row.className = "row";
+      // PHASE 3.5 — real thumbnail from the stored image bytes.  Rows
+      // predating the migration (has_image=false) show the camera-icon
+      // placeholder to make the "not captured" state visible at a glance.
+      const thumb = (r.has_image !== false)
+        ? `<img class="row-thumb-img" src="/dashboard/predictions/${r.id}/image"
+                alt="" loading="lazy" decoding="async"
+                onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'📷'}));">`
+        : '📷';
+      row.innerHTML = `
+        <div class="thumb" title="${escapeHtml(r.crop||'')}">${thumb}</div>
+        <div class="what">
+          <span class="class">${escapeHtml(prettyClass(r.predicted_class))}</span>
+          <span class="meta">${escapeHtml((r.crop||'—'))} · id ${r.id}</span>
+        </div>
+        <div class="when">${escapeHtml(fmtDate(r.created_at))}</div>
+        <div>${tierLabel(r.tier)}</div>
+        <div class="conf">${r.confidence != null ? Number(r.confidence).toFixed(3) : '—'}</div>
+        <div class="id">#${String(r.id).padStart(4,'0')}</div>
+      `;
+      list.appendChild(row);
+    });
+  }
+
+  // Pagination
+  if (payload.n_pages > 1){
+    $("#pagination").hidden = false;
+    $("#pg-current").textContent = payload.page;
+    $("#pg-total").textContent   = payload.n_pages;
+    $("#pg-first").disabled = (payload.page <= 1);
+    $("#pg-prev").disabled  = (payload.page <= 1);
+    $("#pg-next").disabled  = (payload.page >= payload.n_pages);
+    $("#pg-last").disabled  = (payload.page >= payload.n_pages);
+  }
+
+  // Active-filter chips
+  renderActiveFilterChips(payload.filters_applied);
+}
+
+function renderActiveFilterChips(f){
+  const wrap = $("#active-filters");
+  wrap.innerHTML = "";
+  const chips = [];
+  if (f.search)   chips.push(["search: " + f.search, "q"]);
+  if (f.crop)     chips.push(["crop: " + f.crop, "crop"]);
+  if (f.disease)  chips.push(["disease: " + prettyClass(f.disease), "disease"]);
+  if (f.tier)     chips.push(["tier: " + f.tier.toLowerCase().replace("_"," "), "tier"]);
+  if (f.date_from)chips.push(["from: " + f.date_from, "from"]);
+  if (f.date_to)  chips.push(["to: " + f.date_to,     "to"]);
+  if (!chips.length){ wrap.hidden = true; return; }
+  wrap.hidden = false;
+  chips.forEach(([label, key]) => {
+    const c = document.createElement("span");
+    c.className = "chip";
+    c.innerHTML = `${escapeHtml(label)} <span class="close" data-key="${key}" title="remove filter">×</span>`;
+    wrap.appendChild(c);
+  });
+  const clear = document.createElement("button");
+  clear.className = "chip-clear";
+  clear.textContent = "clear all filters";
+  clear.onclick = () => resetAll();
+  wrap.appendChild(clear);
+}
+
+// ── Event wiring ────────────────────────────────────────────────────
+$("#filter-form").addEventListener("submit", e => {
+  e.preventDefault();
+  state.q       = $("#f-q").value.trim();
+  state.crop    = $("#f-crop").value;
+  state.disease = $("#f-disease").value;
+  state.tier    = $("#f-tier").value;
+  state.from    = $("#f-from").value;
+  state.to      = $("#f-to").value;
+  state.sort    = $("#f-sort").value || "newest";
+  state.page    = 1;
+  syncQS();
+  load();
+});
+
+function resetAll(){
+  state.q = ""; state.crop = ""; state.disease = "";
+  state.tier = ""; state.from = ""; state.to = "";
+  state.sort = "newest"; state.page = 1;
+  applyStateToForm();
+  syncQS();
+  load();
+}
+$("#reset-btn").addEventListener("click", resetAll);
+
+document.addEventListener("click", e => {
+  // Remove single chip
+  const x = e.target.closest(".close[data-key]");
+  if (x){
+    const k = x.dataset.key;
+    if (k === "q") state.q = "";
+    else if (k === "from") state.from = "";
+    else if (k === "to")   state.to = "";
+    else state[k] = "";
+    state.page = 1;
+    applyStateToForm();
+    syncQS();
+    load();
+  }
+});
+
+// Export dropdown toggle
+$("#export-toggle").addEventListener("click", e => {
+  e.stopPropagation();
+  $("#export-menu").classList.toggle("open");
+});
+document.addEventListener("click", () => $("#export-menu").classList.remove("open"));
+
+// Pagination
+$("#pg-first").addEventListener("click", () => { state.page = 1; syncQS(); load(); });
+$("#pg-prev" ).addEventListener("click", () => { state.page = Math.max(1, state.page - 1); syncQS(); load(); });
+$("#pg-next" ).addEventListener("click", () => { state.page = state.page + 1; syncQS(); load(); });
+$("#pg-last" ).addEventListener("click", () => {
+  state.page = parseInt($("#pg-total").textContent || "1", 10);
+  syncQS(); load();
+});
+
+// ── Init ────────────────────────────────────────────────────────────
+parseQS();
+applyStateToForm();
+// Call syncQS once during init so the export hrefs reflect URL-borne
+// filters on deep-link page loads (e.g. /dashboard/history?crop=okra
+// must produce export.csv?crop=okra without the user touching the form).
+// parseQS sets state from URL; syncQS pushes state INTO the export hrefs.
+syncQS();
+load();
+</script>
+</body>
+</html>
