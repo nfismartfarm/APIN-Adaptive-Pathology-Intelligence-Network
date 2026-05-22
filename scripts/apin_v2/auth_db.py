@@ -406,6 +406,43 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 CREATE INDEX IF NOT EXISTS idx_reports_user ON reports(user_id, week_start DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_active ON reports(user_id, week_start) WHERE deleted_at IS NULL;
+
+-- Status monitoring heartbeats
+-- A background task writes one row here every 60 seconds. Each row is a
+-- snapshot of every component check at that moment. The raw table is kept
+-- small (pruned to roughly the last 48 hours) and powers the live "recent
+-- pulse" strip plus the health-check latency KPI. The longer 90-day history
+-- the status page draws its uptime bars from lives in status_days below,
+-- which is a compact daily rollup.
+--   overall     : operational | degraded | down  (worst component that tick)
+--   components  : JSON object, component-key to up|degraded|down
+--   response_ms : wall time the component sweep itself took, in ms
+CREATE TABLE IF NOT EXISTS heartbeats (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    recorded_at  TEXT NOT NULL,
+    overall      TEXT NOT NULL,
+    components   TEXT NOT NULL DEFAULT '{}',
+    response_ms  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_heartbeats_time ON heartbeats(recorded_at DESC);
+
+-- Daily status rollup
+-- One row per calendar day (UTC). The heartbeat task upserts today's row on
+-- every tick, accumulating per-component up/degraded/down counters. The
+-- status page reads at most 90 of these rows to draw its uptime bars, so the
+-- 90-day view costs one tiny query regardless of how many heartbeats exist.
+--   components : JSON object, component-key to {up,deg,down} counters
+--   overall    : worst overall status observed across the whole day
+CREATE TABLE IF NOT EXISTS status_days (
+    day          TEXT PRIMARY KEY,
+    overall      TEXT NOT NULL,
+    components   TEXT NOT NULL DEFAULT '{}',
+    samples      INTEGER NOT NULL DEFAULT 0,
+    op_count     INTEGER NOT NULL DEFAULT 0,
+    resp_ms_sum  INTEGER NOT NULL DEFAULT 0,
+    resp_ms_n    INTEGER NOT NULL DEFAULT 0,
+    updated_at   TEXT NOT NULL
+);
 """
 
 
@@ -2535,3 +2572,204 @@ def weekly_prediction_counts(user_id: int) -> dict:
         key = monday.isoformat()
         counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+# ─── Status monitoring — heartbeats + daily rollup ────────────────────────────
+#
+# These power the public /status and /health pages. Every helper here is
+# written so a failure can NEVER take down a page or the monitor loop: the
+# functions swallow their own exceptions and degrade to empty / safe results.
+
+# Worst-of ranking. Lower number = worse. Used to fold many samples into one.
+_STATUS_RANK = {"down": 0, "degraded": 1, "deg": 1, "up": 2, "operational": 2}
+
+# Retention: raw heartbeats kept ~48h, daily rollups kept ~95 days.
+_HEARTBEAT_RAW_HOURS = 48
+_STATUS_DAYS_KEEP    = 95
+
+
+def _worse(a: str, b: str) -> str:
+    """Return whichever of two status strings is the worse one."""
+    return a if _STATUS_RANK.get(a, 1) <= _STATUS_RANK.get(b, 1) else b
+
+
+def record_heartbeat(overall: str, components: dict,
+                     response_ms: Optional[int] = None) -> None:
+    """Persist one monitoring snapshot.
+
+    Writes a raw row to `heartbeats`, folds the snapshot into today's
+    `status_days` rollup, and prunes stale rows. Meant to be called once a
+    minute by a background task. Never raises — any failure is swallowed so
+    the monitor loop keeps ticking.
+    """
+    try:
+        now = _now_iso()
+        day = now[:10]
+        comp_json = json.dumps(components or {}, separators=(",", ":"))
+        rms = int(response_ms) if response_ms is not None else None
+        with _write_lock, get_conn() as c:
+            # The raw insert + rollup upsert + prunes are one logical unit.
+            # On local SQLite (autocommit) wrap them in an explicit
+            # transaction so a crash mid-sequence cannot leave a heartbeat
+            # row without its matching rollup update. If anything raises, the
+            # connection is closed by get_conn()'s contextmanager, which
+            # rolls the open transaction back. Turso keeps its per-statement
+            # behaviour (no transaction shim dependency).
+            _txn = not _USE_TURSO
+            if _txn:
+                c.execute("BEGIN")
+            c.execute(
+                "INSERT INTO heartbeats "
+                "(recorded_at, overall, components, response_ms) "
+                "VALUES (?, ?, ?, ?)",
+                (now, overall, comp_json, rms))
+
+            # Upsert today's rollup — read-merge-write, portable across the
+            # sqlite and libSQL backends (no ON CONFLICT dependency).
+            row = c.execute(
+                "SELECT overall, components, samples, op_count, "
+                "resp_ms_sum, resp_ms_n "
+                "FROM status_days WHERE day = ?", (day,)).fetchone()
+            if row is None:
+                roll, day_overall = {}, overall
+                samples = op_count = rsum = rn = 0
+            else:
+                try:
+                    roll = json.loads(row["components"] or "{}")
+                except Exception:
+                    roll = {}
+                day_overall = _worse(row["overall"] or "operational", overall)
+                samples  = int(row["samples"] or 0)
+                op_count = int(row["op_count"] or 0)
+                rsum     = int(row["resp_ms_sum"] or 0)
+                rn       = int(row["resp_ms_n"] or 0)
+
+            for key, st in (components or {}).items():
+                bucket = roll.get(key) or {"up": 0, "deg": 0, "down": 0}
+                if st == "up":
+                    bucket["up"] = int(bucket.get("up", 0)) + 1
+                elif st == "down":
+                    bucket["down"] = int(bucket.get("down", 0)) + 1
+                else:
+                    bucket["deg"] = int(bucket.get("deg", 0)) + 1
+                roll[key] = bucket
+
+            samples += 1
+            if overall == "operational":
+                op_count += 1
+            if rms is not None:
+                rsum += rms
+                rn   += 1
+            roll_json = json.dumps(roll, separators=(",", ":"))
+
+            if row is None:
+                c.execute(
+                    "INSERT INTO status_days (day, overall, components, "
+                    "samples, op_count, resp_ms_sum, resp_ms_n, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (day, day_overall, roll_json, samples, op_count,
+                     rsum, rn, now))
+            else:
+                c.execute(
+                    "UPDATE status_days SET overall = ?, components = ?, "
+                    "samples = ?, op_count = ?, resp_ms_sum = ?, "
+                    "resp_ms_n = ?, updated_at = ? WHERE day = ?",
+                    (day_overall, roll_json, samples, op_count,
+                     rsum, rn, now, day))
+
+            # Prune — bounded, cheap deletes.
+            cutoff_raw = (datetime.now(timezone.utc)
+                          - timedelta(hours=_HEARTBEAT_RAW_HOURS)).isoformat()
+            c.execute("DELETE FROM heartbeats WHERE recorded_at < ?",
+                      (cutoff_raw,))
+            cutoff_day = (datetime.now(timezone.utc)
+                          - timedelta(days=_STATUS_DAYS_KEEP)).date().isoformat()
+            c.execute("DELETE FROM status_days WHERE day < ?", (cutoff_day,))
+
+            if _txn:
+                c.execute("COMMIT")
+    except Exception:
+        # Monitoring must never crash the app.
+        pass
+
+
+def get_status_days(days: int = 90) -> list[dict]:
+    """Return up to `days` daily-rollup rows, oldest first.
+
+    Each row: {day, overall, components(dict), samples, op_count,
+    resp_ms_avg}. Returns [] on any failure.
+    """
+    try:
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(days=days)).date().isoformat()
+        with get_conn() as c:
+            rows = c.execute(
+                "SELECT day, overall, components, samples, op_count, "
+                "resp_ms_sum, resp_ms_n FROM status_days "
+                "WHERE day >= ? ORDER BY day ASC", (cutoff,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["components"] = json.loads(d.get("components") or "{}")
+            except Exception:
+                d["components"] = {}
+            rn   = int(d.pop("resp_ms_n", 0) or 0)
+            rsum = int(d.pop("resp_ms_sum", 0) or 0)
+            d["resp_ms_avg"] = round(rsum / rn) if rn else None
+            d["op_count"] = int(d.get("op_count", 0) or 0)
+            out.append(d)
+        return out
+    except Exception:
+        return []
+
+
+def get_recent_heartbeats(hours: int = 24, limit: int = 600) -> list[dict]:
+    """Return raw heartbeat rows from the last `hours`, newest first.
+    Returns [] on any failure."""
+    try:
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(hours=hours)).isoformat()
+        with get_conn() as c:
+            rows = c.execute(
+                "SELECT recorded_at, overall, components, response_ms "
+                "FROM heartbeats WHERE recorded_at >= ? "
+                "ORDER BY recorded_at DESC LIMIT ?",
+                (cutoff, int(limit))).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["components"] = json.loads(d.get("components") or "{}")
+            except Exception:
+                d["components"] = {}
+            out.append(d)
+        return out
+    except Exception:
+        return []
+
+
+def count_all_predictions() -> int:
+    """Global prediction count across every user. Returns 0 on failure."""
+    try:
+        with get_conn() as c:
+            row = c.execute(
+                "SELECT COUNT(*) AS n FROM predictions").fetchone()
+            return int(row["n"]) if row else 0
+    except Exception:
+        return 0
+
+
+def status_db_probe() -> dict:
+    """Cheap liveness probe for the database. Returns
+    {ok, latency_ms, backend}. Never raises."""
+    backend = "turso" if _USE_TURSO else "sqlite"
+    t0 = datetime.now(timezone.utc)
+    try:
+        with get_conn() as c:
+            c.execute("SELECT 1").fetchone()
+        dt = (datetime.now(timezone.utc) - t0).total_seconds() * 1000.0
+        return {"ok": True, "latency_ms": round(dt), "backend": backend}
+    except Exception as e:
+        return {"ok": False, "latency_ms": None, "backend": backend,
+                "error": str(e)[:160]}

@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<!-- apin_v2 status — public system status page.
+     Field-notebook aesthetic. Polls /status/data every 30 s. Renders its
+     shell before any data arrives, so a failed feed degrades to "detail
+     unavailable" rather than a blank page. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>System Status · APIN — Adaptive Pathological Intelligence Network</title>
+<meta name="description" content="Live system status for APIN — uptime, component health and recent incidents for the plant disease detection service.">
+<link rel="canonical" href="https://dxv-404-apin.hf.space/status">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#2f6f3e">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="APIN">
+<meta property="og:title" content="APIN System Status">
+<meta property="og:description" content="Live uptime and component health for the APIN plant-disease detection service.">
+<meta property="og:url" content="https://dxv-404-apin.hf.space/status">
+<meta property="og:image" content="https://dxv-404-apin.hf.space/logo.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="APIN System Status">
+<meta name="twitter:description" content="Live uptime and component health for APIN.">
+<meta name="twitter:image" content="https://dxv-404-apin.hf.space/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..700,0..100,0..1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  /* ═════════ DESIGN TOKENS (mirrors ui_template.html 1:1) ═════════ */
+  :root{
+    --paper-deep:#e9e2d1;
+    --paper:#f4efe6;
+    --paper-light:#fbf9f3;
+    --paper-shadow:#d8cfbc;
+    --ink:#1a1612;
+    --ink-body:#3a3228;
+    --ink-meta:#7a6f60;
+    --ink-faint:#a79c89;
+    --line:#c7bca9;
+    --green:#2f6f3e;
+    --green-soft:#4a9d5f;
+    --ochre:#c98a2b;
+    --crimson:#b3402f;
+    --radius:7px;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  html,body{background:var(--paper);}
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    color:var(--ink-body);
+    -webkit-font-smoothing:antialiased;
+    line-height:1.55;
+    min-height:100vh;
+    display:flex;flex-direction:column;
+  }
+  .serif{font-family:'Fraunces',Georgia,serif;color:var(--ink);font-weight:500;letter-spacing:-0.01em;}
+  .mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}
+
+  /* ── masthead ─────────────────────────────────────────────────── */
+  .masthead{
+    background:var(--paper-light);
+    border-bottom:1px solid var(--line);
+    position:relative;
+  }
+  /* washi tape accent */
+  .masthead::before{
+    content:"";position:absolute;top:-9px;left:50%;
+    width:118px;height:22px;transform:translateX(-50%) rotate(-2.4deg);
+    background:rgba(74,157,95,0.30);
+    border-left:1px dashed rgba(47,111,62,0.40);
+    border-right:1px dashed rgba(47,111,62,0.40);
+  }
+  .masthead-inner{
+    max-width:880px;margin:0 auto;padding:18px 22px;
+    display:flex;align-items:center;gap:13px;
+  }
+  .masthead img{
+    width:38px;height:38px;border-radius:8px;
+    border:1px solid var(--line);background:var(--paper);object-fit:cover;
+  }
+  .masthead .wordmark strong{
+    font-family:'Fraunces',serif;font-size:19px;color:var(--ink);
+    letter-spacing:.02em;display:block;line-height:1.1;
+  }
+  .masthead .wordmark span{
+    font-family:'Fraunces',serif;font-style:italic;font-size:11.5px;
+    color:var(--green);
+  }
+  .masthead .home-link{
+    margin-left:auto;font-size:12.5px;font-weight:600;color:var(--green);
+    text-decoration:none;border-bottom:1px solid transparent;
+  }
+  .masthead .home-link:hover{border-bottom-color:var(--green);}
+
+  /* ── layout ───────────────────────────────────────────────────── */
+  main{
+    max-width:880px;margin:0 auto;padding:34px 22px 10px;
+    width:100%;flex:1;
+  }
+  .page-head{
+    display:flex;align-items:baseline;justify-content:space-between;
+    flex-wrap:wrap;gap:8px;margin-bottom:6px;
+  }
+  .page-head h1{font-family:'Fraunces',serif;font-size:30px;color:var(--ink);
+    font-weight:560;letter-spacing:-0.02em;}
+  #clock{font-size:13px;color:var(--ink-meta);}
+  .page-sub{font-size:13px;color:var(--ink-meta);margin-bottom:22px;}
+
+  /* ── overall banner ───────────────────────────────────────────── */
+  .overall{
+    border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--paper-light);padding:18px 20px;margin-bottom:22px;
+    display:flex;align-items:center;gap:15px;position:relative;overflow:hidden;
+  }
+  .overall::before{
+    content:"";position:absolute;left:0;top:0;bottom:0;width:5px;
+    background:var(--ink-faint);
+  }
+  .overall.s-operational::before{background:var(--green-soft);}
+  .overall.s-degraded::before{background:var(--ochre);}
+  .overall.s-down::before{background:var(--crimson);}
+  .overall .dot{
+    width:15px;height:15px;border-radius:50%;flex:none;
+    background:var(--ink-faint);
+  }
+  .overall.s-operational .dot{background:var(--green-soft);
+    box-shadow:0 0 0 5px rgba(74,157,95,0.18);}
+  .overall.s-degraded .dot{background:var(--ochre);
+    box-shadow:0 0 0 5px rgba(201,138,43,0.18);}
+  .overall.s-down .dot{background:var(--crimson);
+    box-shadow:0 0 0 5px rgba(179,64,47,0.18);}
+  .overall .otext h2{font-family:'Fraunces',serif;font-size:19px;
+    color:var(--ink);font-weight:560;}
+  .overall .otext p{font-size:12.5px;color:var(--ink-meta);margin-top:2px;}
+
+  /* ── KPI tiles ────────────────────────────────────────────────── */
+  .kpis{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:12px;
+    margin-bottom:30px;
+  }
+  .kpi{
+    border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--paper-light);padding:14px 15px;
+  }
+  .kpi .val{font-family:'JetBrains Mono',monospace;font-size:21px;
+    color:var(--ink);font-weight:500;letter-spacing:-0.01em;}
+  .kpi .lbl{font-size:10.5px;color:var(--ink-meta);text-transform:uppercase;
+    letter-spacing:0.07em;margin-top:5px;}
+
+  /* ── section heading ──────────────────────────────────────────── */
+  .sec-head{
+    display:flex;align-items:baseline;gap:10px;margin:2px 0 13px;
+  }
+  .sec-head h3{font-family:'Fraunces',serif;font-size:16px;color:var(--ink);
+    font-weight:560;letter-spacing:0.01em;}
+  .sec-head .note{font-size:11.5px;color:var(--ink-faint);}
+
+  /* ── component list ───────────────────────────────────────────── */
+  .components{
+    border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--paper-light);overflow:hidden;margin-bottom:30px;
+  }
+  .comp{padding:16px 18px;border-bottom:1px solid var(--paper-shadow);}
+  .comp:last-child{border-bottom:none;}
+  .comp-top{display:flex;align-items:center;gap:9px;margin-bottom:3px;}
+  .comp-name{font-family:'Fraunces',serif;font-size:14.5px;color:var(--ink);
+    font-weight:560;}
+  .pill{
+    margin-left:auto;font-size:10px;font-weight:600;text-transform:uppercase;
+    letter-spacing:0.06em;padding:3px 9px;border-radius:20px;
+    background:var(--paper-shadow);color:var(--ink-meta);white-space:nowrap;
+  }
+  .pill.s-up{background:rgba(74,157,95,0.16);color:#256b34;}
+  .pill.s-degraded{background:rgba(201,138,43,0.18);color:#8c5e16;}
+  .pill.s-down{background:rgba(179,64,47,0.16);color:#8c2d20;}
+  .comp-dot{width:9px;height:9px;border-radius:50%;flex:none;
+    background:var(--ink-faint);}
+  .comp-dot.s-up{background:var(--green-soft);}
+  .comp-dot.s-degraded{background:var(--ochre);}
+  .comp-dot.s-down{background:var(--crimson);}
+  .comp-detail{font-size:12.5px;color:var(--ink-meta);margin-bottom:11px;
+    padding-left:18px;}
+
+  /* uptime bar — 90 daily cells */
+  .bar{display:flex;gap:2px;align-items:stretch;height:30px;}
+  .bar .cell{
+    flex:1;border-radius:2px;background:var(--paper-shadow);
+    min-width:0;transition:transform .1s ease;
+  }
+  .bar .cell.s-up{background:var(--green-soft);}
+  .bar .cell.s-degraded{background:var(--ochre);}
+  .bar .cell.s-down{background:var(--crimson);}
+  .bar .cell.s-nodata{background:var(--paper-shadow);opacity:0.55;}
+  .bar .cell:hover{transform:scaleY(1.18);}
+  .bar-foot{
+    display:flex;justify-content:space-between;margin-top:6px;
+    font-size:10.5px;color:var(--ink-faint);
+  }
+  .bar-foot .pct{font-family:'JetBrains Mono',monospace;color:var(--ink-meta);
+    font-weight:500;}
+
+  /* ── recent pulse ─────────────────────────────────────────────── */
+  .pulse-wrap{
+    border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--paper-light);padding:16px 18px;margin-bottom:30px;
+  }
+  .pulse{display:flex;gap:3px;height:34px;align-items:flex-end;}
+  .pulse .tick{
+    flex:1;min-width:0;border-radius:2px 2px 0 0;
+    background:var(--green-soft);height:100%;
+  }
+  .pulse .tick.s-degraded{background:var(--ochre);}
+  .pulse .tick.s-down{background:var(--crimson);}
+  .pulse .tick.s-nodata{background:var(--paper-shadow);height:32%;}
+  .pulse .tick.s-gap{
+    background:repeating-linear-gradient(135deg,
+      var(--paper-shadow) 0 3px,var(--paper-deep) 3px 6px);
+    height:100%;border:1px solid var(--ink-faint);opacity:0.8;
+  }
+  .pulse-foot{font-size:10.5px;color:var(--ink-faint);margin-top:8px;}
+
+  /* ── incidents ────────────────────────────────────────────────── */
+  .incidents{
+    border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--paper-light);margin-bottom:14px;
+  }
+  .incident{
+    display:flex;align-items:center;gap:11px;padding:13px 18px;
+    border-bottom:1px solid var(--paper-shadow);font-size:13px;
+  }
+  .incident:last-child{border-bottom:none;}
+  .incident .idot{width:8px;height:8px;border-radius:50%;flex:none;}
+  .incident .idot.s-degraded{background:var(--ochre);}
+  .incident .idot.s-down{background:var(--crimson);}
+  .incident .idot.s-gap{background:var(--ink-faint);}
+  .incident .idur{margin-left:auto;font-family:'JetBrains Mono',monospace;
+    font-size:11px;color:var(--ink-meta);}
+  .incident .iday{font-family:'JetBrains Mono',monospace;color:var(--ink);}
+  .incident .istat{margin-left:auto;font-size:11px;text-transform:uppercase;
+    letter-spacing:0.05em;color:var(--ink-meta);}
+  .all-clear{
+    padding:20px 18px;text-align:center;font-size:13px;color:var(--ink-meta);
+  }
+  .all-clear .ok{color:var(--green);font-weight:600;}
+
+  /* ── feed-error notice ────────────────────────────────────────── */
+  .feed-note{
+    display:none;border:1px dashed var(--ochre);border-radius:var(--radius);
+    background:rgba(201,138,43,0.08);padding:11px 15px;margin-bottom:20px;
+    font-size:12.5px;color:#8c5e16;
+  }
+  .feed-note.show{display:block;}
+
+  .legend{
+    display:flex;flex-wrap:wrap;gap:5px 16px;font-size:11px;
+    color:var(--ink-meta);margin:14px 2px 4px;
+  }
+  .legend i{width:10px;height:10px;border-radius:2px;display:inline-block;
+    margin-right:5px;vertical-align:-1px;}
+  .footnote{font-size:11px;color:var(--ink-faint);line-height:1.6;
+    margin:6px 2px 4px;}
+
+  /* ── SEO footer (mirrors ui_template.html) ────────────────────── */
+  .apin-seo-footer{background:#efe9da;border-top:1px solid #c7bca9;
+    padding:34px 22px 40px;margin-top:40px;
+    font-family:'Inter',system-ui,sans-serif;color:#5a5246;}
+  .apin-foot-inner{max-width:760px;margin:0 auto;text-align:center;}
+  .apin-foot-brand strong{font-family:'Fraunces',Georgia,serif;font-size:20px;
+    color:#1a1612;letter-spacing:.02em;}
+  .apin-foot-brand span{display:block;font-family:'Fraunces',Georgia,serif;
+    font-style:italic;font-size:13px;color:#2f6f3e;margin-top:2px;}
+  .apin-foot-desc{font-size:13px;line-height:1.65;margin:14px auto 16px;
+    max-width:620px;}
+  .apin-foot-links{display:flex;flex-wrap:wrap;gap:8px 22px;
+    justify-content:center;margin-bottom:14px;}
+  .apin-foot-links a{color:#2f6f3e;text-decoration:none;font-size:12.5px;
+    font-weight:600;border-bottom:1px solid transparent;}
+  .apin-foot-links a:hover{border-bottom-color:#2f6f3e;}
+  .apin-foot-legal{font-size:11px;color:#8a7f6a;line-height:1.6;
+    border-top:1px dashed #c7bca9;padding-top:14px;max-width:620px;
+    margin:0 auto;}
+
+  @media(max-width:620px){
+    .kpis{grid-template-columns:repeat(2,1fr);}
+    .page-head h1{font-size:25px;}
+    .bar{height:26px;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ── masthead ──────────────────────────────────────────────────── -->
+<header class="masthead">
+  <div class="masthead-inner">
+    <img src="/logo.png" alt="APIN logo"
+         onerror="this.style.display='none'">
+    <div class="wordmark">
+      <strong>APIN</strong>
+      <span>field laboratory</span>
+    </div>
+    <a class="home-link" href="/">&larr; Disease detector</a>
+  </div>
+</header>
+
+<main>
+  <div class="page-head">
+    <h1 class="serif">System Status</h1>
+    <span id="clock" class="mono">&mdash;&mdash;:&mdash;&mdash; IST</span>
+  </div>
+  <p class="page-sub">
+    Live health of the APIN plant-disease service. This page refreshes itself
+    every 30&nbsp;seconds.
+  </p>
+
+  <div id="feedNote" class="feed-note">
+    The status feed could not be reached just now &mdash; the figures below may
+    be a little stale. Retrying automatically.
+  </div>
+
+  <!-- overall -->
+  <div id="overall" class="overall">
+    <span class="dot"></span>
+    <div class="otext">
+      <h2 id="overallText" class="serif">Checking system status&hellip;</h2>
+      <p id="overallSub">Contacting the status feed&hellip;</p>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="kpis">
+    <div class="kpi"><div id="kpiUptime" class="val">&mdash;</div>
+      <div class="lbl">90-day uptime</div></div>
+    <div class="kpi"><div id="kpiDiag" class="val">&mdash;</div>
+      <div class="lbl">Diagnoses served</div></div>
+    <div class="kpi"><div id="kpiLatency" class="val">&mdash;</div>
+      <div class="lbl">Median check</div></div>
+    <div class="kpi"><div id="kpiDevice" class="val">&mdash;</div>
+      <div class="lbl">Compute device</div></div>
+  </div>
+
+  <!-- components -->
+  <div class="sec-head">
+    <h3 class="serif">Components</h3>
+    <span class="note">90-day history &middot; one cell per day</span>
+  </div>
+  <div id="components" class="components">
+    <div class="comp"><div class="comp-detail" style="padding-left:0">
+      Loading component health&hellip;</div></div>
+  </div>
+
+  <!-- recent pulse -->
+  <div class="sec-head">
+    <h3 class="serif">Recent pulse</h3>
+    <span class="note">recent heartbeats &middot; hatched marks are gaps</span>
+  </div>
+  <div class="pulse-wrap">
+    <div id="pulse" class="pulse"></div>
+    <div class="pulse-foot" id="pulseFoot">Waiting for heartbeat history&hellip;</div>
+  </div>
+
+  <!-- incidents -->
+  <div class="sec-head">
+    <h3 class="serif">Past incidents</h3>
+    <span class="note">component faults in the 90-day record</span>
+  </div>
+  <div id="incidents" class="incidents">
+    <div class="all-clear">Loading incident history&hellip;</div>
+  </div>
+
+  <!-- interruptions -->
+  <div class="sec-head">
+    <h3 class="serif">Past interruptions</h3>
+    <span class="note">monitor gaps in the last 48 hours</span>
+  </div>
+  <div id="interruptions" class="incidents">
+    <div class="all-clear">Loading interruption history&hellip;</div>
+  </div>
+
+  <div class="legend">
+    <span><i style="background:#4a9d5f"></i>Operational</span>
+    <span><i style="background:#c98a2b"></i>Degraded</span>
+    <span><i style="background:#b3402f"></i>Down</span>
+    <span><i style="background:#d8cfbc"></i>No data &middot; service asleep</span>
+  </div>
+  <p class="footnote">
+    Uptime bars fill in over time &mdash; a brand-new deployment shows mostly
+    &ldquo;no data&rdquo; until 90 days of heartbeats accumulate.
+    <strong>Past incidents</strong> are component faults recorded while APIN
+    was running. <strong>Past interruptions</strong> are gaps in the heartbeat
+    stream &mdash; a crash, a redeploy, or the free Space going to sleep, when
+    nothing was alive to record a heartbeat. A total outage of the Space is
+    also tracked by a separate external monitor.
+  </p>
+</main>
+
+<!-- ── SEO footer ────────────────────────────────────────────────── -->
+<footer class="apin-seo-footer" role="contentinfo">
+  <div class="apin-foot-inner">
+    <div class="apin-foot-brand">
+      <strong>APIN</strong>
+      <span>Adaptive Pathological Intelligence Network</span>
+    </div>
+    <p class="apin-foot-desc">
+      Free, AI-assisted plant disease detection for okra, brassica and tomato
+      leaves. Upload a single leaf photo and APIN returns a tiered,
+      confidence-rated diagnosis, a heatmap of where the model looked, and
+      treatment guidance.
+    </p>
+    <nav class="apin-foot-links" aria-label="Footer">
+      <a href="/">Disease detector</a>
+      <a href="/landing">Sign in or create account</a>
+      <a href="/health">Health check</a>
+      <a href="https://github.com/Dxv-404/APIN-Adaptive-Pathology-Intelligence-Network"
+         target="_blank" rel="noopener nofollow">Source on GitHub</a>
+    </nav>
+    <p class="apin-foot-legal">
+      &copy; 2026 APIN. Field Laboratory, Kerala. A research and educational
+      tool, not a substitute for professional agronomic advice.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ── live IST clock — independent of the data feed ─────────────── */
+  function tickClock(){
+    var now = new Date();
+    // IST = UTC + 5:30
+    var ist = new Date(now.getTime() + (330 + now.getTimezoneOffset()) * 60000);
+    var hh = String(ist.getHours()).padStart(2,'0');
+    var mm = String(ist.getMinutes()).padStart(2,'0');
+    var ss = String(ist.getSeconds()).padStart(2,'0');
+    document.getElementById('clock').textContent = hh+':'+mm+':'+ss+' IST';
+  }
+  tickClock();
+  setInterval(tickClock, 1000);
+
+  /* ── helpers ───────────────────────────────────────────────────── */
+  var STATUS_WORD = {
+    operational:'All systems operational',
+    degraded:'Partially degraded service',
+    down:'Major service outage'
+  };
+  var SUB_WORD = {
+    operational:'Every component is responding normally.',
+    degraded:'Some components are running in a reduced mode.',
+    down:'One or more core components are not responding.'
+  };
+
+  function agoText(iso){
+    if(!iso) return 'unknown';
+    var t = Date.parse(iso);
+    if(isNaN(t)) return 'unknown';
+    var s = Math.max(0, Math.round((Date.now() - t)/1000));
+    if(s < 60)  return s + ' second' + (s===1?'':'s') + ' ago';
+    var m = Math.round(s/60);
+    if(m < 60)  return m + ' minute' + (m===1?'':'s') + ' ago';
+    var h = Math.round(m/60);
+    if(h < 24)  return h + ' hour' + (h===1?'':'s') + ' ago';
+    var d = Math.round(h/24);
+    return d + ' day' + (d===1?'':'s') + ' ago';
+  }
+  function fmtDuration(sec){
+    if(sec == null) return '—';
+    sec = Math.round(sec);
+    if(sec < 60)    return sec + 's';
+    var m = Math.floor(sec/60);
+    if(m < 60)      return m + 'm';
+    var h = Math.floor(m/60);
+    if(h < 24)      return h + 'h ' + (m%60) + 'm';
+    var d = Math.floor(h/24);
+    return d + 'd ' + (h%24) + 'h';
+  }
+  function fmtDay(iso){
+    if(!iso) return '';
+    var p = String(iso).split('-');
+    if(p.length !== 3) return iso;
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep',
+                  'Oct','Nov','Dec'];
+    var mi = parseInt(p[1],10) - 1;
+    return (months[mi]||p[1]) + ' ' + parseInt(p[2],10) + ', ' + p[0];
+  }
+  function el(tag, cls){
+    var e = document.createElement(tag);
+    if(cls) e.className = cls;
+    return e;
+  }
+
+  /* ── renderers ─────────────────────────────────────────────────── */
+  function renderOverall(d){
+    var ov = d.overall || 'down';
+    var box = document.getElementById('overall');
+    box.className = 'overall s-' + ov;
+    document.getElementById('overallText').textContent =
+      STATUS_WORD[ov] || 'Status unknown';
+    var sub = SUB_WORD[ov] || '';
+    document.getElementById('overallSub').textContent =
+      sub + '  Last checked ' + agoText(d.checked_at) + '.';
+  }
+
+  function renderKpis(k){
+    k = k || {};
+    document.getElementById('kpiUptime').textContent =
+      (k.uptime_90d == null ? '—' : k.uptime_90d.toFixed(2) + '%');
+    document.getElementById('kpiDiag').textContent =
+      (k.total_diagnoses == null ? '—'
+        : Number(k.total_diagnoses).toLocaleString());
+    document.getElementById('kpiLatency').textContent =
+      (k.median_latency_ms == null ? '—'
+        : Math.round(k.median_latency_ms) + 'ms');
+    document.getElementById('kpiDevice').textContent = k.device || '—';
+  }
+
+  function renderComponents(list){
+    var host = document.getElementById('components');
+    host.innerHTML = '';
+    if(!list || !list.length){
+      var empty = el('div','comp');
+      var ed = el('div','comp-detail'); ed.style.paddingLeft='0';
+      ed.textContent = 'Component detail is temporarily unavailable.';
+      empty.appendChild(ed); host.appendChild(empty);
+      return;
+    }
+    list.forEach(function(c){
+      var st = c.status || 'down';
+      var row = el('div','comp');
+
+      var top = el('div','comp-top');
+      top.appendChild(el('span','comp-dot s-'+st));
+      var nm = el('span','comp-name'); nm.textContent = c.label || c.key;
+      top.appendChild(nm);
+      var pill = el('span','pill s-'+st);
+      pill.textContent = (st==='up'?'operational':st);
+      top.appendChild(pill);
+      row.appendChild(top);
+
+      var det = el('div','comp-detail');
+      det.textContent = c.detail || '';
+      row.appendChild(det);
+
+      var bar = el('div','bar');
+      var cells = c.bars || [];
+      cells.forEach(function(cell){
+        var cv = el('div','cell s-'+(cell.status||'nodata'));
+        var lab = cell.status==='nodata' ? 'no data'
+                  : (cell.status==='up' ? 'operational' : cell.status);
+        cv.title = fmtDay(cell.day) + ' — ' + lab;
+        bar.appendChild(cv);
+      });
+      row.appendChild(bar);
+
+      var foot = el('div','bar-foot');
+      var l = el('span'); l.textContent = '90 days ago';
+      var p = el('span','pct');
+      p.textContent = (c.uptime_pct == null ? 'no data yet'
+                       : c.uptime_pct.toFixed(2) + '% uptime');
+      var r = el('span'); r.textContent = 'today';
+      foot.appendChild(l); foot.appendChild(p); foot.appendChild(r);
+      row.appendChild(foot);
+
+      host.appendChild(row);
+    });
+  }
+
+  function fmtGap(s){
+    s = Math.round(s || 0);
+    if(s < 60) return s + 's';
+    if(s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+    return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+  }
+  function fmtDateTime(iso){
+    if(!iso) return '';
+    var t = Date.parse(iso);
+    if(isNaN(t)) return String(iso);
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep',
+                  'Oct','Nov','Dec'];
+    var d = new Date(t);
+    return months[d.getMonth()] + ' ' + d.getDate() + ', ' +
+      String(d.getHours()).padStart(2,'0') + ':' +
+      String(d.getMinutes()).padStart(2,'0');
+  }
+
+  function renderPulse(pulse){
+    var host = document.getElementById('pulse');
+    host.innerHTML = '';
+    var foot = document.getElementById('pulseFoot');
+    if(!pulse || !pulse.length){
+      foot.textContent = 'No heartbeats recorded yet — the monitor ' +
+        'writes one a minute once the service has settled.';
+      for(var i=0;i<60;i++){
+        host.appendChild(el('div','tick s-nodata'));
+      }
+      return;
+    }
+    var beats = 0, gaps = 0;
+    pulse.forEach(function(h){
+      if(h.gap){
+        gaps++;
+        // one or more hatched ticks, scaled to how long the silence was
+        var n = Math.min(10, Math.max(1, Math.round((h.seconds||90)/90)));
+        for(var i=0;i<n;i++){
+          var g = el('div','tick s-gap');
+          g.title = 'monitor gap — ' + fmtGap(h.seconds) +
+                    ' with no heartbeat';
+          host.appendChild(g);
+        }
+        return;
+      }
+      beats++;
+      var ov = h.overall || 'nodata';
+      var cls = ov==='operational' ? 'tick'
+              : ov==='degraded' ? 'tick s-degraded'
+              : ov==='down' ? 'tick s-down' : 'tick s-nodata';
+      var t = el('div', cls);
+      t.title = (h.t ? new Date(Date.parse(h.t)).toLocaleString() : '') +
+                ' — ' + ov;
+      host.appendChild(t);
+    });
+    foot.textContent = beats + ' heartbeat' + (beats===1?'':'s') +
+      (gaps ? ', ' + gaps + ' gap' + (gaps===1?'':'s') : '') +
+      ' — most recent on the right.';
+  }
+
+  function renderIncidents(list){
+    var host = document.getElementById('incidents');
+    host.innerHTML = '';
+    if(!list || !list.length){
+      var ok = el('div','all-clear');
+      ok.innerHTML = '<span class="ok">✓ No incidents</span> ' +
+        'recorded in the last 90 days.';
+      host.appendChild(ok);
+      return;
+    }
+    list.forEach(function(it){
+      var row = el('div','incident');
+      row.appendChild(el('span','idot s-'+(it.status||'down')));
+      var day = el('span','iday'); day.textContent = fmtDay(it.day);
+      row.appendChild(day);
+      var stat = el('span','istat');
+      stat.textContent = it.status==='down' ? 'outage' : 'degraded';
+      row.appendChild(stat);
+      host.appendChild(row);
+    });
+  }
+
+  function renderInterruptions(list){
+    var host = document.getElementById('interruptions');
+    host.innerHTML = '';
+    if(!list || !list.length){
+      var ok = el('div','all-clear');
+      ok.innerHTML = '<span class="ok">✓ No interruptions</span> ' +
+        'in the last 48 hours.';
+      host.appendChild(ok);
+      return;
+    }
+    list.forEach(function(it){
+      var row = el('div','incident');
+      row.appendChild(el('span','idot s-gap'));
+      var when = el('span','iday');
+      when.textContent = fmtDateTime(it.start);
+      row.appendChild(when);
+      var lbl = el('span');
+      lbl.textContent = 'service interrupted';
+      row.appendChild(lbl);
+      var dur = el('span','idur');
+      dur.textContent = fmtGap(it.seconds) + ' silent';
+      row.appendChild(dur);
+      host.appendChild(row);
+    });
+  }
+
+  /* ── data feed ─────────────────────────────────────────────────── */
+  function applyData(d){
+    document.getElementById('feedNote').classList.remove('show');
+    renderOverall(d);
+    renderKpis(d.kpis);
+    renderComponents(d.components);
+    renderPulse(d.pulse);
+    renderIncidents(d.downtime);
+    renderInterruptions(d.interruptions);
+  }
+
+  function feedError(){
+    document.getElementById('feedNote').classList.add('show');
+    // keep whatever was last rendered; only soften the overall line.
+    var sub = document.getElementById('overallSub');
+    if(sub && sub.textContent.indexOf('Contacting') !== -1){
+      document.getElementById('overallText').textContent =
+        'Status feed unavailable';
+      sub.textContent = 'Could not reach the status feed. Retrying…';
+      document.getElementById('overall').className = 'overall s-degraded';
+    }
+  }
+
+  function poll(){
+    fetch('/status/data', {cache:'no-store'})
+      .then(function(r){
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        return r.json();
+      })
+      .then(function(d){ applyData(d); })
+      .catch(function(){ feedError(); });
+  }
+
+  poll();
+  setInterval(poll, 30000);
+})();
+</script>
+
+</body>
+</html>

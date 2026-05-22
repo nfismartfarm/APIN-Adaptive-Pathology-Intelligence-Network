@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<!-- apin_v2 health — visual health check.
+     Field-notebook aesthetic with an ECG-pulse hero. Served to browsers by
+     the content-negotiated /health route; machines get JSON from the same
+     URL. This page fetches /health?format=json every 5 s. It renders its
+     full shell before any data arrives, so a failed feed degrades to a
+     flatline + "unreachable" rather than a blank page. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Health Check · APIN — Adaptive Pathological Intelligence Network</title>
+<meta name="description" content="Live health check for APIN — component vitals and an ECG-style heartbeat for the plant disease detection service.">
+<link rel="canonical" href="https://dxv-404-apin.hf.space/health">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#2f6f3e">
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..700,0..100,0..1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --paper-deep:#e9e2d1;
+    --paper:#f4efe6;
+    --paper-light:#fbf9f3;
+    --paper-shadow:#d8cfbc;
+    --ink:#1a1612;
+    --ink-body:#3a3228;
+    --ink-meta:#7a6f60;
+    --ink-faint:#a79c89;
+    --line:#c7bca9;
+    --green:#2f6f3e;
+    --green-soft:#4a9d5f;
+    --ochre:#c98a2b;
+    --crimson:#b3402f;
+    --radius:7px;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  html,body{background:var(--paper);}
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    color:var(--ink-body);
+    -webkit-font-smoothing:antialiased;
+    line-height:1.55;min-height:100vh;
+    display:flex;flex-direction:column;
+  }
+  .serif{font-family:'Fraunces',Georgia,serif;color:var(--ink);font-weight:500;letter-spacing:-0.01em;}
+  .mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}
+
+  /* ── masthead ─────────────────────────────────────────────────── */
+  .masthead{background:var(--paper-light);border-bottom:1px solid var(--line);
+    position:relative;}
+  .masthead::before{
+    content:"";position:absolute;top:-9px;left:50%;
+    width:118px;height:22px;transform:translateX(-50%) rotate(2deg);
+    background:rgba(74,157,95,0.30);
+    border-left:1px dashed rgba(47,111,62,0.40);
+    border-right:1px dashed rgba(47,111,62,0.40);
+  }
+  .masthead-inner{max-width:840px;margin:0 auto;padding:18px 22px;
+    display:flex;align-items:center;gap:13px;}
+  .masthead img{width:38px;height:38px;border-radius:8px;
+    border:1px solid var(--line);background:var(--paper);object-fit:cover;}
+  .masthead .wordmark strong{font-family:'Fraunces',serif;font-size:19px;
+    color:var(--ink);letter-spacing:.02em;display:block;line-height:1.1;}
+  .masthead .wordmark span{font-family:'Fraunces',serif;font-style:italic;
+    font-size:11.5px;color:var(--green);}
+  .masthead .home-link{margin-left:auto;font-size:12.5px;font-weight:600;
+    color:var(--green);text-decoration:none;border-bottom:1px solid transparent;}
+  .masthead .home-link:hover{border-bottom-color:var(--green);}
+
+  main{max-width:840px;margin:0 auto;padding:32px 22px 10px;width:100%;flex:1;}
+  .page-head h1{font-family:'Fraunces',serif;font-size:30px;color:var(--ink);
+    font-weight:560;letter-spacing:-0.02em;}
+  .page-sub{font-size:13px;color:var(--ink-meta);margin:4px 0 22px;}
+
+  /* ── ECG hero ─────────────────────────────────────────────────── */
+  .ecg-card{
+    border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--paper-light);padding:0;overflow:hidden;
+    margin-bottom:26px;position:relative;
+  }
+  .ecg-stage{
+    position:relative;height:170px;overflow:hidden;
+    background:
+      repeating-linear-gradient(0deg,transparent 0 23px,rgba(199,188,169,0.30) 23px 24px),
+      repeating-linear-gradient(90deg,transparent 0 23px,rgba(199,188,169,0.30) 23px 24px);
+  }
+  .ecg-stage svg{position:absolute;top:0;left:0;height:100%;width:200%;}
+  .ecg-trace{
+    fill:none;stroke:var(--green-soft);stroke-width:2.6;
+    stroke-linecap:round;stroke-linejoin:round;
+    filter:drop-shadow(0 0 5px rgba(74,157,95,0.45));
+    transition:stroke .4s ease;
+  }
+  .ecg-stage.s-degraded .ecg-trace{stroke:var(--ochre);
+    filter:drop-shadow(0 0 5px rgba(201,138,43,0.45));}
+  .ecg-stage.s-down .ecg-trace{stroke:var(--crimson);
+    filter:drop-shadow(0 0 5px rgba(179,64,47,0.40));}
+  .ecg-sweep{
+    animation:ecgSweep 6s linear infinite;
+  }
+  .ecg-stage.s-down .ecg-sweep{animation-duration:14s;}
+  @keyframes ecgSweep{from{transform:translateX(0);}
+                      to{transform:translateX(-50%);}}
+  @media(prefers-reduced-motion:reduce){
+    .ecg-sweep{animation:none;}
+  }
+  .ecg-readout{
+    display:flex;align-items:center;gap:14px;
+    padding:15px 20px;border-top:1px solid var(--paper-shadow);
+  }
+  .ecg-pulse-dot{
+    width:13px;height:13px;border-radius:50%;flex:none;
+    background:var(--green-soft);
+    animation:pulseDot 1.7s ease-in-out infinite;
+  }
+  .ecg-stage.s-degraded ~ .ecg-readout .ecg-pulse-dot{background:var(--ochre);}
+  .ecg-stage.s-down ~ .ecg-readout .ecg-pulse-dot{background:var(--crimson);
+    animation:none;}
+  @keyframes pulseDot{
+    0%,100%{box-shadow:0 0 0 0 rgba(74,157,95,0.45);}
+    50%{box-shadow:0 0 0 7px rgba(74,157,95,0);}
+  }
+  .ecg-word{font-family:'Fraunces',serif;font-size:23px;font-weight:600;
+    color:var(--ink);letter-spacing:0.01em;}
+  .ecg-bpm{margin-left:auto;text-align:right;}
+  .ecg-bpm .n{font-family:'JetBrains Mono',monospace;font-size:20px;
+    color:var(--ink);font-weight:500;}
+  .ecg-bpm .l{font-size:10px;color:var(--ink-meta);text-transform:uppercase;
+    letter-spacing:0.07em;}
+
+  /* ── section heading ──────────────────────────────────────────── */
+  .sec-head{display:flex;align-items:baseline;gap:10px;margin:4px 0 12px;}
+  .sec-head h3{font-family:'Fraunces',serif;font-size:16px;color:var(--ink);
+    font-weight:560;}
+  .sec-head .note{font-size:11.5px;color:var(--ink-faint);}
+
+  /* ── live checks ──────────────────────────────────────────────── */
+  .checks{border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--paper-light);overflow:hidden;margin-bottom:26px;}
+  .check{display:flex;align-items:flex-start;gap:12px;padding:14px 18px;
+    border-bottom:1px solid var(--paper-shadow);}
+  .check:last-child{border-bottom:none;}
+  .glyph{
+    width:24px;height:24px;border-radius:50%;flex:none;
+    display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:700;color:#fff;margin-top:1px;
+    font-family:'JetBrains Mono',monospace;
+  }
+  .glyph.s-up{background:var(--green-soft);}
+  .glyph.s-degraded{background:var(--ochre);}
+  .glyph.s-down{background:var(--crimson);}
+  .check-body{flex:1;min-width:0;}
+  .check-name{font-family:'Fraunces',serif;font-size:14.5px;color:var(--ink);
+    font-weight:560;}
+  .check-detail{font-size:12.5px;color:var(--ink-meta);margin-top:1px;}
+  .check-tag{font-size:10px;font-weight:600;text-transform:uppercase;
+    letter-spacing:0.06em;padding:3px 9px;border-radius:20px;flex:none;
+    margin-top:2px;background:var(--paper-shadow);color:var(--ink-meta);}
+  .check-tag.s-up{background:rgba(74,157,95,0.16);color:#256b34;}
+  .check-tag.s-degraded{background:rgba(201,138,43,0.18);color:#8c5e16;}
+  .check-tag.s-down{background:rgba(179,64,47,0.16);color:#8c2d20;}
+
+  /* ── vitals ───────────────────────────────────────────────────── */
+  .vitals{
+    border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--paper-light);padding:6px 18px;margin-bottom:14px;
+  }
+  .vital{display:flex;justify-content:space-between;gap:14px;
+    padding:9px 0;border-bottom:1px solid var(--paper-shadow);
+    font-size:12.5px;}
+  .vital:last-child{border-bottom:none;}
+  .vital .k{color:var(--ink-meta);}
+  .vital .v{font-family:'JetBrains Mono',monospace;color:var(--ink);
+    text-align:right;font-weight:500;}
+
+  .feed-note{
+    display:none;border:1px dashed var(--ochre);border-radius:var(--radius);
+    background:rgba(201,138,43,0.08);padding:11px 15px;margin-bottom:20px;
+    font-size:12.5px;color:#8c5e16;
+  }
+  .feed-note.show{display:block;}
+  .footnote{font-size:11px;color:var(--ink-faint);line-height:1.6;
+    margin:6px 2px 4px;}
+  .footnote a{color:var(--green);}
+
+  /* ── SEO footer ───────────────────────────────────────────────── */
+  .apin-seo-footer{background:#efe9da;border-top:1px solid #c7bca9;
+    padding:34px 22px 40px;margin-top:40px;
+    font-family:'Inter',system-ui,sans-serif;color:#5a5246;}
+  .apin-foot-inner{max-width:760px;margin:0 auto;text-align:center;}
+  .apin-foot-brand strong{font-family:'Fraunces',Georgia,serif;font-size:20px;
+    color:#1a1612;letter-spacing:.02em;}
+  .apin-foot-brand span{display:block;font-family:'Fraunces',Georgia,serif;
+    font-style:italic;font-size:13px;color:#2f6f3e;margin-top:2px;}
+  .apin-foot-desc{font-size:13px;line-height:1.65;margin:14px auto 16px;
+    max-width:620px;}
+  .apin-foot-links{display:flex;flex-wrap:wrap;gap:8px 22px;
+    justify-content:center;margin-bottom:14px;}
+  .apin-foot-links a{color:#2f6f3e;text-decoration:none;font-size:12.5px;
+    font-weight:600;border-bottom:1px solid transparent;}
+  .apin-foot-links a:hover{border-bottom-color:#2f6f3e;}
+  .apin-foot-legal{font-size:11px;color:#8a7f6a;line-height:1.6;
+    border-top:1px dashed #c7bca9;padding-top:14px;max-width:620px;
+    margin:0 auto;}
+
+  @media(max-width:560px){
+    .page-head h1{font-size:25px;}
+    .ecg-stage{height:140px;}
+    .ecg-word{font-size:20px;}
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <img src="/logo.png" alt="APIN logo" onerror="this.style.display='none'">
+    <div class="wordmark">
+      <strong>APIN</strong>
+      <span>field laboratory</span>
+    </div>
+    <a class="home-link" href="/status">System status &rarr;</a>
+  </div>
+</header>
+
+<main>
+  <div class="page-head">
+    <h1 class="serif">Health Check</h1>
+  </div>
+  <p class="page-sub">
+    A live instrument read of the APIN service. This page refreshes every
+    5&nbsp;seconds. Machines requesting this same URL receive JSON.
+  </p>
+
+  <div id="feedNote" class="feed-note">
+    The health endpoint did not respond just now &mdash; showing a flatline
+    until it recovers. Retrying automatically.
+  </div>
+
+  <!-- ECG hero -->
+  <div class="ecg-card">
+    <div id="ecgStage" class="ecg-stage">
+      <svg viewBox="0 0 2400 240" preserveAspectRatio="none"
+           aria-hidden="true">
+        <g class="ecg-sweep">
+          <path id="ecgPath" class="ecg-trace" d=""></path>
+        </g>
+      </svg>
+    </div>
+    <div class="ecg-readout">
+      <span class="ecg-pulse-dot"></span>
+      <span id="ecgWord" class="ecg-word">Listening for a pulse&hellip;</span>
+      <span class="ecg-bpm">
+        <span id="ecgUptime" class="n">&mdash;</span>
+        <span class="l">process uptime</span>
+      </span>
+    </div>
+  </div>
+
+  <!-- live checks -->
+  <div class="sec-head">
+    <h3 class="serif">Live checks</h3>
+    <span class="note">probed fresh on every request</span>
+  </div>
+  <div id="checks" class="checks">
+    <div class="check"><div class="check-body">
+      <div class="check-detail">Running checks&hellip;</div></div></div>
+  </div>
+
+  <!-- vitals -->
+  <div class="sec-head">
+    <h3 class="serif">Vitals</h3>
+    <span class="note">runtime readout</span>
+  </div>
+  <div id="vitals" class="vitals">
+    <div class="vital"><span class="k">Reading vitals&hellip;</span>
+      <span class="v">&mdash;</span></div>
+  </div>
+
+  <p class="footnote">
+    This check runs inside the APIN process &mdash; if the whole Space is
+    offline, this page cannot load at all. A full-outage view lives on the
+    <a href="/status">system status</a> page and an independent external
+    monitor.
+  </p>
+</main>
+
+<footer class="apin-seo-footer" role="contentinfo">
+  <div class="apin-foot-inner">
+    <div class="apin-foot-brand">
+      <strong>APIN</strong>
+      <span>Adaptive Pathological Intelligence Network</span>
+    </div>
+    <p class="apin-foot-desc">
+      Free, AI-assisted plant disease detection for okra, brassica and tomato
+      leaves. Upload a single leaf photo and APIN returns a tiered,
+      confidence-rated diagnosis, a heatmap of where the model looked, and
+      treatment guidance.
+    </p>
+    <nav class="apin-foot-links" aria-label="Footer">
+      <a href="/">Disease detector</a>
+      <a href="/landing">Sign in or create account</a>
+      <a href="/status">System status</a>
+      <a href="https://github.com/Dxv-404/APIN-Adaptive-Pathology-Intelligence-Network"
+         target="_blank" rel="noopener nofollow">Source on GitHub</a>
+    </nav>
+    <p class="apin-foot-legal">
+      &copy; 2026 APIN. Field Laboratory, Kerala. A research and educational
+      tool, not a substitute for professional agronomic advice.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ── ECG path generator ────────────────────────────────────────
+     Builds a tile-able waveform. The SVG viewBox is 2400 wide and holds
+     TWO identical 1200-wide tiles; the sweep animation translates the
+     group by -50% (1200 units) for a seamless loop. A "flat" variant is
+     drawn for the down state. */
+  function ecgTile(x0, period, flat){
+    var base = 140;            // baseline y
+    function p(fx, y){ return (x0 + fx*period).toFixed(1) + ',' + y; }
+    if(flat){
+      // near-flat line with a tiny tremor so it is not perfectly dead
+      return 'L ' + p(0.25,base) + ' L ' + p(0.40,base-3) +
+             ' L ' + p(0.55,base+3) + ' L ' + p(0.75,base) +
+             ' L ' + p(1.0,base);
+    }
+    return 'L ' + p(0.16,base) +
+           ' L ' + p(0.30,base) +              // pre P
+           ' L ' + p(0.35,base-16) +           // P wave up
+           ' L ' + p(0.40,base) +              // P wave down
+           ' L ' + p(0.46,base) +              // PR segment
+           ' L ' + p(0.48,base+14) +           // Q
+           ' L ' + p(0.51,base-86) +           // R spike
+           ' L ' + p(0.545,base+30) +          // S
+           ' L ' + p(0.57,base) +              // back to baseline
+           ' L ' + p(0.68,base) +              // ST segment
+           ' L ' + p(0.74,base-26) +           // T wave up
+           ' L ' + p(0.82,base) +              // T wave down
+           ' L ' + p(1.0,base);                // rest
+  }
+  function buildEcg(flat){
+    // four beats per 1200-wide tile, two tiles across 2400.
+    var period = 300, d = 'M 0,140';
+    for(var t=0; t<8; t++){
+      d += ' ' + ecgTile(t*period, period, flat);
+    }
+    return d;
+  }
+  var PATH_BEAT = buildEcg(false);
+  var PATH_FLAT = buildEcg(true);
+  document.getElementById('ecgPath').setAttribute('d', PATH_BEAT);
+
+  /* ── helpers ───────────────────────────────────────────────────── */
+  var WORD = {operational:'All vitals nominal',
+              degraded:'Running degraded',
+              down:'Vitals unresponsive'};
+  var GLYPH = {up:'✓', degraded:'!', down:'✕'};
+
+  function fmtDuration(sec){
+    if(sec == null) return '—';
+    sec = Math.round(sec);
+    if(sec < 60)  return sec + 's';
+    var m = Math.floor(sec/60);
+    if(m < 60)    return m + 'm ' + (sec%60) + 's';
+    var h = Math.floor(m/60);
+    if(h < 24)    return h + 'h ' + (m%60) + 'm';
+    var d = Math.floor(h/24);
+    return d + 'd ' + (h%24) + 'h';
+  }
+  function fmtTime(iso){
+    if(!iso) return '—';
+    var t = Date.parse(iso);
+    if(isNaN(t)) return iso;
+    return new Date(t).toLocaleString();
+  }
+  function el(tag, cls){
+    var e = document.createElement(tag);
+    if(cls) e.className = cls;
+    return e;
+  }
+
+  var COMPONENT_ORDER = ['web','db','router','okra','tomato','signals'];
+
+  /* ── renderers ─────────────────────────────────────────────────── */
+  function renderEcg(overall){
+    var stage = document.getElementById('ecgStage');
+    stage.className = 'ecg-stage s-' +
+      (overall==='operational' ? 'operational'
+       : overall==='degraded' ? 'degraded' : 'down');
+    document.getElementById('ecgPath').setAttribute(
+      'd', overall==='down' ? PATH_FLAT : PATH_BEAT);
+    document.getElementById('ecgWord').textContent =
+      WORD[overall] || 'Status unknown';
+  }
+
+  function renderChecks(components){
+    var host = document.getElementById('checks');
+    host.innerHTML = '';
+    var keys = Object.keys(components || {});
+    if(!keys.length){
+      var e = el('div','check');
+      var b = el('div','check-body');
+      var d = el('div','check-detail');
+      d.textContent = 'Component checks are temporarily unavailable.';
+      b.appendChild(d); e.appendChild(b); host.appendChild(e);
+      return;
+    }
+    // stable order, with any unexpected keys appended
+    var ordered = COMPONENT_ORDER.filter(function(k){
+      return components[k]; });
+    keys.forEach(function(k){
+      if(ordered.indexOf(k) === -1) ordered.push(k);
+    });
+    ordered.forEach(function(k){
+      var c = components[k] || {};
+      var st = c.status || 'down';
+      var row = el('div','check');
+
+      var g = el('div','glyph s-'+st);
+      g.textContent = GLYPH[st] || '?';
+      row.appendChild(g);
+
+      var body = el('div','check-body');
+      var nm = el('div','check-name');
+      nm.textContent = c.label || k;
+      body.appendChild(nm);
+      var det = el('div','check-detail');
+      det.textContent = c.detail || '';
+      body.appendChild(det);
+      row.appendChild(body);
+
+      var tag = el('div','check-tag s-'+st);
+      tag.textContent = (st==='up'?'pass':st==='degraded'?'warn':'fail');
+      row.appendChild(tag);
+
+      host.appendChild(row);
+    });
+  }
+
+  function vitalRow(k, v){
+    var row = el('div','vital');
+    var kk = el('span','k'); kk.textContent = k;
+    var vv = el('span','v'); vv.textContent = v;
+    row.appendChild(kk); row.appendChild(vv);
+    return row;
+  }
+  function renderVitals(d){
+    var host = document.getElementById('vitals');
+    host.innerHTML = '';
+    host.appendChild(vitalRow('Overall',
+      (d.overall||'unknown').toUpperCase()));
+    host.appendChild(vitalRow('Endpoint status', d.status || '—'));
+    host.appendChild(vitalRow('Version', d.version || '—'));
+    host.appendChild(vitalRow('Compute device',
+      (d.device||'—').toUpperCase()));
+    host.appendChild(vitalRow('GPU memory in use',
+      (d.gpu_vram_gb == null ? '—' : d.gpu_vram_gb + ' GB')));
+    host.appendChild(vitalRow('Process uptime',
+      fmtDuration(d.process_uptime_s)));
+    host.appendChild(vitalRow('Check latency',
+      (d.check_latency_ms == null ? '—' : d.check_latency_ms + ' ms')));
+    host.appendChild(vitalRow('Last reading', fmtTime(d.timestamp)));
+  }
+
+  /* ── data feed ─────────────────────────────────────────────────── */
+  function applyData(d){
+    document.getElementById('feedNote').classList.remove('show');
+    var overall = d.overall || (d.status==='ok' ? 'operational' : 'down');
+    renderEcg(overall);
+    document.getElementById('ecgUptime').textContent =
+      fmtDuration(d.process_uptime_s);
+    renderChecks(d.components);
+    renderVitals(d);
+  }
+
+  function feedError(){
+    document.getElementById('feedNote').classList.add('show');
+    renderEcg('down');
+    document.getElementById('ecgWord').textContent = 'Health endpoint unreachable';
+  }
+
+  function poll(){
+    fetch('/health?format=json', {cache:'no-store'})
+      .then(function(r){
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        return r.json();
+      })
+      .then(function(d){ applyData(d); })
+      .catch(function(){ feedError(); });
+  }
+
+  poll();
+  setInterval(poll, 5000);
+})();
+</script>
+
+</body>
+</html>

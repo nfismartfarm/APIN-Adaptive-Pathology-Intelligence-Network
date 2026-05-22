@@ -2142,6 +2142,515 @@ def _load_tomato_pipeline_safe():
         return None
 
 
+# ════════════════════════════════════════════════════════════════════
+# Status & health monitoring
+#
+#   GET /status        → public visual status page (status.html)
+#   GET /status/data   → JSON the status page polls every 30 s
+#   GET /health        → content-negotiated: a browser gets health.html,
+#                        a machine (curl / UptimeRobot) gets JSON
+#
+# A background task records one heartbeat a minute into the database
+# (auth_db.record_heartbeat). The pages read that history so the 90-day
+# uptime bars survive a process restart. Every component probe is wrapped
+# so a single failing check degrades ONE row rather than erroring the page.
+#
+# Honest limitation: no in-process page can report that the whole Space
+# has crashed - that is exactly what the external UptimeRobot monitor covers.
+# ════════════════════════════════════════════════════════════════════
+
+from datetime import datetime as _dtmod, timezone as _tzmod, timedelta as _td_
+
+
+def _utcnow():
+    """UTC-aware current time. Tiny wrapper so the status code reads cleanly."""
+    return _dtmod.now(_tzmod.utc)
+
+
+# Wall-clock time this worker process started - drives the "uptime" KPI.
+_PROCESS_START = _utcnow()
+
+# Guard so the heartbeat loop is started exactly once (see _ensure_heartbeat).
+_heartbeat_started = False
+
+# Fixed display order + human labels for the six tracked components.
+_STATUS_COMPONENTS = [
+    ("web",     "Web application"),
+    ("db",      "Database"),
+    ("router",  "Crop router"),
+    ("okra",    "Okra & Brassica model"),
+    ("tomato",  "Tomato model"),
+    ("signals", "Diagnostic signals"),
+]
+
+
+def _collect_status(app) -> dict:
+    """Run every component probe in isolation and return a status snapshot.
+
+    Each probe is wrapped in try/except: a failing component reports as
+    'down' or 'degraded' instead of raising, so the snapshot is ALWAYS a
+    valid dict no matter what state the app is in.
+
+    Returns: {overall, components{key: {...}}, checked_at,
+              process_uptime_s, check_latency_ms}
+    """
+    import time as _t
+    t0 = _t.perf_counter()
+    components: dict = {}
+
+    # 1 - Web application. If this code is running, the process is serving.
+    components["web"] = {
+        "status": "up", "label": "Web application",
+        "detail": "Serving requests normally",
+    }
+
+    # 2 - Database (Turso in production / SQLite locally).
+    try:
+        from scripts.apin_v2 import auth_db
+        probe = auth_db.status_db_probe()
+        if probe.get("ok"):
+            components["db"] = {
+                "status": "up", "label": "Database",
+                "detail": (f"{probe.get('backend', '?')} responding in "
+                           f"{probe.get('latency_ms', '?')} ms"),
+                "backend": probe.get("backend"),
+                "latency_ms": probe.get("latency_ms"),
+            }
+        else:
+            components["db"] = {
+                "status": "down", "label": "Database",
+                "detail": f"Unreachable - {probe.get('error', 'no response')}"[:200],
+                "backend": probe.get("backend"),
+            }
+    except Exception as e:
+        components["db"] = {
+            "status": "down", "label": "Database",
+            "detail": f"Probe error - {e}"[:200],
+        }
+
+    # 3 - Crop router. Lazy-loaded; "ready, not yet warm" is healthy.
+    try:
+        rs = getattr(app.state, "v2_router_state", {}) or {}
+        loaded = bool(rs.get("loaded") and rs.get("backbone") is not None)
+        components["router"] = {
+            "status": "up", "label": "Crop router",
+            "detail": ("Loaded and routing crops"
+                       if loaded else "Ready - warms on first diagnosis"),
+            "loaded": loaded,
+        }
+    except Exception as e:
+        components["router"] = {
+            "status": "down", "label": "Crop router",
+            "detail": f"Error - {e}"[:200],
+        }
+
+    # 4 - Okra & Brassica model. Surfaces real DINOv3 vs the timm fallback,
+    #     which is the production-misdiagnosis signal we want visible.
+    try:
+        from scripts.apin.section8_apin_server import get_apin as _ga
+        a = _ga()
+        m2 = getattr(a, "_model2", None) if a is not None else None
+        if m2 is None:
+            components["okra"] = {
+                "status": "up", "label": "Okra & Brassica model",
+                "detail": "Ready - backbone loads on first diagnosis",
+                "backbone": "pending",
+            }
+        else:
+            bt = getattr(m2, "_backbone_type", None)
+            if bt == "transformers":
+                components["okra"] = {
+                    "status": "up", "label": "Okra & Brassica model",
+                    "detail": "Running the real DINOv3-ConvNeXt backbone",
+                    "backbone": "dinov3",
+                }
+            else:
+                components["okra"] = {
+                    "status": "degraded", "label": "Okra & Brassica model",
+                    "detail": ("On the generic timm fallback backbone - "
+                               "accuracy reduced. Set the HF_TOKEN secret."),
+                    "backbone": "fallback",
+                }
+    except Exception as e:
+        components["okra"] = {
+            "status": "down", "label": "Okra & Brassica model",
+            "detail": f"Error - {e}"[:200], "backbone": "error",
+        }
+
+    # 5 - Tomato model. Optional pipeline: absent => degraded, not down,
+    #     because okra/brassica/chilli diagnosis is unaffected by it.
+    try:
+        tp = getattr(app.state, "v2_tomato_pipeline", None)
+        if tp is not None:
+            components["tomato"] = {
+                "status": "up", "label": "Tomato model",
+                "detail": "Pipeline loaded and ready",
+            }
+        else:
+            components["tomato"] = {
+                "status": "degraded", "label": "Tomato model",
+                "detail": "Pipeline unavailable - tomato diagnosis offline",
+            }
+    except Exception as e:
+        components["tomato"] = {
+            "status": "down", "label": "Tomato model",
+            "detail": f"Error - {e}"[:200],
+        }
+
+    # 6 - Diagnostic signals. The APIN ensemble (Model 2 / EfficientNet /
+    #     DINOv2 / PSV). Reachable orchestrator => healthy; signals warm
+    #     lazily so a low warm-count before first use is normal.
+    try:
+        from scripts.apin.section8_apin_server import get_apin as _ga
+        a = _ga()
+        if a is None:
+            components["signals"] = {
+                "status": "up", "label": "Diagnostic signals",
+                "detail": "Ready - signals warm on first diagnosis",
+                "warm": 0, "total": 4,
+            }
+        else:
+            warm = sum([
+                getattr(a, "_model2", None) is not None,
+                getattr(a, "_efficientnet", None) is not None,
+                getattr(a, "_dinov2_backbone", None) is not None,
+                getattr(a, "psv_calibration", None) is not None,
+            ])
+            components["signals"] = {
+                "status": "up", "label": "Diagnostic signals",
+                "detail": (f"{warm}/4 signals warm and ready" if warm
+                           else "Ready - signals warm on first diagnosis"),
+                "warm": int(warm), "total": 4,
+            }
+    except Exception as e:
+        components["signals"] = {
+            "status": "down", "label": "Diagnostic signals",
+            "detail": f"Error - {e}"[:200],
+        }
+
+    # Overall = the worst single component.
+    rank = {"down": 0, "degraded": 1, "up": 2}
+    worst = min((rank.get(c["status"], 1) for c in components.values()),
+                default=2)
+    overall = {0: "down", 1: "degraded", 2: "operational"}[worst]
+
+    now = _utcnow()
+    return {
+        "overall": overall,
+        "components": components,
+        "checked_at": now.isoformat(),
+        "process_uptime_s": round((now - _PROCESS_START).total_seconds()),
+        "check_latency_ms": round((_t.perf_counter() - t0) * 1000.0),
+    }
+
+
+def _parse_iso(s):
+    """Parse an ISO-8601 timestamp string to a datetime, or None."""
+    if not s:
+        return None
+    try:
+        return _dtmod.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+# Two heartbeats are a "gap" if more than this many seconds apart. The loop
+# ticks every 60s, so >90s means at least one beat was missed.
+_GAP_THRESHOLD_S = 90
+
+
+def _detect_heartbeat_gaps(recent, threshold_s=_GAP_THRESHOLD_S):
+    """Find stretches of monitor silence in a newest-first heartbeat list.
+
+    A gap longer than threshold_s means at least one 60s heartbeat was
+    missed: the process crashed, was redeployed, or the Space went to sleep.
+    The monitor cannot record its own downtime as a 'down' status (the
+    heartbeat task dies with the process), so these gaps are the only way an
+    in-app outage becomes visible at all. Returns a newest-first list of
+    {start, end, seconds}.
+    """
+    rows = list(reversed(recent or []))   # oldest -> newest
+    gaps = []
+    for a, b in zip(rows, rows[1:]):
+        ta = _parse_iso(a.get("recorded_at"))
+        tb = _parse_iso(b.get("recorded_at"))
+        if ta is None or tb is None:
+            continue
+        dt = (tb - ta).total_seconds()
+        if dt > threshold_s:
+            gaps.append({"start": a.get("recorded_at"),
+                         "end":   b.get("recorded_at"),
+                         "seconds": round(dt)})
+    gaps.reverse()   # newest first
+    return gaps
+
+
+def _build_status_payload(app) -> dict:
+    """Assemble the full JSON the /status page renders.
+
+    Combines the live snapshot with the persisted 90-day history. Wrapped so
+    that even a total DB outage yields a valid payload (empty history, live
+    snapshot only) rather than a 500.
+    """
+    snap = _collect_status(app)
+    days, recent, total_diag = [], [], 0
+    try:
+        from scripts.apin_v2 import auth_db
+        days       = auth_db.get_status_days(90)
+        # 48h of raw heartbeats - powers the pulse strip, the median-latency
+        # KPI, and gap detection (the raw table is pruned to ~48h anyway).
+        recent     = auth_db.get_recent_heartbeats(hours=48, limit=4000)
+        total_diag = auth_db.count_all_predictions()
+    except Exception as e:
+        logger.warning(f"status payload: history unavailable - {e}")
+
+    today = _utcnow().date()
+    day_keys = [(today - _td_(days=i)).isoformat() for i in range(89, -1, -1)]
+    day_map = {d.get("day"): d for d in days}
+    comp_keys = [k for k, _ in _STATUS_COMPONENTS]
+
+    # Per-component 90-day uptime bars + per-component uptime %.
+    bars, uptime_pct = {}, {}
+    for ck in comp_keys:
+        cells, up_n, tot_n = [], 0, 0
+        for dk in day_keys:
+            row = day_map.get(dk)
+            cd = ((row.get("components") if row else None) or {}).get(ck)
+            if not cd:
+                cells.append({"day": dk, "status": "nodata"})
+                continue
+            u = int(cd.get("up", 0))
+            g = int(cd.get("deg", 0))
+            d_ = int(cd.get("down", 0))
+            t = u + g + d_
+            up_n += u
+            tot_n += t
+            if t == 0:
+                st = "nodata"
+            elif d_ > 0:
+                st = "down"
+            elif g > 0:
+                st = "degraded"
+            else:
+                st = "up"
+            cells.append({"day": dk, "status": st, "samples": t})
+        bars[ck] = cells
+        uptime_pct[ck] = round(100.0 * up_n / tot_n, 3) if tot_n else None
+
+    # Overall window uptime - fraction of ticks where everything was up.
+    # Summed over EXACTLY the 90 displayed days (day_keys), not the slightly
+    # wider set get_status_days() can return, so the KPI matches the bars.
+    ov_op  = sum(int(day_map[dk].get("op_count", 0))
+                 for dk in day_keys if dk in day_map)
+    ov_tot = sum(int(day_map[dk].get("samples", 0))
+                 for dk in day_keys if dk in day_map)
+    overall_uptime = round(100.0 * ov_op / ov_tot, 3) if ov_tot else None
+
+    # Median heartbeat latency from the raw recent rows.
+    lat = sorted(int(h["response_ms"]) for h in recent
+                 if h.get("response_ms") is not None)
+    median_ms = (lat[len(lat) // 2] if lat else snap["check_latency_ms"])
+
+    # Downtime log - every non-operational day, newest first. Bounded to
+    # day_keys (the 90 displayed days) so it never lists an incident for a
+    # day the uptime bars do not also show.
+    _day_key_set = set(day_keys)
+    downtime = [
+        {"day": d.get("day"), "status": d.get("overall")}
+        for d in reversed(days)
+        if d.get("overall") and d.get("overall") != "operational"
+        and d.get("day") in _day_key_set
+    ][:14]
+
+    # Monitor interruptions - gaps in the heartbeat stream over the last
+    # 48h. Each one is a stretch where APIN was crashed, redeploying, or
+    # the Space was asleep, so nothing was alive to record a heartbeat.
+    interruptions = _detect_heartbeat_gaps(recent)[:14]
+
+    # Recent pulse strip - last ~90 heartbeats oldest-first, with grey gap
+    # markers inserted wherever the monitor fell silent.
+    last90 = list(reversed(recent[:90]))   # oldest -> newest
+    pulse = []
+    prev_t = None
+    for h in last90:
+        t = _parse_iso(h.get("recorded_at"))
+        if prev_t is not None and t is not None:
+            dt = (t - prev_t).total_seconds()
+            if dt > _GAP_THRESHOLD_S:
+                pulse.append({"gap": True, "seconds": round(dt)})
+        pulse.append({"t": h.get("recorded_at"),
+                      "overall": h.get("overall")})
+        if t is not None:
+            prev_t = t
+
+    try:
+        import torch
+        device = "GPU (CUDA)" if torch.cuda.is_available() else "CPU"
+    except Exception:
+        device = "unknown"
+
+    components_list = []
+    for ck, _label in _STATUS_COMPONENTS:
+        c = dict(snap["components"].get(ck, {}))
+        c["key"] = ck
+        c["uptime_pct"] = uptime_pct.get(ck)
+        c["bars"] = bars.get(ck, [])
+        components_list.append(c)
+
+    return {
+        "overall": snap["overall"],
+        "checked_at": snap["checked_at"],
+        "process_uptime_s": snap["process_uptime_s"],
+        "check_latency_ms": snap["check_latency_ms"],
+        "components": components_list,
+        "kpis": {
+            "uptime_90d": overall_uptime,
+            "total_diagnoses": total_diag,
+            "median_latency_ms": median_ms,
+            "device": device,
+        },
+        "downtime": downtime,
+        "interruptions": interruptions,
+        "pulse": pulse,
+        "history_days": len(days),
+        "poll_interval_s": 30,
+    }
+
+
+def _heartbeat_tick(app):
+    """One monitoring sample: probe every component, persist the heartbeat.
+    Hoisted to module scope (not redefined per loop iteration) and only ever
+    run inside asyncio.to_thread, since record_heartbeat does blocking DB I/O."""
+    from scripts.apin_v2 import auth_db
+    snap = _collect_status(app)
+    simple = {k: v.get("status", "up")
+              for k, v in snap["components"].items()}
+    auth_db.record_heartbeat(snap["overall"], simple, snap["check_latency_ms"])
+
+
+async def _status_heartbeat_loop(app):
+    """Record one heartbeat a minute, forever. Each tick is isolated so a
+    transient DB failure logs and the loop keeps running."""
+    await asyncio.sleep(20)   # let the process settle before the first sample
+    while True:
+        try:
+            await asyncio.to_thread(_heartbeat_tick, app)
+        except Exception as e:
+            logger.warning(f"heartbeat tick failed: {e}")
+        await asyncio.sleep(60)
+
+
+def _ensure_heartbeat(app):
+    """Idempotently start the heartbeat loop.
+
+    Called both from the startup event AND lazily from the first /status/data
+    request. The lazy path means the task still starts even if a future
+    upstream change switches make_app() to a lifespan handler (which would
+    silently disable on_event startup hooks). asyncio.create_task needs a
+    running loop, so a too-early call is caught and simply retried later.
+    """
+    global _heartbeat_started
+    if _heartbeat_started:
+        return
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return   # no loop yet — a later call will succeed
+    _heartbeat_started = True
+    asyncio.create_task(_status_heartbeat_loop(app))
+    logger.info("status heartbeat task started (60 s interval)")
+
+
+def _add_status_routes(app):
+    """Register /status + /status/data and arm the heartbeat task."""
+    status_html = _load_html("status.html")
+
+    @app.get("/status", response_class=HTMLResponse)
+    async def v2_status_page():
+        return HTMLResponse(status_html, headers=_PUBLIC_PAGE_HEADERS)
+
+    @app.get("/status/data")
+    async def v2_status_data():
+        _ensure_heartbeat(app)   # lazy-start fallback if startup hook missed
+        # Build off the event loop - component probes touch the DB.
+        try:
+            payload = await asyncio.to_thread(_build_status_payload, app)
+        except Exception as e:
+            logger.warning(f"/status/data failed: {e}")
+            payload = {
+                "overall": "degraded", "components": [],
+                "checked_at": _utcnow().isoformat(),
+                "kpis": {}, "downtime": [], "interruptions": [], "pulse": [],
+                "error": "status snapshot unavailable",
+                "poll_interval_s": 30,
+            }
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.on_event("startup")
+    async def _start_heartbeat():
+        _ensure_heartbeat(app)
+
+    logger.info(f"v2 status routes registered - /status + /status/data "
+                f"(status.html {len(status_html):,} bytes)")
+
+
+def _override_health_route(app):
+    """Replace section8's JSON-only /health with a content-negotiated route.
+
+    A browser (Accept: text/html) gets the visual health.html page; a machine
+    - curl, the UptimeRobot monitor - gets JSON. The JSON keeps `status: ok`
+    whenever the route runs, so the external monitor's keyword check is
+    unaffected; component nuance rides in the `overall` + `components` fields.
+    `?format=json` / `?format=html` force either branch.
+    """
+    from starlette.routing import Route
+    removed = 0
+    for i in range(len(app.router.routes) - 1, -1, -1):
+        r = app.router.routes[i]
+        if isinstance(r, Route) and r.path == "/health" and "GET" in r.methods:
+            app.router.routes.pop(i)
+            removed += 1
+
+    health_html = _load_html("health.html")
+
+    @app.get("/health")
+    async def v2_health(request: Request):
+        accept = (request.headers.get("accept") or "").lower()
+        fmt = (request.query_params.get("format") or "").lower()
+        want_html = (fmt != "json") and (fmt == "html" or "text/html" in accept)
+        if want_html:
+            return HTMLResponse(health_html, headers=_PUBLIC_PAGE_HEADERS)
+
+        # JSON branch - superset of the original /health shape.
+        try:
+            import torch
+            cuda = torch.cuda.is_available()
+            vram = round((torch.cuda.memory_allocated() / 1e9) if cuda else 0, 2)
+        except Exception:
+            cuda, vram = False, 0.0
+        snap = await asyncio.to_thread(_collect_status, app)
+        comp = {k: {"status": v.get("status"), "label": v.get("label"),
+                    "detail": v.get("detail")}
+                for k, v in snap["components"].items()}
+        okra = snap["components"].get("okra", {})
+        return JSONResponse({
+            "status": "ok",                       # external-monitor keyword
+            "overall": snap["overall"],
+            "device": "cuda" if cuda else "cpu",
+            "gpu_vram_gb": vram,
+            "version": "apin-1.0",
+            "apin_loaded": okra.get("status") in ("up", "degraded"),
+            "components": comp,
+            "process_uptime_s": snap["process_uptime_s"],
+            "check_latency_ms": snap["check_latency_ms"],
+            "timestamp": snap["checked_at"],
+        }, headers={"Cache-Control": "no-store"})
+
+    logger.info(f"v2 '/health' route replaced (removed {removed} original) - "
+                f"content-negotiated HTML/JSON (health.html "
+                f"{len(health_html):,} bytes)")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8766,
@@ -2157,11 +2666,11 @@ def main():
     _override_index_route(app)
     _add_landing_route(app)  # cinematic landing + login/signup (additive)
     _add_seo_routes(app)     # favicon, logo, robots.txt, sitemap.xml
-    _add_auth_routes(app)    # /auth/* — real SQLite+argon2id, Day 3
+    _add_auth_routes(app)    # /auth/* - real SQLite+argon2id, Day 3
     _add_dashboard_routes(app)  # /dashboard + /dashboard/data, Day 4
 
     # Phase B.3: load tomato pipeline (v3 + single-pass LoRA ensemble) and override /predict/full.
-    # Additive — no edits to scripts/apin/. Tomato pipeline is optional: if it fails to
+    # Additive - no edits to scripts/apin/. Tomato pipeline is optional: if it fails to
     # load, the override still runs and tomato requests return a graceful error. Okra /
     # brassica / chilli paths are unaffected regardless of tomato pipeline status.
     tomato_pipeline = _load_tomato_pipeline_safe()
@@ -2169,6 +2678,11 @@ def main():
     # PDA R1 B-1 fix: /warmup/status must reflect the v2 override's router state,
     # not section8's closure state (which is never populated in this process).
     _override_warmup_status_route(app)
+
+    # Status & health monitoring - public /status page, content-negotiated
+    # /health, and a once-a-minute heartbeat task. Additive + override.
+    _add_status_routes(app)
+    _override_health_route(app)
 
     if args.preload:
         logger.info("Warming APIN (Model 2 + EfficientNet + DINOv2 + PSV)...")
