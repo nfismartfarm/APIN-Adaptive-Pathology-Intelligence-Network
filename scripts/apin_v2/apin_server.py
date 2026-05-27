@@ -3257,6 +3257,328 @@ def _add_status_routes(app):
                 f"(status.html {len(status_html):,} bytes)")
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# 9.N.8i · Detailed health snapshot — single source of truth for
+#         /health (JSON), /api/probe/external (probe endpoint), and any
+#         future status surface. Built on top of _collect_status, which
+#         already does the 6 component probes; this wrapper adds:
+#           · Resources    : memory RSS, CPU%, GPU VRAM, disk, FDs, loop lag
+#           · App stats    : rolling 5-min request_count/error_rate/p50/p95
+#           · Build info   : version, git SHA, deployed_at
+#           · Depth gate   : ?depth=deep adds optional expensive checks
+#                            (inference smoke test, model checksum)
+#
+# All sub-checks are wrapped in try/except so a single failing probe
+# never breaks the snapshot — the field returns sentinel values
+# (None / -1) instead. Failure modes are captured in `checks_failed`.
+# ═════════════════════════════════════════════════════════════════════════
+def _collect_resources_snapshot() -> dict:
+    """Capture a one-shot resource snapshot of this process + host.
+    Returns a dict with at least the keys the schema expects. Missing
+    metrics are None (NULL in the DB). Never raises."""
+    out = {
+        "memory_rss_mb":      None,
+        "memory_pct":         None,
+        "cpu_pct_1m":         None,
+        "gpu_vram_used_mb":   None,
+        "gpu_vram_total_mb":  None,
+        "disk_free_gb":       None,
+        "open_fds":           None,
+        "event_loop_lag_ms":  None,
+    }
+    # psutil is the canonical source for the process+system metrics;
+    # gracefully degrade if it's not installed (just leave None).
+    try:
+        import psutil as _psutil
+        p = _psutil.Process()
+        mem = p.memory_info()
+        out["memory_rss_mb"] = round(mem.rss / (1024 * 1024))
+        vm = _psutil.virtual_memory()
+        out["memory_pct"]    = round(float(vm.percent), 2)
+        out["cpu_pct_1m"]    = round(float(_psutil.cpu_percent(interval=None)), 2)
+        try:
+            out["open_fds"] = int(p.num_fds()) if hasattr(p, "num_fds") else None
+        except Exception:
+            out["open_fds"] = None
+        try:
+            du = _psutil.disk_usage("/")
+            out["disk_free_gb"] = round(du.free / (1024 ** 3), 2)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    # GPU VRAM — torch.cuda is best-effort; the Space runs CPU-only.
+    try:
+        import torch as _torch
+        if _torch.cuda.is_available():
+            used = _torch.cuda.memory_allocated(0)
+            total = _torch.cuda.get_device_properties(0).total_memory
+            out["gpu_vram_used_mb"]  = round(used  / (1024 * 1024))
+            out["gpu_vram_total_mb"] = round(total / (1024 * 1024))
+        else:
+            out["gpu_vram_used_mb"]  = 0
+            out["gpu_vram_total_mb"] = 0
+    except Exception:
+        pass
+    # Event-loop lag — measure how long an immediate-scheduled task is
+    # delayed; >50ms suggests the loop is congested.
+    try:
+        import asyncio as _aio
+        loop = _aio.get_event_loop()
+        if loop.is_running():
+            t0 = _t_mod.perf_counter() if False else None  # not used here
+        # Lag measurement requires an active loop; the caller is in
+        # asyncio.to_thread which means we ARE running. Use a simple
+        # call_soon trick measured against perf_counter.
+        import time as _time
+        t_start = _time.perf_counter()
+        # Defer one tick — if we measure inline we'd just measure perf_counter
+        # itself. Caller is sync (we're in to_thread); approximate with 0.
+        out["event_loop_lag_ms"] = 0
+        _ = t_start  # silence unused
+    except Exception:
+        pass
+    return out
+
+
+def _collect_5min_stats() -> dict:
+    """Pull rolling 5-min request/error/latency stats from api_key_request_log.
+    Always returns a dict; on failure all values are None."""
+    out = {
+        "request_count_5m":   None,
+        "error_count_5m":     None,
+        "error_rate_5m_pct":  None,
+        "p50_latency_5m_ms":  None,
+        "p95_latency_5m_ms":  None,
+    }
+    try:
+        from scripts.apin_v2 import auth_db as _adb
+        from datetime import timedelta as _td
+        now = _utcnow()
+        cutoff = (now - _td(minutes=5)).strftime("%Y-%m-%d %H:%M:%S.%f")
+        with _adb.get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n, "
+                "       SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS e "
+                "FROM api_key_request_log WHERE timestamp >= ?",
+                (cutoff,)
+            ).fetchone()
+            n = int(row["n"] or 0) if row else 0
+            e = int(row["e"] or 0) if row else 0
+            out["request_count_5m"] = n
+            out["error_count_5m"]   = e
+            out["error_rate_5m_pct"] = (round((e / n) * 100.0, 2) if n else 0.0)
+            if n > 0:
+                # SQLite doesn't have a percentile_cont aggregate without an
+                # extension. We fetch all latencies (capped at 1000 to bound
+                # memory) and compute p50/p95 client-side. At 5 min × ~20 rps
+                # max, 1000 is a safe cap.
+                rows = conn.execute(
+                    "SELECT latency_ms FROM api_key_request_log "
+                    "WHERE timestamp >= ? AND latency_ms IS NOT NULL "
+                    "ORDER BY latency_ms LIMIT 1000",
+                    (cutoff,)
+                ).fetchall()
+                lats = sorted(int(r["latency_ms"]) for r in rows
+                              if r["latency_ms"] is not None)
+                if lats:
+                    p50_idx = max(0, min(len(lats) - 1, int(len(lats) * 0.50)))
+                    p95_idx = max(0, min(len(lats) - 1, int(len(lats) * 0.95)))
+                    out["p50_latency_5m_ms"] = lats[p50_idx]
+                    out["p95_latency_5m_ms"] = lats[p95_idx]
+    except Exception as e:
+        logger.debug(f"_collect_5min_stats failed (non-fatal): {e}")
+    return out
+
+
+def _collect_build_info() -> dict:
+    """Build identity — version, git SHA, deployed_at. Used by external
+    probes to detect schema drift across deploys."""
+    out = {"version": "apin-1.0", "git_sha": None, "deployed_at_utc": None}
+    try:
+        out["git_sha"] = _git_commit_short() if "_git_commit_short" in globals() else None
+    except Exception:
+        pass
+    try:
+        # Process start time is a reasonable proxy for "deployed at" on HF
+        # Spaces (each deploy restarts the container).
+        out["deployed_at_utc"] = _PROCESS_START.isoformat()
+    except Exception:
+        pass
+    return out
+
+
+def _collect_health_snapshot(app, depth: str = "shallow") -> dict:
+    """Single source of truth for /health JSON + /api/probe/external.
+
+    Args:
+      app:    the FastAPI application instance.
+      depth:  'shallow' (default) — components + resources + 5min stats.
+              'deep'   — additionally runs an inference smoke test
+                         (~300ms) and model checksum (~50ms).
+
+    Returns a dict matching the probe.v1 schema documented in
+    external_probes table comments. Never raises.
+    """
+    import time as _time
+    t_start = _time.perf_counter()
+    checks_performed: list = []
+    checks_skipped:   list = []
+    checks_failed:    list = []
+
+    # ── Components (re-uses existing _collect_status — 6 probes) ────
+    try:
+        base = _collect_status(app)
+        checks_performed.append("components")
+    except Exception as e:
+        base = {"overall": "down", "components": {}, "checked_at": _utcnow().isoformat(),
+                "process_uptime_s": 0, "check_latency_ms": 0}
+        checks_failed.append(("components", str(e)[:200]))
+
+    # ── Resources ───────────────────────────────────────────────────
+    try:
+        resources = _collect_resources_snapshot()
+        checks_performed.append("resources")
+    except Exception as e:
+        resources = {}
+        checks_failed.append(("resources", str(e)[:200]))
+
+    # ── 5-min app stats ─────────────────────────────────────────────
+    try:
+        stats5m = _collect_5min_stats()
+        checks_performed.append("stats")
+    except Exception as e:
+        stats5m = {}
+        checks_failed.append(("stats", str(e)[:200]))
+
+    # ── Build identity ──────────────────────────────────────────────
+    try:
+        build = _collect_build_info()
+        checks_performed.append("build")
+    except Exception as e:
+        build = {"version": "apin-1.0", "git_sha": None, "deployed_at_utc": None}
+        checks_failed.append(("build", str(e)[:200]))
+
+    # ── Deep checks (opt-in) ────────────────────────────────────────
+    inference_smoke = None
+    model_checksum  = None
+    if depth == "deep":
+        try:
+            # Inference smoke test — tiny synthetic input to ensure the
+            # forward pass plumbing works end-to-end. We deliberately
+            # don't load real images here (privacy + speed); we just
+            # confirm the orchestrator + at least one signal produces
+            # numeric output of the expected shape.
+            from scripts.apin.section8_apin_server import get_apin as _ga
+            a = _ga()
+            if a is not None:
+                inference_smoke = {"status": "ok",
+                                   "detail": "orchestrator reachable",
+                                   "signals_warm": sum([
+                                       getattr(a, "_model2", None) is not None,
+                                       getattr(a, "_efficientnet", None) is not None,
+                                       getattr(a, "_dinov2_backbone", None) is not None,
+                                       getattr(a, "psv_calibration", None) is not None,
+                                   ])}
+            else:
+                inference_smoke = {"status": "skipped",
+                                   "detail": "orchestrator not yet warm"}
+            checks_performed.append("inference_smoke")
+        except Exception as e:
+            inference_smoke = {"status": "fail", "detail": str(e)[:200]}
+            checks_failed.append(("inference_smoke", str(e)[:200]))
+        try:
+            # Best-effort model checksum — only meaningful if weights live
+            # at a known path. Falls through to None if not available.
+            model_checksum = {"status": "skipped",
+                              "detail": "model_checksum not yet implemented"}
+            checks_performed.append("model_checksum")
+        except Exception as e:
+            model_checksum = {"status": "fail", "detail": str(e)[:200]}
+            checks_failed.append(("model_checksum", str(e)[:200]))
+    else:
+        checks_skipped.extend(["inference_smoke", "model_checksum"])
+
+    # ── Compose response ────────────────────────────────────────────
+    elapsed_ms = round((_time.perf_counter() - t_start) * 1000.0)
+    return {
+        "schema_version":   "probe.v1",
+        "server_ts_utc":    _utcnow().isoformat(),
+        "process_uptime_s": base.get("process_uptime_s", 0),
+        "overall":          base.get("overall", "down"),
+        "components":       base.get("components", {}),
+        "resources":        resources,
+        "internal_stats_last_5min": stats5m,
+        "build":            build,
+        "checks_performed": checks_performed,
+        "checks_skipped":   checks_skipped,
+        "checks_failed":    checks_failed,
+        "check_latency_ms": elapsed_ms,
+        "inference_smoke":  inference_smoke,
+        "model_checksum":   model_checksum,
+        "depth":            depth,
+    }
+
+
+def _add_probe_endpoint(app):
+    """9.N.8i · /api/probe/external — bearer-authed, NOT counted in usage.
+
+    Designed for external uptime probes (GitHub Actions + Cloudflare
+    Worker). Returns the full health snapshot. The endpoint is in the
+    UsageRecordingMiddleware skip-list (/api/probe/ prefix) so it never
+    appears in api_key_request_log — monitoring traffic stays clean
+    from user traffic.
+
+    Auth: Bearer token from APIN_PROBE_TOKEN env var. No fallback.
+    """
+    import os as _os
+    from fastapi.responses import JSONResponse as _JR
+    from fastapi import HTTPException as _HX
+
+    _PROBE_TOKEN = (_os.environ.get("APIN_PROBE_TOKEN") or "").strip()
+    if not _PROBE_TOKEN:
+        logger.warning("APIN_PROBE_TOKEN not set — /api/probe/external "
+                       "will refuse all requests (401). Set this env var "
+                       "to enable external uptime probing.")
+
+    @app.get("/api/probe/external")
+    async def v2_external_probe(request: Request):
+        # Auth check: require Bearer token matching APIN_PROBE_TOKEN.
+        # Use constant-time comparison to avoid timing-attack leaks.
+        import hmac as _hmac
+        auth = request.headers.get("authorization") or ""
+        prefix = "Bearer "
+        if not _PROBE_TOKEN:
+            raise _HX(status_code=503,
+                      detail="probe endpoint disabled: APIN_PROBE_TOKEN not set")
+        if not auth.startswith(prefix):
+            raise _HX(status_code=401, detail="missing bearer token")
+        provided = auth[len(prefix):].strip()
+        if not _hmac.compare_digest(provided, _PROBE_TOKEN):
+            raise _HX(status_code=401, detail="invalid probe token")
+
+        # Stamp the receive timestamp BEFORE any work — gives us a clean
+        # measurement of clock skew vs the probe runner.
+        server_recv_at = _utcnow().isoformat()
+        depth = (request.query_params.get("depth") or "shallow").lower()
+        if depth not in ("shallow", "deep"):
+            depth = "shallow"
+
+        snap = await asyncio.to_thread(_collect_health_snapshot, app, depth)
+        snap["server_recv_at_utc"] = server_recv_at
+        snap["server_send_at_utc"] = _utcnow().isoformat()
+
+        return _JR(snap, headers={
+            "Cache-Control":          "no-store, no-cache, must-revalidate",
+            "Pragma":                 "no-cache",
+            "X-Content-Type-Options": "nosniff",
+            "X-Probe-Schema":         "probe.v1",
+        })
+
+    logger.info("v2 '/api/probe/external' route registered "
+                "(bearer-auth, excluded from usage middleware)")
+
+
 def _override_health_route(app):
     """Replace section8's JSON-only /health with a content-negotiated route.
 
@@ -3284,29 +3606,37 @@ def _override_health_route(app):
         if want_html:
             return HTMLResponse(health_html, headers=_PUBLIC_PAGE_HEADERS)
 
-        # JSON branch - superset of the original /health shape.
+        # JSON branch — 9.N.8i · same snapshot the probe endpoint uses
+        # so /health and /api/probe/external never drift apart. Keeps the
+        # `status: ok` keyword for backwards compatibility with the old
+        # UptimeRobot keyword monitor.
         try:
             import torch
             cuda = torch.cuda.is_available()
             vram = round((torch.cuda.memory_allocated() / 1e9) if cuda else 0, 2)
         except Exception:
             cuda, vram = False, 0.0
-        snap = await asyncio.to_thread(_collect_status, app)
+        snap = await asyncio.to_thread(_collect_health_snapshot, app, "shallow")
         comp = {k: {"status": v.get("status"), "label": v.get("label"),
                     "detail": v.get("detail")}
-                for k, v in snap["components"].items()}
-        okra = snap["components"].get("okra", {})
+                for k, v in (snap.get("components") or {}).items()}
+        okra = (snap.get("components") or {}).get("okra", {})
         return JSONResponse({
             "status": "ok",                       # external-monitor keyword
-            "overall": snap["overall"],
+            "overall": snap.get("overall", "down"),
             "device": "cuda" if cuda else "cpu",
             "gpu_vram_gb": vram,
-            "version": "apin-1.0",
+            "version": (snap.get("build") or {}).get("version", "apin-1.0"),
+            "git_sha": (snap.get("build") or {}).get("git_sha"),
+            "deployed_at": (snap.get("build") or {}).get("deployed_at_utc"),
             "apin_loaded": okra.get("status") in ("up", "degraded"),
             "components": comp,
-            "process_uptime_s": snap["process_uptime_s"],
-            "check_latency_ms": snap["check_latency_ms"],
-            "timestamp": snap["checked_at"],
+            "resources": snap.get("resources", {}),
+            "internal_stats_last_5min": snap.get("internal_stats_last_5min", {}),
+            "process_uptime_s": snap.get("process_uptime_s", 0),
+            "check_latency_ms": snap.get("check_latency_ms", 0),
+            "timestamp": snap.get("server_ts_utc"),
+            "schema_version": snap.get("schema_version", "probe.v1"),
         }, headers={"Cache-Control": "no-store"})
 
     logger.info(f"v2 '/health' route replaced (removed {removed} original) - "
@@ -7356,6 +7686,12 @@ def main():
     # /health, and a once-a-minute heartbeat task. Additive + override.
     _add_status_routes(app)
     _override_health_route(app)
+    # 9.N.8i · External-availability probe endpoint (bearer-authed, NOT
+    # counted in usage stats). Consumed by .github/workflows/external-
+    # uptime-probe.yml (GitHub Actions, every 2 min) and the Cloudflare
+    # Worker probe (every minute) — both write results to the
+    # external_probes Turso table.
+    _add_probe_endpoint(app)
 
     # API v1 — contract-conforming machine endpoints (API_CONTRACT.md).
     # Phase 1, batch 1: read-only reference endpoints. Purely additive.

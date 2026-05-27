@@ -1,0 +1,70 @@
+# 9.N.8i · External uptime probe — runs every 2 minutes.
+#
+# This Action probes /api/probe/external on the HF Space, validates the
+# response against the probe.v1 schema, and INSERTs a row into the
+# external_probes Turso table.
+#
+# Why this exists:
+#   · Inside-the-container monitors (/health, /status) can't detect
+#     hibernation — when the container is asleep, those pages don't load.
+#   · An external probe from a different network observes the URL the
+#     way a real user would, catching cold-start timeouts and outages.
+#   · Writing directly to Turso (not via an endpoint on the Space)
+#     means probe results are recorded even when the Space is dead.
+#   · 2-minute cron interval also doubles as a hibernation keep-alive
+#     (HF free-tier sleeps after ~30 min idle).
+#
+# Required secrets (Settings → Secrets and variables → Actions):
+#   · APIN_PROBE_TOKEN      — shared with HF Space env var of same name
+#   · TURSO_DATABASE_URL    — libsql://... (same as Space's secret)
+#   · TURSO_AUTH_TOKEN      — JWT (same as Space's secret)
+#
+# To pause monitoring temporarily, disable this workflow in the GH UI.
+
+name: External Uptime Probe
+
+on:
+  schedule:
+    - cron: '*/2 * * * *'            # every 2 minutes
+  workflow_dispatch:                  # manual trigger for testing
+    inputs:
+      depth:
+        description: 'Probe depth (shallow | deep)'
+        required: false
+        default: 'shallow'
+
+concurrency:
+  group: external-uptime-probe
+  cancel-in-progress: false           # let in-flight probes finish
+
+permissions:
+  contents: read                      # no write perms needed
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2                # individual job timeout safety
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/workflows/scripts/
+
+      - name: Run probe + record to Turso
+        env:
+          PROBE_TARGET_URL:   https://dxv-404-apin.hf.space/api/probe/external
+          PROBE_TOKEN:        ${{ secrets.APIN_PROBE_TOKEN }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN:   ${{ secrets.TURSO_AUTH_TOKEN }}
+          PROBE_SOURCE:       github-actions
+          PROBE_RUNNER:       ubuntu-latest
+          PROBE_REGION:       gh-actions-us
+          PROBE_VERSION:      probe-script.v1.0.0
+          PROBE_DEPTH:        ${{ github.event.inputs.depth || 'shallow' }}
+          SLO_LATENCY_MS:     '5000'
+        run: bash .github/workflows/scripts/run_probe.sh
+
+      # Hourly deep probe — every 30th run (= roughly hourly at 2-min cadence)
+      # adds the deep checks. The script decides this on its own based on
+      # the current minute, so this job doesn't need a separate workflow.

@@ -921,6 +921,152 @@ CREATE TABLE IF NOT EXISTS status_days (
     updated_at   TEXT NOT NULL
 );
 
+-- ═════════════════════════════════════════════════════════════════════════
+-- 9.N.8i · External availability probes.
+--
+-- Records the result of every external monitor probe (GitHub Action +
+-- Cloudflare Worker, every 2 min / 1 min respectively).  These probes
+-- hit /api/probe/external — a dedicated endpoint that is *excluded* from
+-- api_key_request_log so monitoring traffic never inflates user usage
+-- stats.  The probe runner writes results DIRECTLY to Turso, so probe
+-- failures (including HF Space hibernation) are still recorded — the
+-- Space being asleep doesn't break the recording pipeline.
+--
+-- This is the ground-truth source for the /status page's "External
+-- Availability" section.  Heartbeats above (status_days) are the
+-- inside-the-container view; this table is the from-outside view.
+--
+-- Industry-grade column design — every probe captures:
+--   · Identity   : probe_id (UUIDv4 for dedup on retries) + schema_version
+--   · Timing     : 4 timestamps (issued, server-recv, server-send, recorded)
+--                  + 5-stage breakdown (dns, tcp, tls, ttfb, download)
+--   · Outcome    : success flag + overall + error_class enum + error_detail
+--   · HTTP       : status code, body size, sha256 prefix, target_url
+--   · Components : full JSON map + denormalised up/total counts + failures
+--   · Resources  : memory, cpu, gpu vram, disk, fds, event-loop lag
+--   · App stats  : last-5min request count, error rate, p50, p95
+--   · Build      : version, git sha, deployed_at  (drift detection across deploys)
+--   · Provenance : probe_source, runner, region, version, user-agent, depth
+--   · Gates      : 7 boolean gates the probe checks (HTTP 2xx, JSON parse,
+--                  schema match, overall ok, all components up, latency SLO,
+--                  no resource alerts) — for fine-grained failure analysis
+-- ═════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS external_probes (
+    -- ── Identity ────────────────────────────────────────────────────
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    probe_id                 TEXT    NOT NULL,
+    schema_version           TEXT    NOT NULL DEFAULT 'probe.v1',
+
+    -- ── Timing (ISO 8601, UTC, microsecond precision) ───────────────
+    issued_at_utc            TEXT    NOT NULL,
+    server_recv_at_utc       TEXT,
+    server_send_at_utc       TEXT,
+    recorded_at_utc          TEXT    NOT NULL,
+
+    -- ── Outcome ─────────────────────────────────────────────────────
+    success                  INTEGER NOT NULL,
+    overall                  TEXT    NOT NULL,
+    error_class              TEXT,
+    error_detail             TEXT,
+    sla_breach               INTEGER NOT NULL DEFAULT 0,
+
+    -- ── HTTP level ──────────────────────────────────────────────────
+    http_status              INTEGER,
+    target_url               TEXT    NOT NULL,
+    response_bytes           INTEGER,
+    response_checksum_sha256 TEXT,
+
+    -- ── Timing breakdown (probe-perspective, ms) ────────────────────
+    dns_ms                   INTEGER,
+    tcp_connect_ms           INTEGER,
+    tls_handshake_ms         INTEGER,
+    ttfb_ms                  INTEGER,
+    download_ms              INTEGER,
+    total_ms                 INTEGER NOT NULL,
+
+    -- ── Component health (parsed from response body) ────────────────
+    components_json          TEXT,
+    components_up_count      INTEGER,
+    components_total_count   INTEGER,
+    component_failures_json  TEXT,
+
+    -- ── Server-side resource snapshot ───────────────────────────────
+    process_uptime_s         INTEGER,
+    memory_rss_mb            INTEGER,
+    memory_pct               REAL,
+    cpu_pct_1m               REAL,
+    gpu_vram_used_mb         INTEGER,
+    gpu_vram_total_mb        INTEGER,
+    disk_free_gb             REAL,
+    open_fds                 INTEGER,
+    event_loop_lag_ms        INTEGER,
+
+    -- ── Rolling 5-min app stats (from api_key_request_log) ──────────
+    request_count_5m         INTEGER,
+    error_count_5m           INTEGER,
+    error_rate_5m_pct        REAL,
+    p50_latency_5m_ms        INTEGER,
+    p95_latency_5m_ms        INTEGER,
+
+    -- ── Build identity ──────────────────────────────────────────────
+    build_version            TEXT,
+    build_git_sha            TEXT,
+    build_deployed_at_utc    TEXT,
+
+    -- ── Probe provenance ────────────────────────────────────────────
+    probe_source             TEXT    NOT NULL,
+    probe_runner             TEXT,
+    probe_region             TEXT,
+    probe_version            TEXT,
+    probe_depth              TEXT    NOT NULL DEFAULT 'shallow',
+    probe_user_agent         TEXT,
+
+    -- ── Validation gates ────────────────────────────────────────────
+    gate_http_2xx            INTEGER,
+    gate_json_parseable      INTEGER,
+    gate_schema_match        INTEGER,
+    gate_overall_ok          INTEGER,
+    gate_all_components_up   INTEGER,
+    gate_latency_under_slo   INTEGER,
+    gate_no_resource_alerts  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_external_probes_issued_at
+    ON external_probes(issued_at_utc DESC);
+CREATE INDEX IF NOT EXISTS idx_external_probes_success_issued
+    ON external_probes(success, issued_at_utc DESC);
+CREATE INDEX IF NOT EXISTS idx_external_probes_source_issued
+    ON external_probes(probe_source, issued_at_utc DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_external_probes_probe_id
+    ON external_probes(probe_id);
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 9.N.8i · Daily rollup of external_probes.
+--
+-- Populated by .github/workflows/external-uptime-daily-rollup.yml at 00:05 UTC
+-- every day.  Lets /status render the 90-day uptime chart in 1 query
+-- instead of scanning ~64k raw rows (90d × ~720 2-min slots).  Raw rows
+-- are retained for 90 days; rollup rows are retained forever.
+-- ═════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS external_probes_daily (
+    day                      TEXT    PRIMARY KEY,
+    probes_total             INTEGER NOT NULL DEFAULT 0,
+    probes_success           INTEGER NOT NULL DEFAULT 0,
+    probes_failed            INTEGER NOT NULL DEFAULT 0,
+    uptime_pct               REAL    NOT NULL DEFAULT 0,
+    p50_ms                   INTEGER,
+    p95_ms                   INTEGER,
+    p99_ms                   INTEGER,
+    max_ms                   INTEGER,
+    error_breakdown_json     TEXT,
+    incident_count           INTEGER NOT NULL DEFAULT 0,
+    longest_outage_minutes   INTEGER,
+    mttr_avg_minutes         INTEGER,
+    first_failure_utc        TEXT,
+    last_failure_utc         TEXT,
+    sources_breakdown_json   TEXT,
+    updated_at_utc           TEXT    NOT NULL
+);
+
 -- Machine API keys (Bearer tokens) tied to a user account.
 -- token_hash    : sha256(raw_token) hex; the raw token is shown to the
 --                 caller ONCE on creation and is never recoverable after.

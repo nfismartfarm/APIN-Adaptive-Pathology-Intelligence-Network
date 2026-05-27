@@ -1,0 +1,32 @@
+# 9.N.8i · Cloudflare Worker for external uptime probing.
+#
+# Runs once per minute (cron trigger), parallel to the GitHub Action
+# probe that runs every 2 minutes. Two probe sources give us:
+#   1. Cross-validation — disagreement between sources reveals network
+#      issues between specific regions (CF edge → HF vs GH → HF).
+#   2. Higher resolution — 1-min CF + 2-min GH = effective 40s probe
+#      cadence at the table level.
+#   3. Failover — if GH Actions has an outage of its own, CF keeps
+#      collecting data (and vice versa).
+#
+# Setup:
+#   $ npm install -g wrangler
+#   $ wrangler login
+#   $ cd cloudflare-worker
+#   $ wrangler secret put APIN_PROBE_TOKEN     # paste the token
+#   $ wrangler secret put TURSO_DATABASE_URL   # libsql://...
+#   $ wrangler secret put TURSO_AUTH_TOKEN     # JWT
+#   $ wrangler deploy
+
+name = "apin-uptime-probe"
+main = "probe-worker.js"
+compatibility_date = "2025-05-01"
+
+# Cron schedule — every minute on the dot
+[triggers]
+crons = ["* * * * *"]
+
+# Free-tier Worker limits: 100k requests/day, 10ms CPU per invocation.
+# Our probe is one curl + one Turso INSERT, well within limits.
+[observability]
+enabled = true

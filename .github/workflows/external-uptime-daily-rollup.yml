@@ -1,0 +1,158 @@
+# 9.N.8i · Daily rollup of external_probes -> external_probes_daily.
+#
+# Runs at 00:05 UTC daily, aggregates the previous day's external_probes
+# rows into one external_probes_daily row. Lets /status render the
+# 90-day uptime chart in a single ~90-row query instead of scanning
+# ~64,800 raw rows (90d × 720 2-min slots).
+#
+# Aggregations:
+#   · probes_total / probes_success / probes_failed
+#   · uptime_pct
+#   · p50 / p95 / p99 / max latency
+#   · error_breakdown_json — {"timeout":3,"http_5xx":1,...}
+#   · incident_count + longest_outage_minutes + mttr_avg_minutes
+#   · sources_breakdown_json — per-probe-source success/total
+#
+# After rollup, raw external_probes rows older than 90 days are deleted
+# in a second statement (kept-forever rollups preserve the long view).
+
+name: External Uptime Daily Rollup
+
+on:
+  schedule:
+    - cron: '5 0 * * *'              # 00:05 UTC daily
+  workflow_dispatch: {}
+
+concurrency:
+  group: external-uptime-rollup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rollup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compute yesterday's rollup + retention prune
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN:   ${{ secrets.TURSO_AUTH_TOKEN }}
+          RETENTION_DAYS:     '90'
+        run: |
+          set -uo pipefail
+          DAY=$(date -u -d 'yesterday' +%Y-%m-%d)
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.%6NZ")
+          TURSO_HTTP_URL=$(echo "${TURSO_DATABASE_URL}" | sed 's|^libsql://|https://|')
+
+          echo "==> Computing rollup for ${DAY}"
+
+          # We compute the rollup in SQL — Turso supports SELECT aggregates +
+          # CTEs which is plenty. One UPSERT statement per metric kept us
+          # simple; one combined UPSERT is faster but harder to read.
+          ROLLUP_SQL="
+          INSERT INTO external_probes_daily (
+            day, probes_total, probes_success, probes_failed, uptime_pct,
+            p50_ms, p95_ms, p99_ms, max_ms,
+            error_breakdown_json, incident_count, longest_outage_minutes,
+            mttr_avg_minutes, first_failure_utc, last_failure_utc,
+            sources_breakdown_json, updated_at_utc
+          )
+          SELECT
+            '${DAY}',
+            COUNT(*),
+            SUM(success),
+            COUNT(*) - SUM(success),
+            CASE WHEN COUNT(*) = 0 THEN 0.0
+                 ELSE ROUND(100.0 * SUM(success) / COUNT(*), 3) END,
+            -- p50/p95/p99/max via NTILE on total_ms; SQLite doesn't have
+            -- percentile_cont but we can fake it with ordered position.
+            (SELECT total_ms FROM external_probes
+              WHERE substr(issued_at_utc,1,10)='${DAY}' AND total_ms IS NOT NULL
+              ORDER BY total_ms LIMIT 1 OFFSET CAST((COUNT()*0.50) AS INT)),
+            (SELECT total_ms FROM external_probes
+              WHERE substr(issued_at_utc,1,10)='${DAY}' AND total_ms IS NOT NULL
+              ORDER BY total_ms LIMIT 1 OFFSET CAST((COUNT()*0.95) AS INT)),
+            (SELECT total_ms FROM external_probes
+              WHERE substr(issued_at_utc,1,10)='${DAY}' AND total_ms IS NOT NULL
+              ORDER BY total_ms LIMIT 1 OFFSET CAST((COUNT()*0.99) AS INT)),
+            MAX(total_ms),
+            -- error_breakdown — group by error_class, return as JSON object
+            (SELECT json_group_object(error_class, n) FROM (
+                SELECT error_class, COUNT(*) AS n FROM external_probes
+                WHERE substr(issued_at_utc,1,10)='${DAY}'
+                  AND success = 0 AND error_class IS NOT NULL
+                GROUP BY error_class
+            )),
+            -- incident_count: rough heuristic — count transitions from
+            -- success=1 to success=0 in the day's timeline.
+            (SELECT COUNT(*) FROM (
+                SELECT issued_at_utc, success,
+                       LAG(success) OVER (ORDER BY issued_at_utc) AS prev_s
+                FROM external_probes
+                WHERE substr(issued_at_utc,1,10)='${DAY}'
+            ) WHERE success = 0 AND (prev_s = 1 OR prev_s IS NULL)),
+            -- longest_outage_minutes — placeholder for now; needs window
+            -- functions that are non-trivial in SQLite; daily rollup CT runs
+            -- and we'll do a v2 pass in Python if needed.
+            NULL,
+            NULL,                                       -- mttr_avg_minutes (deferred)
+            MIN(CASE WHEN success=0 THEN issued_at_utc END),
+            MAX(CASE WHEN success=0 THEN issued_at_utc END),
+            -- sources_breakdown — per-source success/total counts
+            (SELECT json_group_object(probe_source,
+                json_object('success', s, 'total', t))
+             FROM (
+                SELECT probe_source, SUM(success) AS s, COUNT(*) AS t
+                FROM external_probes
+                WHERE substr(issued_at_utc,1,10)='${DAY}'
+                GROUP BY probe_source
+             )),
+            '${NOW}'
+          FROM external_probes
+          WHERE substr(issued_at_utc,1,10) = '${DAY}'
+          ON CONFLICT(day) DO UPDATE SET
+            probes_total           = excluded.probes_total,
+            probes_success         = excluded.probes_success,
+            probes_failed          = excluded.probes_failed,
+            uptime_pct             = excluded.uptime_pct,
+            p50_ms                 = excluded.p50_ms,
+            p95_ms                 = excluded.p95_ms,
+            p99_ms                 = excluded.p99_ms,
+            max_ms                 = excluded.max_ms,
+            error_breakdown_json   = excluded.error_breakdown_json,
+            incident_count         = excluded.incident_count,
+            longest_outage_minutes = excluded.longest_outage_minutes,
+            mttr_avg_minutes       = excluded.mttr_avg_minutes,
+            first_failure_utc      = excluded.first_failure_utc,
+            last_failure_utc       = excluded.last_failure_utc,
+            sources_breakdown_json = excluded.sources_breakdown_json,
+            updated_at_utc         = excluded.updated_at_utc;
+          "
+
+          # Retention prune — drop raw rows > RETENTION_DAYS old
+          PRUNE_SQL="
+          DELETE FROM external_probes
+          WHERE issued_at_utc < datetime('now', '-${RETENTION_DAYS} days');
+          "
+
+          # Submit both as separate pipeline requests so a rollup failure
+          # doesn't block retention (or vice-versa).
+          for stmt in "${ROLLUP_SQL}" "${PRUNE_SQL}"; do
+            PAYLOAD=$(jq -n --arg s "${stmt}" '{requests:[{type:"execute",stmt:{sql:$s}}]}')
+            RESP=$(curl -sS \
+              --max-time 30 \
+              -X POST \
+              -H "Authorization: Bearer ${TURSO_AUTH_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "${PAYLOAD}" \
+              "${TURSO_HTTP_URL}/v2/pipeline")
+            if echo "${RESP}" | jq -e '.results[0].type == "ok"' >/dev/null 2>&1; then
+              echo "==> stmt ok"
+            else
+              echo "==> stmt failed:"
+              echo "${RESP}" | jq -C . 2>/dev/null || echo "${RESP}"
+            fi
+          done
+          echo "==> done"

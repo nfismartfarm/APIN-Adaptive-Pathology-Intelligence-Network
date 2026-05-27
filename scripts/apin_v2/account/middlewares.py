@@ -996,6 +996,10 @@ class UsageRecordingMiddleware:
             "/static/",
             "/auth/",
             "/api/auth/",
+            "/api/probe/",     # 9.N.8i · External availability probes —
+                               # MUST be excluded so monitoring traffic
+                               # never inflates user API usage counts.
+                               # See external_probes table.
             "/dashboard",
             "/health",
             "/status",
