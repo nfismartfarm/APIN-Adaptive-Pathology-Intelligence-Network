@@ -219,6 +219,14 @@ class TokenFormatMiddleware:
         if not path.startswith("/api/"):
             return await self.app(scope, receive, send)
 
+        # 9.N.8i · External probe endpoint uses a different auth scheme
+        # (APIN_PROBE_TOKEN env var, not user API keys). Its token doesn't
+        # match T.VALID_TOKEN_REGEX, so the format check below would 401
+        # every probe. Bypass token-format checks for the probe endpoint;
+        # the endpoint handler does its own constant-time HMAC compare.
+        if path.startswith("/api/probe/"):
+            return await self.app(scope, receive, send)
+
         headers = _scope_headers_dict(scope)
         # Header values arrive as bytes — decode with latin1 (lossless for
         # ASCII; we don't accept non-ASCII tokens anyway, but the decode
