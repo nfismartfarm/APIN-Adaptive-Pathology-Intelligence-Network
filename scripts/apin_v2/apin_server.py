@@ -1038,6 +1038,147 @@ _ACCOUNT_CHIP_SNIPPET = """
 """
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# 9.N.8h · Splash + warmup overlay — injected into EVERY HTML page so cold
+# starts on the HF Space don't show a blank page.  Defined here once and
+# inserted right after <body> by _inject_splash().  Was previously inline
+# in ui_template.html only, which meant /docs, /landing, /status, /pipeline,
+# console_*, etc. all loaded with no visual feedback during cold start.
+#
+# The overlay paints immediately from the inline CSS, probes /health until
+# it's fast, then fades.  Hard 18s failsafe.  sessionStorage flag prevents
+# the probe from running on every internal navigation.  Service worker is
+# registered here so subsequent visits hit the static-asset cache.
+# ─────────────────────────────────────────────────────────────────────────
+_SPLASH_HTML = """
+<!-- ── apin-splash · injected on every HTML page (9.N.8h) ─────────────── -->
+<div id="apin-splash" role="status" aria-live="polite">
+  <div class="splash-inner">
+    <svg class="splash-leaf" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 52 C 12 32 28 14 52 12 C 50 36 32 52 12 52 Z"/>
+      <path d="M12 52 C 22 42 32 32 52 12"/>
+      <path d="M28 38 L 36 30"/>
+      <path d="M22 44 L 30 36"/>
+    </svg>
+    <h1 class="splash-title">APIN</h1>
+    <p class="splash-sub" id="apin-splash-sub">warming up the server&hellip;</p>
+    <div class="splash-progress" aria-hidden="true"><div class="splash-bar" id="apin-splash-bar"></div></div>
+    <p class="splash-hint">first visit may take up to 30s &middot; subsequent visits are cached</p>
+  </div>
+</div>
+<style id="apin-splash-css">
+  #apin-splash{position:fixed;inset:0;z-index:1000000;background:#f5efe1;
+    display:flex;align-items:center;justify-content:center;
+    transition:opacity .28s ease,visibility .28s ease;}
+  #apin-splash.is-hidden{opacity:0;visibility:hidden;pointer-events:none;}
+  #apin-splash .splash-inner{text-align:center;max-width:420px;padding:32px;
+    font-family:'Inter',system-ui,sans-serif;}
+  #apin-splash .splash-leaf{width:72px;height:72px;color:#2f6f3e;
+    animation:apin-splash-pulse 1.8s ease-in-out infinite;}
+  #apin-splash .splash-title{font-family:'Fraunces',Georgia,serif;
+    font-weight:500;font-size:34px;color:#1a1612;margin:14px 0 4px;
+    letter-spacing:.04em;font-feature-settings:"ss01" on;}
+  #apin-splash .splash-sub{font-family:'Fraunces',Georgia,serif;
+    font-style:italic;color:#6b6453;margin:0 0 20px;font-size:14.5px;
+    min-height:1.4em;}
+  #apin-splash .splash-progress{width:240px;height:3px;background:#e6dcc5;
+    margin:0 auto 18px;border-radius:2px;overflow:hidden;}
+  #apin-splash .splash-bar{height:100%;background:#2f6f3e;width:5%;
+    transition:width .5s cubic-bezier(.4,.0,.2,1);}
+  #apin-splash .splash-hint{font-family:'JetBrains Mono',monospace;
+    font-size:11px;color:#9a907a;margin:0;line-height:1.6;}
+  @keyframes apin-splash-pulse{
+    0%,100%{transform:scale(1);opacity:1;}
+    50%{transform:scale(1.08);opacity:.65;}
+  }
+</style>
+<script>
+(function(){
+  'use strict';
+  var splash = document.getElementById('apin-splash');
+  if (!splash) return;
+  var bar    = document.getElementById('apin-splash-bar');
+  var sub    = document.getElementById('apin-splash-sub');
+  try {
+    if (sessionStorage.getItem('apin_warm') === '1') {
+      _setProgress(70, 'restoring session…');
+      setTimeout(_hideSplash, 250);
+      return;
+    }
+  } catch (_) {}
+  var startedAt = Date.now();
+  var MIN_SHOWN_MS = 350, MAX_SHOWN_MS = 18000;
+  var probes = 0, current = 5;
+  function _setProgress(p, label) {
+    current = Math.min(99, Math.max(current, p));
+    if (bar) bar.style.width = current + '%';
+    if (label && sub) sub.textContent = label;
+  }
+  function _hideSplash() {
+    var elapsed = Date.now() - startedAt;
+    var wait = Math.max(0, MIN_SHOWN_MS - elapsed);
+    setTimeout(function(){
+      _setProgress(100, 'ready');
+      try { sessionStorage.setItem('apin_warm', '1'); } catch (_) {}
+      setTimeout(function(){
+        splash.classList.add('is-hidden');
+        setTimeout(function(){ if (splash.parentNode) splash.parentNode.removeChild(splash); }, 350);
+      }, 150);
+    }, wait);
+  }
+  function _probe() {
+    probes++;
+    var t0 = Date.now();
+    fetch('/health', { cache: 'no-store', credentials: 'omit' })
+      .then(function(r){
+        var dt = Date.now() - t0;
+        if (r.ok && dt < 1500) { _setProgress(85, 'loading assets…'); _hideSplash(); }
+        else if (r.ok) {
+          _setProgress(Math.min(75, 15 + probes * 6), 'starting up (' + probes + '×)');
+          if (probes < 25) setTimeout(_probe, 800); else _hideSplash();
+        } else {
+          if (probes < 15) setTimeout(_probe, 1200); else _hideSplash();
+        }
+      })
+      .catch(function(){
+        _setProgress(Math.min(60, 15 + probes * 5), 'waking the container…');
+        if (probes < 25) setTimeout(_probe, 1500); else _hideSplash();
+      });
+  }
+  setTimeout(_hideSplash, MAX_SHOWN_MS);
+  _probe();
+  setInterval(function(){
+    fetch('/health', { cache: 'no-store', credentials: 'omit' }).catch(function(){});
+  }, 240000);
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('/apin_sw.js').catch(function(){});
+    });
+  }
+})();
+</script>
+<!-- ── /apin-splash ──────────────────────────────────────────────────── -->
+"""
+
+
+def _inject_splash(html: str) -> str:
+    """Insert _SPLASH_HTML right after the first <body...> tag.
+
+    Returns the original HTML unchanged if no <body> is found (e.g. an
+    error page fallback) — never raises.  Idempotent: if the splash is
+    already present (e.g. ui_template.html still has its inline copy
+    during a partial deploy), the second insertion is suppressed.
+    """
+    if not html or "apin-splash" in html:
+        return html      # idempotent — already injected or pre-injected
+    import re as _re
+    m = _re.search(r"<body\b[^>]*>", html, _re.IGNORECASE)
+    if not m:
+        return html
+    idx = m.end()
+    return html[:idx] + _SPLASH_HTML + html[idx:]
+
+
 def _load_v2_html() -> str:
     """Load the v2 UI template + inject account-chip overlay.
 
@@ -1057,14 +1198,14 @@ def _load_v2_html() -> str:
     # (#acct-area) + auth modal which understand the full auth model
     # (user / guest / anonymous).  Injecting the old chip too produced a
     # duplicate "sign in" affordance in the masthead.
-    return html
+    return _inject_splash(html)        # 9.N.8h · splash on home page too
 
 
 def _load_landing_html() -> str:
     """Load the cinematic landing/login page (apin_v2 only)."""
     html_path = APIN_V2_DIR / "landing.html"
     try:
-        return html_path.read_text(encoding="utf-8")
+        return _inject_splash(html_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return (f"<h1>apin_v2/landing.html missing</h1>"
                 f"<p>Expected at {html_path}</p>")
@@ -1220,10 +1361,16 @@ def _load_html(filename: str) -> str:
     """Generic loader for Phase 3 HTML pages (reports.html, loupe.html,
     gallery.html, settings.html, share.html). Returns a friendly fallback
     page if the file is missing — useful during dev when a page is half-
-    built."""
+    built.
+
+    9.N.8h · Every page loaded here gets the splash overlay injected right
+    after <body>.  That covers docs, status, health, pipeline, keys, the
+    8 console pages, and all the Phase 3 pages.  The home page (ui_template)
+    and landing page get the same treatment via _load_v2_html and
+    _load_landing_html respectively, so the splash now appears EVERYWHERE."""
     html_path = APIN_V2_DIR / filename
     try:
-        return html_path.read_text(encoding="utf-8")
+        return _inject_splash(html_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return (f"<!doctype html><meta charset=utf-8>"
                 f"<title>{filename} missing</title>"
