@@ -1092,11 +1092,12 @@ _SPLASH_HTML = """
     50%{transform:scale(1.08);opacity:.65;}
   }
 </style>
-<!-- Dismiss logic loaded as external file — account pages enforce
-     `script-src 'self'` CSP that blocks inline <script>. The home/docs
-     pages allow inline scripts but loading the external file works on
-     both, so we use a single code path everywhere. -->
-<script src="/static/apin_splash.js" defer></script>
+<!-- Dismiss logic loaded as external file (CSP-compatible).  NO defer or
+     async — the script must run synchronously at parse time so it can
+     monkey-patch window.fetch / XMLHttpRequest BEFORE any other page
+     script gets a chance to fire data calls.  That's what lets the
+     splash wait for the page's own loading to settle, not just /health. -->
+<script src="/static/apin_splash.js"></script>
 <!-- ── /apin-splash ──────────────────────────────────────────────────── -->
 """
 
