@@ -353,12 +353,21 @@
   </div>
 
   <div class="kpis" id="extAvKpis" style="margin-bottom:18px">
-    <div class="kpi"><div id="extUp24" class="val">&mdash;</div>
-      <div class="lbl">24h uptime</div></div>
-    <div class="kpi"><div id="extUp7d" class="val">&mdash;</div>
-      <div class="lbl">7-day uptime</div></div>
-    <div class="kpi"><div id="extUp90d" class="val">&mdash;</div>
-      <div class="lbl">90-day uptime</div></div>
+    <div class="kpi">
+      <div id="extUp24" class="val">&mdash;</div>
+      <div class="lbl">24h uptime <span class="note" style="font-size:9.5px">(URL-reachable)</span></div>
+      <div id="extUp24Strict" style="font-size:11px;color:var(--mute,#6b6453);font-family:'JetBrains Mono',monospace;margin-top:3px">&mdash;</div>
+    </div>
+    <div class="kpi">
+      <div id="extUp7d" class="val">&mdash;</div>
+      <div class="lbl">7-day uptime <span class="note" style="font-size:9.5px">(URL-reachable)</span></div>
+      <div id="extUp7dStrict" style="font-size:11px;color:var(--mute,#6b6453);font-family:'JetBrains Mono',monospace;margin-top:3px">&mdash;</div>
+    </div>
+    <div class="kpi">
+      <div id="extUp90d" class="val">&mdash;</div>
+      <div class="lbl">90-day uptime <span class="note" style="font-size:9.5px">(URL-reachable)</span></div>
+      <div id="extUp90dStrict" style="font-size:11px;color:var(--mute,#6b6453);font-family:'JetBrains Mono',monospace;margin-top:3px">&mdash;</div>
+    </div>
     <div class="kpi"><div id="extP95" class="val">&mdash;</div>
       <div class="lbl">p95 latency (24h)</div></div>
     <div class="kpi"><div id="extProbes24" class="val">&mdash;</div>
@@ -366,6 +375,13 @@
     <div class="kpi"><div id="extIncidents24" class="val">&mdash;</div>
       <div class="lbl">incidents (24h)</div></div>
   </div>
+  <p class="note" style="margin:-10px 0 14px 0;font-size:11.5px;line-height:1.5">
+    <b>URL-reachable</b> &mdash; HTTP 2xx + valid response shape + latency under
+    SLO. This is what users see. <b>Fully-healthy</b> (smaller number underneath)
+    additionally requires every component to report up AND no resource alerts &mdash;
+    the stricter engineering SLO. The two numbers will diverge during ops-only
+    incidents (high memory, degraded subsystem) that don't affect responses.
+  </p>
 
   <div id="extAvBars" class="comp">
     <div class="comp-detail" style="padding-left:0">
@@ -755,10 +771,19 @@
     if(!ea){ ea = {available:false, kpis:{}, bars:[], sources:[], incidents:[]}; }
     var k = ea.kpis || {};
 
-    // KPI tiles
+    // KPI tiles — URL-reachable is the headline; strict shown underneath
     document.getElementById('extUp24').textContent  = fmtPct(k.uptime_24h_pct);
     document.getElementById('extUp7d').textContent  = fmtPct(k.uptime_7d_pct);
     document.getElementById('extUp90d').textContent = fmtPct(k.uptime_90d_pct);
+    document.getElementById('extUp24Strict').textContent =
+      (k.uptime_24h_strict_pct == null ? '—'
+        : 'strict ' + fmtPct(k.uptime_24h_strict_pct));
+    document.getElementById('extUp7dStrict').textContent =
+      (k.uptime_7d_strict_pct == null ? '—'
+        : 'strict ' + fmtPct(k.uptime_7d_strict_pct));
+    document.getElementById('extUp90dStrict').textContent =
+      (k.uptime_90d_strict_pct == null ? '—'
+        : 'strict ' + fmtPct(k.uptime_90d_strict_pct));
     document.getElementById('extP95').textContent   = fmtMs(k.p95_latency_ms);
     document.getElementById('extProbes24').textContent  = fmtNum(k.probes_24h);
     document.getElementById('extIncidents24').textContent = fmtNum(k.incidents_24h);
@@ -815,7 +840,10 @@
         var d = el('span','idot s-'+dotCls);
         var nm = el('span','iname'); nm.textContent = s.name;
         var meta = el('span','imeta');
-        meta.textContent = fmtPct(s.uptime_pct) + ' · '
+        var strictPart = (s.uptime_strict_pct != null && s.uptime_strict_pct !== s.uptime_pct)
+          ? ' (strict ' + fmtPct(s.uptime_strict_pct) + ')'
+          : '';
+        meta.textContent = fmtPct(s.uptime_pct) + strictPart + ' · '
           + fmtNum(s.probes_24h) + ' probes · avg '
           + fmtMs(s.avg_ms) + ' · last ' + fmtAgoShort(s.last_at);
         row.appendChild(d); row.appendChild(nm); row.appendChild(meta);

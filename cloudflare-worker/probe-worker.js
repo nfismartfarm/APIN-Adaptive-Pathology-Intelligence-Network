@@ -118,10 +118,13 @@ async function runProbe(env, depth) {
       if (overall === "operational") gates.overall_ok = 1;
       if (componentsUp === componentsTotal && componentsTotal > 0)
         gates.all_components_up = 1;
-      // Resource alert check
-      const memOk = resources.memory_pct == null || resources.memory_pct < 90;
-      const fdsOk = resources.open_fds   == null || resources.open_fds  < 1000;
-      const dskOk = resources.disk_free_gb == null || resources.disk_free_gb > 0.5;
+      // Resource alert check — uses per-process memory_rss_mb, NOT the
+      // system-wide memory_pct (which on HF Space's shared host reflects
+      // OTHER tenants' memory usage, not ours).  HF free-tier hard-kills
+      // around 2 GB, so 1800 MB is a sensible per-process ceiling.
+      const memOk = resources.memory_rss_mb == null || resources.memory_rss_mb < 1800;
+      const fdsOk = resources.open_fds      == null || resources.open_fds      < 1000;
+      const dskOk = resources.disk_free_gb  == null || resources.disk_free_gb  > 0.5;
       gates.no_resource_alerts = (memOk && fdsOk && dskOk) ? 1 : 0;
     }
   }
@@ -154,7 +157,7 @@ async function runProbe(env, depth) {
     errorDetail = `total_ms=${totalMs} exceeded slo=${SLO_LATENCY_MS}`;
   } else if (!gates.no_resource_alerts) {
     errorClass = "resource_alert";
-    errorDetail = `mem=${resources.memory_pct} fds=${resources.open_fds} disk=${resources.disk_free_gb}`;
+    errorDetail = `mem_rss=${resources.memory_rss_mb}MB fds=${resources.open_fds} disk=${resources.disk_free_gb}GB`;
   }
 
   const success = (gates.http_2xx && gates.json_parseable && gates.schema_match &&

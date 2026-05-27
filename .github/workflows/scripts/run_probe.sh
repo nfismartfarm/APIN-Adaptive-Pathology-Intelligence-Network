@@ -175,8 +175,15 @@ if [ -s /tmp/probe_body ] && jq -e . /tmp/probe_body >/dev/null 2>&1; then
     if [ "${COMPONENTS_UP_COUNT}" = "${COMPONENTS_TOTAL_COUNT}" ] && [ "${COMPONENTS_UP_COUNT}" != "null" ]; then
       GATE_ALL_COMPONENTS_UP=1
     fi
-    # Gate 7: no resource alerts (memory < 90%, fds < 1000, disk > 0.5GB)
-    if [ "${MEMORY_PCT}" != "null" ] && awk -v v="${MEMORY_PCT}" 'BEGIN{exit !(v < 90)}' && \
+    # Gate 7: no resource alerts.
+    # Per-process memory (memory_rss_mb) < 1800 MB on HF free-tier (hard
+    # limit is ~2 GB), open_fds < 1000, disk > 0.5 GB.
+    # memory_pct was REMOVED from this gate — on a shared HF Space it
+    # measures the WHOLE NODE's memory (including other tenants), which
+    # is environmental noise our app can do nothing about.  See
+    # _qa_tmp/investigate_resource_alerts.py for the diagnosis (memory_pct
+    # ranged 71-96% while RSS stayed flat at ~1360 MB).
+    if { [ "${MEMORY_RSS_MB}" = "null" ] || [ "${MEMORY_RSS_MB}" -lt 1800 ]; } && \
        { [ "${OPEN_FDS}" = "null" ] || [ "${OPEN_FDS}" -lt 1000 ]; } && \
        { [ "${DISK_FREE_GB}" = "null" ] || awk -v v="${DISK_FREE_GB}" 'BEGIN{exit !(v > 0.5)}'; }; then
       GATE_NO_RESOURCE_ALERTS=1
@@ -230,7 +237,7 @@ elif [ "${GATE_LATENCY_UNDER_SLO}" = "0" ]; then
   ERROR_DETAIL="total_ms=${TOTAL_MS} exceeded slo=${SLO_LATENCY_MS}"
 elif [ "${GATE_NO_RESOURCE_ALERTS}" = "0" ]; then
   ERROR_CLASS="resource_alert"
-  ERROR_DETAIL="memory_pct=${MEMORY_PCT} open_fds=${OPEN_FDS} disk_free_gb=${DISK_FREE_GB}"
+  ERROR_DETAIL="memory_rss_mb=${MEMORY_RSS_MB} open_fds=${OPEN_FDS} disk_free_gb=${DISK_FREE_GB}"
 fi
 
 # Final success = all gates passed

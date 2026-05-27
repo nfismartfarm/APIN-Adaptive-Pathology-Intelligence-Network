@@ -3197,31 +3197,70 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
             except Exception:
                 return {}
 
+        # 9.N.8i · Dual-track uptime scoring.
+        #
+        # success (1/0)  — STRICT: every one of the 7 gates passes.  This is
+        #                  the engineering view: "is everything as it should
+        #                  be?".  Resource-alert false-positives on shared
+        #                  hosts (see `memory_pct` issue) can drag this down.
+        # url_reachable  — DERIVED at read time from the gate columns: HTTP
+        #                  2xx + JSON parseable + schema match + overall ok
+        #                  + latency under SLO.  This is the USER view: "did
+        #                  my request to the URL succeed?".  Ignores
+        #                  resource alerts + component-down signals (which
+        #                  may be ops concerns the user wouldn't notice).
+        #
+        # We report both numbers on /status so the answer to "what's our
+        # uptime?" matches whichever audience is asking.
+        URL_REACHABLE_EXPR = (
+            "CASE WHEN gate_http_2xx=1 AND gate_json_parseable=1 "
+            "      AND gate_schema_match=1 AND gate_overall_ok=1 "
+            "      AND gate_latency_under_slo=1 THEN 1 ELSE 0 END"
+        )
+
         with _adb.get_conn() as conn:
             # ── KPI rollup: 24h / 7d totals + p95 + last probe time ──
             row24 = _row_to_dict(conn.execute(
-                "SELECT COUNT(*) AS n, SUM(success) AS ok, MAX(issued_at_utc) AS last_at "
-                "FROM external_probes WHERE issued_at_utc >= ?",
+                f"SELECT COUNT(*) AS n, "
+                f"       SUM(success) AS ok_strict, "
+                f"       SUM({URL_REACHABLE_EXPR}) AS ok_url, "
+                f"       MAX(issued_at_utc) AS last_at "
+                f"FROM external_probes WHERE issued_at_utc >= ?",
                 (cutoff_24h,)
             ).fetchone())
             row7 = _row_to_dict(conn.execute(
-                "SELECT COUNT(*) AS n, SUM(success) AS ok FROM external_probes "
-                "WHERE issued_at_utc >= ?", (cutoff_7d,)
+                f"SELECT COUNT(*) AS n, "
+                f"       SUM(success) AS ok_strict, "
+                f"       SUM({URL_REACHABLE_EXPR}) AS ok_url "
+                f"FROM external_probes WHERE issued_at_utc >= ?",
+                (cutoff_7d,)
             ).fetchone())
             row90 = _row_to_dict(conn.execute(
-                "SELECT COUNT(*) AS n, SUM(success) AS ok FROM external_probes"
+                f"SELECT COUNT(*) AS n, "
+                f"       SUM(success) AS ok_strict, "
+                f"       SUM({URL_REACHABLE_EXPR}) AS ok_url "
+                f"FROM external_probes"
             ).fetchone())
 
             n24  = int(row24.get("n")  or 0)
-            ok24 = int(row24.get("ok") or 0)
+            ok24_strict = int(row24.get("ok_strict") or 0)
+            ok24_url    = int(row24.get("ok_url")    or 0)
             n7   = int(row7.get("n")   or 0)
-            ok7  = int(row7.get("ok")  or 0)
+            ok7_strict  = int(row7.get("ok_strict")  or 0)
+            ok7_url     = int(row7.get("ok_url")     or 0)
             n90  = int(row90.get("n")  or 0)
-            ok90 = int(row90.get("ok") or 0)
+            ok90_strict = int(row90.get("ok_strict") or 0)
+            ok90_url    = int(row90.get("ok_url")    or 0)
 
-            up24 = round(100.0 * ok24 / n24, 3) if n24 else None
-            up7  = round(100.0 * ok7  / n7,  3) if n7  else None
-            up90 = round(100.0 * ok90 / n90, 3) if n90 else None
+            # Strict uptime (all 7 gates)
+            up24_strict = round(100.0 * ok24_strict / n24, 3) if n24 else None
+            up7_strict  = round(100.0 * ok7_strict  / n7,  3) if n7  else None
+            up90_strict = round(100.0 * ok90_strict / n90, 3) if n90 else None
+            # URL-reachable uptime (the headline, user-facing number)
+            up24 = round(100.0 * ok24_url / n24, 3) if n24 else None
+            up7  = round(100.0 * ok7_url  / n7,  3) if n7  else None
+            up90 = round(100.0 * ok90_url / n90, 3) if n90 else None
+
             last_at = row24.get("last_at")
 
             # p95 over last 24h
@@ -3245,26 +3284,30 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
             # Incident count last 24h: rough — count failed probes
             incidents24_count = max(0, n24 - ok24)
 
-            # Per-source health (last 24h)
+            # Per-source health (last 24h) — both URL-reachable and strict
             src_rows = conn.execute(
-                "SELECT probe_source, COUNT(*) AS n, SUM(success) AS ok, "
-                "       AVG(total_ms) AS avg_ms, MAX(issued_at_utc) AS last_at "
-                "FROM external_probes WHERE issued_at_utc >= ? "
-                "GROUP BY probe_source ORDER BY n DESC",
+                f"SELECT probe_source, COUNT(*) AS n, "
+                f"       SUM(success) AS ok_strict, "
+                f"       SUM({URL_REACHABLE_EXPR}) AS ok_url, "
+                f"       AVG(total_ms) AS avg_ms, MAX(issued_at_utc) AS last_at "
+                f"FROM external_probes WHERE issued_at_utc >= ? "
+                f"GROUP BY probe_source ORDER BY n DESC",
                 (cutoff_24h,)
             ).fetchall()
             sources = []
             for r in src_rows:
                 rs = _row_to_dict(r)
-                src_n  = int(rs.get("n")  or 0)
-                src_ok = int(rs.get("ok") or 0)
+                src_n      = int(rs.get("n") or 0)
+                src_ok_url = int(rs.get("ok_url") or 0)
+                src_ok_st  = int(rs.get("ok_strict") or 0)
                 sources.append({
-                    "name":       rs.get("probe_source"),
-                    "probes_24h": src_n,
-                    "ok_24h":     src_ok,
-                    "uptime_pct": round(100.0 * src_ok / src_n, 2) if src_n else None,
-                    "avg_ms":     round(float(rs.get("avg_ms") or 0)),
-                    "last_at":    rs.get("last_at"),
+                    "name":           rs.get("probe_source"),
+                    "probes_24h":     src_n,
+                    "ok_24h":         src_ok_url,
+                    "uptime_pct":     round(100.0 * src_ok_url / src_n, 2) if src_n else None,
+                    "uptime_strict_pct": round(100.0 * src_ok_st / src_n, 2) if src_n else None,
+                    "avg_ms":         round(float(rs.get("avg_ms") or 0)),
+                    "last_at":        rs.get("last_at"),
                 })
 
             # ── 90-day daily bars ────────────────────────────────────
@@ -3281,18 +3324,18 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
                 rd = _row_to_dict(r)
                 rollup_map[rd.get("day")] = rd
 
-            # Aggregate any days missing from rollup by querying raw
+            # Aggregate any days missing from rollup by querying raw.
+            # Bars reflect URL-REACHABLE uptime (user-facing), not strict.
             missing = [dk for dk in day_keys if dk not in rollup_map]
             raw_map = {}
             if missing:
-                # Build day -> {n, ok} from raw probes for the missing days
                 raw_rows = conn.execute(
-                    "SELECT substr(issued_at_utc,1,10) AS day, "
-                    "       COUNT(*) AS n, SUM(success) AS ok "
-                    "FROM external_probes "
-                    "WHERE substr(issued_at_utc,1,10) IN ({}) "
-                    "GROUP BY substr(issued_at_utc,1,10)".format(
-                        ",".join("?" * len(missing))),
+                    f"SELECT substr(issued_at_utc,1,10) AS day, "
+                    f"       COUNT(*) AS n, "
+                    f"       SUM({URL_REACHABLE_EXPR}) AS ok "
+                    f"FROM external_probes "
+                    f"WHERE substr(issued_at_utc,1,10) IN ({','.join('?' * len(missing))}) "
+                    f"GROUP BY substr(issued_at_utc,1,10)",
                     missing
                 ).fetchall()
                 for r in raw_rows:
@@ -3334,22 +3377,41 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
             ).fetchall()
             recent = [_row_to_dict(r) for r in rec_rows]
 
-            # ── Recent incidents (failed probe runs, grouped into windows) ──
+            # ── Recent incidents — URL-reachable failures only ──────────
+            # The bars + KPIs use URL-reachable, so the incidents shown
+            # MUST match.  A probe that returned 200 OK with a healthy
+            # response body but tripped a resource_alert (ops noise) is
+            # not a user-visible incident — exclude it from the list.
             inc_rows = conn.execute(
                 "SELECT issued_at_utc, probe_source, http_status, "
                 "       total_ms, error_class, error_detail "
                 "FROM external_probes "
-                "WHERE success = 0 AND issued_at_utc >= ? "
+                "WHERE issued_at_utc >= ? "
+                "  AND NOT (gate_http_2xx=1 AND gate_json_parseable=1 "
+                "           AND gate_schema_match=1 AND gate_overall_ok=1 "
+                "           AND gate_latency_under_slo=1) "
                 "ORDER BY issued_at_utc DESC LIMIT 50",
                 (cutoff_7d,)
             ).fetchall()
             incidents = [_row_to_dict(r) for r in inc_rows]
+            # URL-reachable incident count (last 24h) — matches the KPI.
+            url_incidents_row = _row_to_dict(conn.execute(
+                f"SELECT COUNT(*) AS n FROM external_probes "
+                f"WHERE issued_at_utc >= ? AND {URL_REACHABLE_EXPR} = 0",
+                (cutoff_24h,)
+            ).fetchone())
+            incidents24_count = int(url_incidents_row.get("n") or 0)
 
         out["available"] = (n90 > 0)
         out["kpis"] = {
+            # URL-reachable uptime (the headline number — user-facing)
             "uptime_24h_pct":   up24,
             "uptime_7d_pct":    up7,
             "uptime_90d_pct":   up90,
+            # Strict uptime (all 7 gates — engineering / SLO view)
+            "uptime_24h_strict_pct": up24_strict,
+            "uptime_7d_strict_pct":  up7_strict,
+            "uptime_90d_strict_pct": up90_strict,
             "probes_24h":       n24,
             "probes_7d":        n7,
             "probes_90d":       n90,
