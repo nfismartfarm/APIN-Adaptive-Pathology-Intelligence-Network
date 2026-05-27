@@ -47,9 +47,14 @@ RUN python -c "import timm; timm.create_model('vit_small_patch14_reg4_dinov2.lvd
 # as `from app.config_* import ...`; `scripts/` is the rest of the codebase.
 # `logo.png` lands at /app/logo.png — the weekly PDF report reads it from
 # the project root to draw the report cover logo.
+# `_qa_tmp/` carries the 5 pipeline-atlas JSON files read at runtime by
+# /api/pipeline_data/{slug} (router, tomato, chilli, forward_pass, phase_d).
+# The folder is in the Space's git repo but was previously not copied into
+# the Docker image — that made every module deep-dive on /pipeline 404.
 COPY --chown=user logo.png .
 COPY --chown=user app/ app/
 COPY --chown=user scripts/ scripts/
+COPY --chown=user _qa_tmp/ _qa_tmp/
 
 EXPOSE 7860
 CMD ["python", "scripts/apin_v2/apin_server.py", "--host", "0.0.0.0", "--port", "7860"]
