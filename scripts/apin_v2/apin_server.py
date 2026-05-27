@@ -3126,6 +3126,12 @@ def _build_status_payload(app) -> dict:
         c["bars"] = bars.get(ck, [])
         components_list.append(c)
 
+    # 9.N.8i · External availability — the ground-truth uptime measured
+    # from outside the container (GH Actions + CF Worker probes). The
+    # data lives in external_probes (raw, 90d) + external_probes_daily
+    # (rollup). This is the section that tells the HONEST uptime story.
+    external_availability = _collect_external_availability_snapshot(day_keys)
+
     return {
         "overall": snap["overall"],
         "checked_at": snap["checked_at"],
@@ -3142,8 +3148,208 @@ def _build_status_payload(app) -> dict:
         "interruptions": interruptions,
         "pulse": pulse,
         "history_days": len(days),
+        "external_availability": external_availability,
         "poll_interval_s": 30,
     }
+
+
+def _collect_external_availability_snapshot(day_keys: list) -> dict:
+    """Aggregate the external_probes + external_probes_daily tables into a
+    snapshot for the /status page's "External Availability" section.
+
+    Returns a dict with:
+      · kpis        : uptime_24h, uptime_7d, uptime_90d, total_probes_24h,
+                      p95_latency_ms, incidents_24h, last_probe_at,
+                      sources_active
+      · bars        : list of 90 day-cells with status (up/down/degraded/nodata)
+                      for the same day_keys the component bars use
+      · sources     : per-probe-source latest health + counts
+      · recent      : last ~50 raw probes for the live strip + drill-down
+      · incidents   : recent failed-probe runs grouped into incident windows
+
+    Wrapped in try/except so a probe-table DB outage degrades to empty
+    section rather than blocking the whole /status payload.
+    """
+    out = {
+        "kpis":      {},
+        "bars":      [],
+        "sources":   [],
+        "recent":    [],
+        "incidents": [],
+        "available": False,
+    }
+    try:
+        from scripts.apin_v2 import auth_db as _adb
+        from datetime import timedelta as _td2
+        now = _utcnow()
+        cutoff_24h = (now - _td2(hours=24)).strftime("%Y-%m-%dT%H:%M:%S.%f")
+        cutoff_7d  = (now - _td2(days=7)).strftime("%Y-%m-%dT%H:%M:%S.%f")
+
+        with _adb.get_conn() as conn:
+            # ── KPI rollup: 24h / 7d totals + p95 + last probe time ──
+            row24 = conn.execute(
+                "SELECT COUNT(*) AS n, SUM(success) AS ok, MAX(issued_at_utc) AS last_at "
+                "FROM external_probes WHERE issued_at_utc >= ?",
+                (cutoff_24h,)
+            ).fetchone()
+            row7 = conn.execute(
+                "SELECT COUNT(*) AS n, SUM(success) AS ok FROM external_probes "
+                "WHERE issued_at_utc >= ?", (cutoff_7d,)
+            ).fetchone()
+            row90 = conn.execute(
+                "SELECT COUNT(*) AS n, SUM(success) AS ok FROM external_probes"
+            ).fetchone()
+
+            n24  = int((row24 or {})["n"] or 0)
+            ok24 = int((row24 or {})["ok"] or 0)
+            n7   = int((row7  or {})["n"]  or 0)
+            ok7  = int((row7  or {})["ok"] or 0)
+            n90  = int((row90 or {})["n"]  or 0)
+            ok90 = int((row90 or {})["ok"] or 0)
+
+            up24 = round(100.0 * ok24 / n24, 3) if n24 else None
+            up7  = round(100.0 * ok7  / n7,  3) if n7  else None
+            up90 = round(100.0 * ok90 / n90, 3) if n90 else None
+            last_at = (row24 or {}).get("last_at") if row24 else None
+
+            # p95 over last 24h
+            p95 = None
+            p50 = None
+            try:
+                lats = conn.execute(
+                    "SELECT total_ms FROM external_probes "
+                    "WHERE issued_at_utc >= ? AND total_ms IS NOT NULL "
+                    "ORDER BY total_ms",
+                    (cutoff_24h,)
+                ).fetchall()
+                if lats:
+                    arr = [int(r["total_ms"]) for r in lats]
+                    p50 = arr[int(len(arr) * 0.50)]
+                    p95 = arr[int(len(arr) * 0.95)] if len(arr) >= 2 else arr[-1]
+            except Exception:
+                pass
+
+            # Incident count last 24h: rough — count failed probes
+            incidents24_count = max(0, n24 - ok24)
+
+            # Per-source health (last 24h)
+            src_rows = conn.execute(
+                "SELECT probe_source, COUNT(*) AS n, SUM(success) AS ok, "
+                "       AVG(total_ms) AS avg_ms, MAX(issued_at_utc) AS last_at "
+                "FROM external_probes WHERE issued_at_utc >= ? "
+                "GROUP BY probe_source ORDER BY n DESC",
+                (cutoff_24h,)
+            ).fetchall()
+            sources = []
+            for r in src_rows:
+                rs = dict(r)
+                src_n  = int(rs["n"] or 0)
+                src_ok = int(rs["ok"] or 0)
+                sources.append({
+                    "name":       rs["probe_source"],
+                    "probes_24h": src_n,
+                    "ok_24h":     src_ok,
+                    "uptime_pct": round(100.0 * src_ok / src_n, 2) if src_n else None,
+                    "avg_ms":     round(float(rs["avg_ms"] or 0)),
+                    "last_at":    rs["last_at"],
+                })
+
+            # ── 90-day daily bars ────────────────────────────────────
+            # Prefer the rollup table; fall back to raw aggregation for
+            # days the rollup hasn't computed yet (today + recent days).
+            rollup_rows = conn.execute(
+                "SELECT day, uptime_pct, probes_total, probes_failed "
+                "FROM external_probes_daily "
+                "WHERE day >= ?",
+                (day_keys[0],)
+            ).fetchall()
+            rollup_map = {dict(r)["day"]: dict(r) for r in rollup_rows}
+
+            # Aggregate any days missing from rollup by querying raw
+            missing = [dk for dk in day_keys if dk not in rollup_map]
+            raw_map = {}
+            if missing:
+                # Build day -> {n, ok} from raw probes for the missing days
+                raw_rows = conn.execute(
+                    "SELECT substr(issued_at_utc,1,10) AS day, "
+                    "       COUNT(*) AS n, SUM(success) AS ok "
+                    "FROM external_probes "
+                    "WHERE substr(issued_at_utc,1,10) IN ({}) "
+                    "GROUP BY substr(issued_at_utc,1,10)".format(
+                        ",".join("?" * len(missing))),
+                    missing
+                ).fetchall()
+                for r in raw_rows:
+                    rd = dict(r)
+                    n = int(rd["n"] or 0)
+                    ok = int(rd["ok"] or 0)
+                    raw_map[rd["day"]] = {
+                        "uptime_pct": round(100.0 * ok / n, 2) if n else None,
+                        "probes_total":  n,
+                        "probes_failed": n - ok,
+                    }
+
+            bars = []
+            for dk in day_keys:
+                d = rollup_map.get(dk) or raw_map.get(dk)
+                if not d or not (d.get("probes_total") or 0):
+                    bars.append({"day": dk, "status": "nodata"})
+                    continue
+                up = float(d.get("uptime_pct") or 0)
+                if up >= 99.5:
+                    st = "up"
+                elif up >= 95.0:
+                    st = "degraded"
+                else:
+                    st = "down"
+                bars.append({
+                    "day": dk, "status": st,
+                    "uptime_pct": up,
+                    "probes_total":  d.get("probes_total"),
+                    "probes_failed": d.get("probes_failed"),
+                })
+
+            # ── Recent probes (last 50, newest first) ────────────────
+            rec_rows = conn.execute(
+                "SELECT issued_at_utc, probe_source, success, http_status, "
+                "       total_ms, error_class, error_detail "
+                "FROM external_probes "
+                "ORDER BY id DESC LIMIT 50"
+            ).fetchall()
+            recent = [dict(r) for r in rec_rows]
+
+            # ── Recent incidents (failed probe runs, grouped into windows) ──
+            inc_rows = conn.execute(
+                "SELECT issued_at_utc, probe_source, http_status, "
+                "       total_ms, error_class, error_detail "
+                "FROM external_probes "
+                "WHERE success = 0 AND issued_at_utc >= ? "
+                "ORDER BY issued_at_utc DESC LIMIT 50",
+                (cutoff_7d,)
+            ).fetchall()
+            incidents = [dict(r) for r in inc_rows]
+
+        out["available"] = (n90 > 0)
+        out["kpis"] = {
+            "uptime_24h_pct":   up24,
+            "uptime_7d_pct":    up7,
+            "uptime_90d_pct":   up90,
+            "probes_24h":       n24,
+            "probes_7d":        n7,
+            "probes_90d":       n90,
+            "p50_latency_ms":   p50,
+            "p95_latency_ms":   p95,
+            "incidents_24h":    incidents24_count,
+            "last_probe_at":    last_at,
+            "sources_active":   len(sources),
+        }
+        out["bars"]      = bars
+        out["sources"]   = sources
+        out["recent"]    = recent
+        out["incidents"] = incidents
+    except Exception as e:
+        logger.warning(f"external_availability snapshot failed (non-fatal): {e}")
+    return out
 
 
 def _heartbeat_tick(app):

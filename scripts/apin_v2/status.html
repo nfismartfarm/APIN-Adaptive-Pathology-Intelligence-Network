@@ -341,10 +341,60 @@
       <div class="lbl">Compute device</div></div>
   </div>
 
-  <!-- components -->
+  <!-- 9.N.8i · External Availability — TRUE uptime from outside the
+       container. Probed by a GitHub Action (every 2 min) and a Cloudflare
+       Worker (every 1 min); results recorded in Turso directly so even
+       container hibernation is captured. This is the section that tells
+       the honest story; the Component Health below is the inside-the-
+       container view. -->
   <div class="sec-head">
-    <h3 class="serif">Components</h3>
-    <span class="note">90-day history &middot; one cell per day</span>
+    <h3 class="serif">External Availability</h3>
+    <span class="note">ground-truth uptime measured from outside the container</span>
+  </div>
+
+  <div class="kpis" id="extAvKpis" style="margin-bottom:18px">
+    <div class="kpi"><div id="extUp24" class="val">&mdash;</div>
+      <div class="lbl">24h uptime</div></div>
+    <div class="kpi"><div id="extUp7d" class="val">&mdash;</div>
+      <div class="lbl">7-day uptime</div></div>
+    <div class="kpi"><div id="extUp90d" class="val">&mdash;</div>
+      <div class="lbl">90-day uptime</div></div>
+    <div class="kpi"><div id="extP95" class="val">&mdash;</div>
+      <div class="lbl">p95 latency (24h)</div></div>
+    <div class="kpi"><div id="extProbes24" class="val">&mdash;</div>
+      <div class="lbl">probes / 24h</div></div>
+    <div class="kpi"><div id="extIncidents24" class="val">&mdash;</div>
+      <div class="lbl">incidents (24h)</div></div>
+  </div>
+
+  <div id="extAvBars" class="comp">
+    <div class="comp-detail" style="padding-left:0">
+      Waiting for external probe data &mdash; the GitHub Action + Cloudflare
+      Worker write to Turso every 1&ndash;2 minutes; the chart below fills in
+      as days accumulate.
+    </div>
+  </div>
+
+  <div class="sec-head" style="margin-top:18px">
+    <h4 class="serif" style="font-size:14.5px;font-weight:500;margin:0">Probe sources (last 24h)</h4>
+    <span class="note">independent vantage points; disagreement reveals network-path issues</span>
+  </div>
+  <div id="extAvSources" class="incidents">
+    <div class="all-clear">Waiting for first probe results&hellip;</div>
+  </div>
+
+  <div class="sec-head" style="margin-top:18px">
+    <h4 class="serif" style="font-size:14.5px;font-weight:500;margin:0">Recent external incidents</h4>
+    <span class="note">failed probes from the last 7 days</span>
+  </div>
+  <div id="extAvIncidents" class="incidents">
+    <div class="all-clear">No external incidents recorded yet.</div>
+  </div>
+
+  <!-- components -->
+  <div class="sec-head" style="margin-top:28px">
+    <h3 class="serif">Component Health</h3>
+    <span class="note">90-day history &middot; one cell per day &middot; inside-the-container view</span>
   </div>
   <div id="components" class="components">
     <div class="comp"><div class="comp-detail" style="padding-left:0">
@@ -674,11 +724,141 @@
     });
   }
 
+  /* ── 9.N.8i · External Availability section ──────────────────── */
+  function fmtPct(v){
+    if(v == null) return '—';
+    var n = Number(v);
+    if(isNaN(n)) return '—';
+    return n.toFixed(n >= 99 ? 3 : 2) + '%';
+  }
+  function fmtMs(v){
+    if(v == null) return '—';
+    if(v < 1000) return Math.round(v) + 'ms';
+    return (v/1000).toFixed(2) + 's';
+  }
+  function fmtNum(v){
+    if(v == null) return '—';
+    return Number(v).toLocaleString();
+  }
+  function fmtAgoShort(iso){
+    if(!iso) return 'never';
+    var t = Date.parse(iso);
+    if(isNaN(t)) return '—';
+    var s = Math.max(0, Math.round((Date.now() - t)/1000));
+    if(s < 60)   return s + 's ago';
+    if(s < 3600) return Math.floor(s/60) + 'm ago';
+    if(s < 86400) return Math.floor(s/3600) + 'h ago';
+    return Math.floor(s/86400) + 'd ago';
+  }
+
+  function renderExternalAvailability(ea){
+    if(!ea){ ea = {available:false, kpis:{}, bars:[], sources:[], incidents:[]}; }
+    var k = ea.kpis || {};
+
+    // KPI tiles
+    document.getElementById('extUp24').textContent  = fmtPct(k.uptime_24h_pct);
+    document.getElementById('extUp7d').textContent  = fmtPct(k.uptime_7d_pct);
+    document.getElementById('extUp90d').textContent = fmtPct(k.uptime_90d_pct);
+    document.getElementById('extP95').textContent   = fmtMs(k.p95_latency_ms);
+    document.getElementById('extProbes24').textContent  = fmtNum(k.probes_24h);
+    document.getElementById('extIncidents24').textContent = fmtNum(k.incidents_24h);
+
+    // 90-day bar chart — same cell styling as the component bars
+    var host = document.getElementById('extAvBars');
+    host.innerHTML = '';
+    var bars = ea.bars || [];
+    if(!bars.length){
+      var ed = el('div','comp-detail'); ed.style.paddingLeft='0';
+      ed.textContent = 'Waiting for external probe data — fills in as days '
+        + 'accumulate (1 row per 1-2 min × 1440 min × N days).';
+      host.appendChild(ed);
+    } else {
+      var bar = el('div','bar');
+      bars.forEach(function(cell){
+        var cv = el('div','cell s-'+(cell.status||'nodata'));
+        var lab;
+        if(cell.status === 'nodata') lab = 'no data yet';
+        else if(cell.status === 'up') lab = 'up — ' + fmtPct(cell.uptime_pct);
+        else lab = (cell.status||'?') + ' — ' + fmtPct(cell.uptime_pct);
+        var pf = (cell.probes_failed||0);
+        if(pf > 0) lab += ' · ' + pf + ' failed of ' + (cell.probes_total||0);
+        cv.title = fmtDay(cell.day) + ' — ' + lab;
+        bar.appendChild(cv);
+      });
+      host.appendChild(bar);
+
+      var foot = el('div','bar-foot');
+      var lf = el('span'); lf.textContent = '90 days ago';
+      var pc = el('span','pct');
+      pc.textContent = (k.uptime_90d_pct == null ? 'collecting...'
+                       : fmtPct(k.uptime_90d_pct) + ' over ' + fmtNum(k.probes_90d) + ' probes');
+      var rf = el('span'); rf.textContent = 'today';
+      foot.appendChild(lf); foot.appendChild(pc); foot.appendChild(rf);
+      host.appendChild(foot);
+    }
+
+    // Per-source list
+    var srcHost = document.getElementById('extAvSources');
+    srcHost.innerHTML = '';
+    var sources = ea.sources || [];
+    if(!sources.length){
+      var sd = el('div','all-clear');
+      sd.textContent = 'No probe sources have reported yet. GH Action + '
+        + 'CF Worker probes will appear here within ~2 minutes.';
+      srcHost.appendChild(sd);
+    } else {
+      sources.forEach(function(s){
+        var row = el('div','incident');
+        var up = s.uptime_pct;
+        var dotCls = (up == null) ? 'nodata' : (up >= 99 ? 'up'
+                       : (up >= 95 ? 'degraded' : 'down'));
+        var d = el('span','idot s-'+dotCls);
+        var nm = el('span','iname'); nm.textContent = s.name;
+        var meta = el('span','imeta');
+        meta.textContent = fmtPct(s.uptime_pct) + ' · '
+          + fmtNum(s.probes_24h) + ' probes · avg '
+          + fmtMs(s.avg_ms) + ' · last ' + fmtAgoShort(s.last_at);
+        row.appendChild(d); row.appendChild(nm); row.appendChild(meta);
+        srcHost.appendChild(row);
+      });
+    }
+
+    // Recent external incidents (failed probes)
+    var incHost = document.getElementById('extAvIncidents');
+    incHost.innerHTML = '';
+    var incs = ea.incidents || [];
+    if(!incs.length){
+      var ic = el('div','all-clear');
+      ic.textContent = ea.available
+        ? '✓ No external incidents recorded in the last 7 days.'
+        : 'No probe data yet — incident detection starts after the first probes.';
+      incHost.appendChild(ic);
+    } else {
+      // Show the first 8 — full list available via API for postmortems
+      incs.slice(0, 8).forEach(function(inc){
+        var row = el('div','incident');
+        row.appendChild(el('span','idot s-down'));
+        var nm = el('span','iname');
+        nm.textContent = (inc.error_class || 'unknown') + ' · '
+          + (inc.probe_source || '?');
+        var meta = el('span','imeta');
+        meta.textContent = fmtDateTime(inc.issued_at_utc) + ' · http '
+          + (inc.http_status || 0) + ' · ' + fmtMs(inc.total_ms);
+        if(inc.error_detail){
+          meta.textContent += ' · ' + String(inc.error_detail).substring(0, 80);
+        }
+        row.appendChild(nm); row.appendChild(meta);
+        incHost.appendChild(row);
+      });
+    }
+  }
+
   /* ── data feed ─────────────────────────────────────────────────── */
   function applyData(d){
     document.getElementById('feedNote').classList.remove('show');
     renderOverall(d);
     renderKpis(d.kpis);
+    renderExternalAvailability(d.external_availability);
     renderComponents(d.components);
     renderPulse(d.pulse);
     renderIncidents(d.downtime);
