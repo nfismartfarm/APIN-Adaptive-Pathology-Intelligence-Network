@@ -1092,71 +1092,11 @@ _SPLASH_HTML = """
     50%{transform:scale(1.08);opacity:.65;}
   }
 </style>
-<script>
-(function(){
-  'use strict';
-  var splash = document.getElementById('apin-splash');
-  if (!splash) return;
-  var bar    = document.getElementById('apin-splash-bar');
-  var sub    = document.getElementById('apin-splash-sub');
-  try {
-    if (sessionStorage.getItem('apin_warm') === '1') {
-      _setProgress(70, 'restoring session…');
-      setTimeout(_hideSplash, 250);
-      return;
-    }
-  } catch (_) {}
-  var startedAt = Date.now();
-  var MIN_SHOWN_MS = 350, MAX_SHOWN_MS = 18000;
-  var probes = 0, current = 5;
-  function _setProgress(p, label) {
-    current = Math.min(99, Math.max(current, p));
-    if (bar) bar.style.width = current + '%';
-    if (label && sub) sub.textContent = label;
-  }
-  function _hideSplash() {
-    var elapsed = Date.now() - startedAt;
-    var wait = Math.max(0, MIN_SHOWN_MS - elapsed);
-    setTimeout(function(){
-      _setProgress(100, 'ready');
-      try { sessionStorage.setItem('apin_warm', '1'); } catch (_) {}
-      setTimeout(function(){
-        splash.classList.add('is-hidden');
-        setTimeout(function(){ if (splash.parentNode) splash.parentNode.removeChild(splash); }, 350);
-      }, 150);
-    }, wait);
-  }
-  function _probe() {
-    probes++;
-    var t0 = Date.now();
-    fetch('/health', { cache: 'no-store', credentials: 'omit' })
-      .then(function(r){
-        var dt = Date.now() - t0;
-        if (r.ok && dt < 1500) { _setProgress(85, 'loading assets…'); _hideSplash(); }
-        else if (r.ok) {
-          _setProgress(Math.min(75, 15 + probes * 6), 'starting up (' + probes + '×)');
-          if (probes < 25) setTimeout(_probe, 800); else _hideSplash();
-        } else {
-          if (probes < 15) setTimeout(_probe, 1200); else _hideSplash();
-        }
-      })
-      .catch(function(){
-        _setProgress(Math.min(60, 15 + probes * 5), 'waking the container…');
-        if (probes < 25) setTimeout(_probe, 1500); else _hideSplash();
-      });
-  }
-  setTimeout(_hideSplash, MAX_SHOWN_MS);
-  _probe();
-  setInterval(function(){
-    fetch('/health', { cache: 'no-store', credentials: 'omit' }).catch(function(){});
-  }, 240000);
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function(){
-      navigator.serviceWorker.register('/apin_sw.js').catch(function(){});
-    });
-  }
-})();
-</script>
+<!-- Dismiss logic loaded as external file — account pages enforce
+     `script-src 'self'` CSP that blocks inline <script>. The home/docs
+     pages allow inline scripts but loading the external file works on
+     both, so we use a single code path everywhere. -->
+<script src="/static/apin_splash.js" defer></script>
 <!-- ── /apin-splash ──────────────────────────────────────────────────── -->
 """
 
@@ -5828,6 +5768,7 @@ def _add_account_console_routes(app):
         "apin_live_pulse.js",      # Phase 9.N.7 — live req/sec chart + commentary
         "apin_syntax.js",          # Phase 9.N.7 — homegrown code highlighter
         "apin_scrubber.js",        # Phase 9.N.11 — time scrubber slider
+        "apin_splash.js",          # 9.N.8h — splash overlay dismiss logic
     }
     _STATIC_JS_CACHE: dict[str, dict] = {}
 
