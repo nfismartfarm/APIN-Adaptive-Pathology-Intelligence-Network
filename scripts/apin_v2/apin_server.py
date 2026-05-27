@@ -3282,7 +3282,9 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
                 pass
 
             # Incident count last 24h: rough — count failed probes
-            incidents24_count = max(0, n24 - ok24)
+            # URL-reachable incidents (overwritten later from a precise query;
+            # this is just a defensive default in case the precise query fails)
+            incidents24_count = max(0, n24 - ok24_url)
 
             # Per-source health (last 24h) — both URL-reachable and strict
             src_rows = conn.execute(
