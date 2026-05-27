@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="__APIN_CSRF_TOKEN__">
+<title>Webhooks · APIN Console</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Phase 7 Wave 5 · Webhooks · full CRUD UI.
+   List, create with one-time secret view, edit, delete with confirm,
+   test-ping with synchronous result panel, rotate-secret with grace
+   window, per-webhook delivery log drawer. Embedded sudo modal.
+   Matches keys.html aesthetic. */
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/fonts/inter-w400.woff2') format('woff2'),local('Inter');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/fonts/inter-w500.woff2') format('woff2'),local('Inter Medium');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;
+  src:url('/fonts/inter-w600.woff2') format('woff2'),local('Inter SemiBold');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;
+  src:url('/fonts/inter-w700.woff2') format('woff2'),local('Inter Bold');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w400.woff2') format('woff2'),local('JetBrains Mono');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w500.woff2') format('woff2'),local('JetBrains Mono Medium');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:600;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w600.woff2') format('woff2'),local('JetBrains Mono SemiBold');}
+:root{
+  --paper:#fbf9f3; --paper-deep:#e9e2d1; --paper-edge:#c7bca9;
+  --ink:#1a1612; --ink-soft:#5a5246;
+  --accent-green:#2f6f3e; --accent-ochre:#b87d1e; --accent-crimson:#b01820;
+  --accent-blue:#2d6a96;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:0 4px 12px rgba(0,0,0,0.06);
+  --shadow-lg:0 12px 32px rgba(0,0,0,0.16);
+  --radius:10px; --radius-sm:6px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#f4efe6;color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;min-height:100vh}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;text-align:left}
+a{color:var(--accent-green);text-decoration:none}
+a:hover{text-decoration:underline}
+input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent-blue);outline-offset:2px}
+[hidden]{display:none !important}
+
+.page{max-width:1080px;margin:0 auto;padding:24px 24px 80px}
+.crumbs{font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);margin-bottom:6px}
+.crumbs a{color:var(--accent-green);font-style:normal}
+.masthead{display:flex;align-items:flex-end;justify-content:space-between;
+  gap:18px;margin-bottom:20px;flex-wrap:wrap}
+.masthead h1{font-family:'Fraunces',serif;font-weight:500;font-size:36px;
+  letter-spacing:-0.018em;line-height:1.05}
+.masthead .subtitle{font-family:'Fraunces',serif;font-style:italic;
+  font-size:15px;color:var(--ink-soft);margin-top:4px}
+.masthead-right{display:flex;align-items:center;gap:12px}
+.cap-pill{font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  padding:7px 14px;background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:14px;color:var(--ink-soft)}
+.cap-pill strong{color:var(--ink);font-weight:600}
+
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;
+  border-radius:var(--radius-sm);font-weight:500;font-size:13.5px;
+  border:1.5px solid var(--paper-edge);background:var(--paper);
+  transition:transform .12s,border-color .12s,background .12s;cursor:pointer}
+.btn:hover{transform:translateY(-1px);border-color:var(--ink-soft)}
+.btn:disabled{opacity:0.45;pointer-events:none;transform:none}
+.btn-primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.btn-primary:hover{background:#000}
+.btn-danger{background:var(--accent-crimson);color:#fff;border-color:var(--accent-crimson)}
+.btn-danger:hover{background:#8a131a;border-color:#8a131a}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--ink-soft)}
+.btn-ghost:hover{background:var(--paper-deep);color:var(--ink)}
+.btn-sm{padding:5px 12px;font-size:12.5px}
+
+/* ── Webhook cards ────────────────────────────────────── */
+.wh-list{display:flex;flex-direction:column;gap:14px;margin-top:6px}
+.wh-card{background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:var(--radius);padding:18px 20px;
+  box-shadow:var(--shadow-sm);transition:box-shadow .12s,border-color .12s}
+.wh-card:hover{box-shadow:var(--shadow-md)}
+.wh-card.disabled{opacity:0.7}
+.wh-card.auto-disabled{border-color:var(--accent-crimson)}
+.wh-head{display:grid;grid-template-columns:1fr auto;gap:16px;
+  align-items:flex-start}
+.wh-url{font-family:'JetBrains Mono',monospace;font-size:14px;
+  font-weight:500;color:var(--ink);word-break:break-all;line-height:1.4}
+.wh-desc{font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);margin-top:4px}
+.wh-status-area{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.wh-pill{padding:3px 11px;border-radius:11px;font-size:11.5px;font-weight:600;
+  font-family:'JetBrains Mono',monospace;text-transform:uppercase;
+  letter-spacing:0.04em}
+.wh-pill.active     {background:#d8e9d3;color:#1f5b32}
+.wh-pill.disabled   {background:var(--paper-deep);color:var(--ink-soft)}
+.wh-pill.auto-disabled{background:#f4cbc8;color:#7c1c1c}
+
+.wh-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:14px;margin-top:14px;padding-top:14px;
+  border-top:1px dashed var(--paper-edge);
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink-soft)}
+.wh-meta dt{font-size:10px;text-transform:uppercase;letter-spacing:0.06em;
+  color:var(--ink-soft);margin-bottom:3px;font-weight:500}
+.wh-meta dd{color:var(--ink);font-size:12px;word-break:break-word}
+
+.wh-events{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.event-chip{font-family:'JetBrains Mono',monospace;font-size:11px;
+  padding:2px 9px;border-radius:10px;background:var(--paper-deep);
+  color:var(--ink-soft);border:1px solid var(--paper-edge)}
+
+.wh-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;
+  padding-top:12px;border-top:1px dashed var(--paper-edge)}
+
+/* Delivery log drawer (per-card) */
+.wh-deliveries{display:none;margin-top:14px;padding-top:14px;
+  border-top:1px dashed var(--paper-edge)}
+.wh-deliveries.open{display:block}
+.wh-deliveries h4{font-family:'Inter',sans-serif;font-weight:600;font-size:12px;
+  text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);
+  margin-bottom:8px}
+.dlv-table{width:100%;border-collapse:collapse;font-size:11.5px;
+  font-family:'JetBrains Mono',monospace}
+.dlv-table th{text-align:left;padding:6px 8px;background:var(--paper-deep);
+  color:var(--ink-soft);font-size:10px;text-transform:uppercase;
+  letter-spacing:0.05em;font-weight:500;border-bottom:1px solid var(--paper-edge)}
+.dlv-table td{padding:6px 8px;border-bottom:1px solid var(--paper-edge);
+  color:var(--ink-soft)}
+.dlv-table td:nth-child(2){color:var(--ink)}
+.dlv-status{padding:1px 7px;border-radius:8px;font-weight:600;font-size:10.5px;
+  text-transform:uppercase;letter-spacing:0.04em}
+.dlv-status.delivered{background:#d8e9d3;color:#1f5b32}
+.dlv-status.failed_attempt,.dlv-status.gave_up{background:#f4cbc8;color:#7c1c1c}
+.dlv-status.queued,.dlv-status.in_flight{background:#fbe3c2;color:#7a4e0a}
+
+/* ── Empty state ──────────────────────────────────────── */
+.list-empty{background:var(--paper);border:1px dashed var(--paper-edge);
+  border-radius:var(--radius);padding:50px 30px;text-align:center;
+  font-family:'Fraunces',serif;color:var(--ink-soft)}
+.list-empty h3{font-weight:500;font-size:22px;color:var(--ink);
+  margin-bottom:10px;font-style:normal}
+.list-empty p{font-style:italic;font-size:14px;line-height:1.7;
+  max-width:480px;margin:0 auto 16px}
+.list-empty .btn{margin-top:6px}
+
+/* ── Service-offline banner ──────────────────────────── */
+.svc-down{background:#fef0f0;border:1px solid #f5c0c0;
+  border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;
+  font-size:13.5px;color:var(--accent-crimson)}
+.svc-down strong{font-weight:600}
+
+/* ── Modals ───────────────────────────────────────────── */
+.modal-veil{position:fixed;inset:0;background:rgba(26,22,18,0.55);
+  z-index:5000;display:flex;align-items:center;justify-content:center;
+  padding:20px;backdrop-filter:blur(4px)}
+.modal{background:var(--paper);border:1.5px solid var(--paper-edge);
+  border-radius:var(--radius);max-width:540px;width:100%;
+  box-shadow:var(--shadow-lg);overflow:hidden;display:flex;flex-direction:column;
+  max-height:90vh}
+.modal.wide{max-width:680px}
+.modal-head{padding:16px 22px;border-bottom:1px solid var(--paper-edge);
+  display:flex;align-items:center;justify-content:space-between}
+.modal-head h3{font-family:'Fraunces',serif;font-weight:500;font-size:20px}
+.modal-head .modal-close{font-size:22px;color:var(--ink-soft);
+  width:32px;height:32px;display:flex;align-items:center;
+  justify-content:center;border-radius:50%;cursor:pointer}
+.modal-head .modal-close:hover{background:var(--paper-deep);color:var(--ink)}
+.modal-body{padding:20px 22px;overflow-y:auto}
+.modal-body p{margin-bottom:12px;font-size:13.5px;color:var(--ink-soft);line-height:1.6}
+.modal-body p strong{color:var(--ink)}
+.modal-body label{display:block;font-size:13px;margin:14px 0 6px;
+  color:var(--ink);font-weight:500}
+.modal-body label:first-child{margin-top:0}
+.modal-body input[type="text"],
+.modal-body input[type="url"],
+.modal-body input[type="password"],
+.modal-body input[type="number"],
+.modal-body textarea{width:100%;padding:9px 12px;
+  border:1.5px solid var(--paper-edge);border-radius:var(--radius-sm);
+  font-family:'JetBrains Mono',monospace;font-size:13px;background:#fff}
+.modal-body textarea{font-family:'Inter',sans-serif;resize:vertical;
+  min-height:60px;font-size:13.5px}
+.modal-body input:focus,.modal-body textarea:focus{border-color:var(--accent-blue);
+  outline:none}
+.modal-body .field-hint{font-family:'Fraunces',serif;font-style:italic;
+  font-size:12px;color:var(--ink-soft);margin-top:4px}
+.modal-foot{padding:14px 22px 18px;display:flex;justify-content:flex-end;
+  gap:10px;border-top:1px solid var(--paper-edge);background:var(--paper-deep)}
+.error-text{font-family:'Fraunces',serif;font-style:italic;font-size:12.5px;
+  color:var(--accent-crimson);margin-top:8px}
+
+/* Events checkbox grid */
+.events-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:6px 14px;padding:10px;background:var(--paper-deep);
+  border-radius:var(--radius-sm);border:1px solid var(--paper-edge)}
+.events-grid label{display:flex;align-items:center;gap:6px;margin:0;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;cursor:pointer;
+  color:var(--ink);font-weight:400}
+.events-grid input[type=checkbox]{width:14px;height:14px;cursor:pointer}
+
+/* One-time-view secret */
+.secret-reveal{background:var(--paper-deep);border:1px solid var(--paper-edge);
+  padding:12px 14px;border-radius:var(--radius-sm);
+  font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  word-break:break-all;color:var(--ink);margin-bottom:10px;
+  display:flex;align-items:center;gap:10px}
+.secret-reveal code{flex:1;font-family:inherit;font-size:inherit;
+  background:transparent;padding:0}
+.secret-reveal .copy{font-family:'Inter',sans-serif;font-size:11px;
+  padding:4px 10px;border-radius:var(--radius-sm);background:var(--ink);
+  color:var(--paper);border:0;cursor:pointer;flex-shrink:0;font-weight:500}
+.secret-reveal .copy.copied{background:var(--accent-green)}
+
+.callout{background:#fffbe6;border:1px solid #e9d889;
+  border-radius:var(--radius-sm);padding:12px 16px;font-size:13px;
+  line-height:1.6;margin-bottom:10px}
+.callout.warn{background:#fef0f0;border-color:#f5c0c0;color:var(--accent-crimson)}
+.callout.warn strong{color:var(--accent-crimson)}
+
+.test-result{margin-top:12px;padding:14px 18px;border-radius:var(--radius-sm)}
+.test-result.ok{background:#edf5ed;border:1px solid #b5d0b5;color:#1f5b32}
+.test-result.bad{background:#fef0f0;border:1px solid #f5c0c0;color:#7c1c1c}
+.test-result h4{font-family:'Fraunces',serif;font-weight:500;font-size:16px;
+  margin-bottom:6px}
+.test-result .res-meta{font-family:'JetBrains Mono',monospace;font-size:12px;
+  margin-top:4px;color:inherit;opacity:0.85}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%)
+  translateY(8px);background:var(--ink);color:var(--paper);
+  padding:10px 22px;border-radius:var(--radius-sm);font-size:13px;
+  font-weight:500;opacity:0;transition:opacity .2s,transform .2s;
+  z-index:9999;pointer-events:none;box-shadow:var(--shadow-lg)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.err{background:var(--accent-crimson)}
+.toast.ok{background:var(--accent-green)}
+
+@media (max-width: 640px){
+  .wh-head{grid-template-columns:1fr}
+}
+
+/* Phase 8.H · "How to test a webhook" collapsible helper */
+.how-to-test{background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:var(--radius);padding:14px 20px;margin-bottom:16px;
+  box-shadow:var(--shadow-sm)}
+.how-to-test summary{font-family:'Fraunces',serif;font-weight:500;
+  font-size:15px;color:var(--ink);cursor:pointer;list-style:none;
+  padding:2px 0;display:flex;align-items:center;gap:8px}
+.how-to-test summary::marker,
+.how-to-test summary::-webkit-details-marker{display:none}
+.how-to-test summary::before{content:'▸';color:var(--accent-green);
+  font-size:13px;transition:transform .15s;display:inline-block}
+.how-to-test[open] summary::before{transform:rotate(90deg)}
+.how-to-test ol{margin:14px 0 6px 22px;font-size:13.5px;line-height:1.7;
+  color:var(--ink-soft)}
+.how-to-test li{margin-bottom:6px}
+.how-to-test li strong{color:var(--ink);font-weight:500}
+.how-to-test code{font-family:'JetBrains Mono',monospace;font-size:12px;
+  background:var(--paper-deep);padding:1px 6px;border-radius:4px;color:var(--ink)}
+.how-to-test a{color:var(--accent-green);text-decoration:none}
+.how-to-test a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<!-- @ICON_SPRITE@ -->
+<!-- @CONSOLE_NAV@ -->
+<div class="page">
+  <div class="crumbs">
+    <a href="/dashboard">dashboard</a> · <a href="/account/api/keys">API Console</a> · Webhooks
+  </div>
+
+  <div class="masthead">
+    <div>
+      <h1>Webhooks</h1>
+      <p class="subtitle">HMAC-signed events delivered to your URLs when keys, alerts, or deliveries change state</p>
+    </div>
+    <div class="masthead-right">
+      <span class="cap-pill" id="cap-pill">loading&hellip;</span>
+      <button type="button" class="btn btn-primary" id="new-wh-btn">+ new webhook</button>
+    </div>
+  </div>
+
+  <!-- Phase 8.H · Testing-a-webhook helper. Collapsible so it doesn't
+       block returning users; open by default the first time. -->
+  <details class="how-to-test" id="how-to-test" open>
+    <summary>How to test a webhook</summary>
+    <ol>
+      <li>
+        <strong>Set up a free public receiver</strong> at
+        <a href="https://webhook.site" target="_blank" rel="noopener noreferrer">webhook.site</a>
+        or <a href="https://requestbin.com" target="_blank" rel="noopener noreferrer">requestbin.com</a>.
+        Copy the unique URL they give you.
+      </li>
+      <li>
+        Click <strong>+ new webhook</strong> above, paste that URL,
+        subscribe to one or more events, and save. You will see the
+        <code>signing_secret</code> exactly once &mdash; save it.
+      </li>
+      <li>
+        Click the <strong>test</strong> button on the new row. APIN
+        fires one synchronous <code>webhook.test</code> POST and shows
+        the HTTP status the receiver returned. A <code>200</code> here
+        means the receiver got the event and acknowledged it.
+      </li>
+      <li>
+        To verify the signature: on each delivery APIN sends an
+        <code>APIN-Signature</code> header shaped
+        <code>t=&lt;timestamp&gt;,v1=&lt;hex&gt;</code>. Compute
+        <code>HMAC-SHA256(secret, "&lt;timestamp&gt;.&lt;raw-body&gt;")</code>
+        and compare. Reject if the timestamp is older than 5 minutes
+        (replay protection).
+      </li>
+    </ol>
+  </details>
+
+  <div id="svc-down-banner"></div>
+  <div class="wh-list" id="wh-list" aria-live="polite"></div>
+</div>
+
+<!-- ─── Create / edit modal (shared) ─── -->
+<div class="modal-veil" id="wh-modal" hidden>
+  <div class="modal wide">
+    <div class="modal-head">
+      <h3 id="wh-modal-title">New webhook</h3>
+      <button type="button" class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <p id="wh-modal-intro">A webhook receives signed HTTP POSTs whenever the events you subscribe to fire. You will get the signing secret ONCE on create.</p>
+
+      <label for="wh-url">Endpoint URL</label>
+      <input type="url" id="wh-url" placeholder="https://your-app.example.com/webhooks/apin">
+      <p class="field-hint">Must be HTTPS. We do not deliver to plaintext HTTP.</p>
+
+      <label for="wh-desc">Description <span style="color:var(--ink-soft);font-weight:400">(optional)</span></label>
+      <textarea id="wh-desc" maxlength="280" placeholder="What is this webhook for?"></textarea>
+      <p class="field-hint">Up to 280 chars. Surfaces in the list view.</p>
+
+      <label>Subscribe to events</label>
+      <div class="events-grid" id="wh-events">
+        <label><input type="checkbox" value="key.created"> key.created</label>
+        <label><input type="checkbox" value="key.rotated"> key.rotated</label>
+        <label><input type="checkbox" value="key.deleted"> key.deleted</label>
+        <label><input type="checkbox" value="key.first_use_from_new_ip"> key.first_use_from_new_ip</label>
+        <label><input type="checkbox" value="key.quota_exceeded"> key.quota_exceeded</label>
+        <label><input type="checkbox" value="key.rate_limited"> key.rate_limited</label>
+        <label><input type="checkbox" value="key.auth_failed_burst"> key.auth_failed_burst</label>
+        <label><input type="checkbox" value="account.alert_raised"> account.alert_raised</label>
+        <label><input type="checkbox" value="account.settings_changed"> account.settings_changed</label>
+        <label><input type="checkbox" value="webhook.failed"> webhook.failed</label>
+        <label><input type="checkbox" value="webhook.auto_disabled"> webhook.auto_disabled</label>
+      </div>
+
+      <details style="margin-top:14px">
+        <summary style="cursor:pointer;font-size:13px;color:var(--ink-soft);font-weight:500">Advanced (rare)</summary>
+        <label style="margin-top:10px"><input type="checkbox" id="wh-allow-self-signed"> Allow self-signed TLS certs</label>
+        <p class="field-hint">Only useful for staging endpoints. Production should always have a valid cert.</p>
+        <label><input type="checkbox" id="wh-allow-internal"> Allow internal-network targets</label>
+        <p class="field-hint">Skips the SSRF defence that blocks RFC1918 / loopback / link-local. Only enable for tunneled corporate URLs.</p>
+      </details>
+
+      <p class="error-text" id="wh-modal-error" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+      <button type="button" class="btn btn-primary" id="wh-modal-submit">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Secret reveal modal (after create / rotate) ─── -->
+<div class="modal-veil" id="secret-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="secret-title">Save your signing secret</h3>
+      <button type="button" class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <div class="callout warn">
+        <strong>This is the only time we will show this secret.</strong>
+        Save it to your secrets manager now. Use it to verify the
+        <code>APIN-Signature</code> header on incoming deliveries.
+      </div>
+      <div class="secret-reveal">
+        <code id="secret-value">&hellip;</code>
+        <button type="button" class="copy" id="secret-copy">copy</button>
+      </div>
+      <p id="secret-grace-note"></p>
+      <details style="margin-top:8px">
+        <summary style="cursor:pointer;font-size:13px;color:var(--ink-soft);font-weight:500">How verification works</summary>
+        <p style="margin-top:10px;font-size:12.5px">Each delivery has an <code>APIN-Signature</code> header in the form <code>t=&lt;unix-ts&gt;,v1=&lt;hex&gt;</code>. The hex is <code>HMAC-SHA256(secret, "&lt;ts&gt;.&lt;event-id&gt;.&lt;raw-body&gt;")</code>. Compare in constant time. See the <a href="/account/api/quickstart" target="_blank">quickstart</a> for sample verifier code.</p>
+      </details>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-primary" data-close>I have saved it</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Delete confirm modal ─── -->
+<div class="modal-veil" id="delete-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h3>Delete webhook</h3>
+      <button type="button" class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <p>This hard-deletes the webhook and all of its delivery history. <strong>Cannot be undone.</strong></p>
+      <p>Type the webhook URL to confirm:</p>
+      <p style="font-family:'JetBrains Mono',monospace;font-size:12.5px;background:var(--paper-deep);padding:8px 12px;border-radius:6px;word-break:break-all" id="del-url-display"></p>
+      <input type="text" id="del-confirm-input" placeholder="paste the URL above">
+      <p class="error-text" id="delete-error" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+      <button type="button" class="btn btn-danger" id="delete-confirm-btn" disabled>Delete forever</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Test ping modal ─── -->
+<div class="modal-veil" id="test-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h3>Test ping</h3>
+      <button type="button" class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <p>Fire ONE synchronous POST at this URL with a <code>webhook.test</code> event payload. Returns within ~10 s with the HTTP status the receiver returned, or a transport error.</p>
+      <p style="font-family:'JetBrains Mono',monospace;font-size:12.5px;background:var(--paper-deep);padding:8px 12px;border-radius:6px;word-break:break-all" id="test-url-display"></p>
+      <div id="test-result-area"></div>
+      <p class="error-text" id="test-error" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" data-close>Close</button>
+      <button type="button" class="btn btn-primary" id="test-fire-btn">Fire test event</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Rotate secret modal ─── -->
+<div class="modal-veil" id="rotate-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h3>Rotate signing secret</h3>
+      <button type="button" class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <p>Mints a new signing secret. During the grace window, deliveries are signed with the new secret but receivers can verify against EITHER the new or the old secret (via the <code>v1_prev=</code> portion of <code>APIN-Signature</code>).</p>
+      <label for="rotate-grace">Grace window (seconds)</label>
+      <input type="number" id="rotate-grace" min="0" max="2592000" step="60" value="86400">
+      <p class="field-hint"><code>0</code> = old secret stops immediately (drops in-flight deliveries). Default <code>86400</code> = 24 h. Max 30 days.</p>
+      <p class="error-text" id="rotate-error" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+      <button type="button" class="btn btn-primary" id="rotate-confirm-btn">Rotate &amp; reveal new secret</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Sudo modal (embedded) ─── -->
+<div class="modal-veil" id="sudo-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h3>Confirm with password</h3>
+      <button type="button" class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <p>This action requires <strong>sudo re-authentication</strong>. After confirming, you can take more actions without re-entering your password until the sudo window expires.</p>
+      <label for="sudo-pw">Account password</label>
+      <input type="password" id="sudo-pw" autocomplete="current-password">
+      <p class="error-text" id="sudo-error" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+      <button type="button" class="btn btn-primary" id="sudo-submit">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/static/console_webhooks.js"></script>
+</body>
+</html>

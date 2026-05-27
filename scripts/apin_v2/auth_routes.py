@@ -250,6 +250,21 @@ async def signup(payload: SignupPayload, request: Request, response: Response):
     ip = request.client.host if request.client else None
     token = auth_db.create_session(user["id"], user_agent=ua, ip_addr=ip)
     _set_session_cookie(response, token, request=request)
+
+    # Stage 2: guest → user conversion. If the visitor was running as a
+    # guest before signing up, attribute their guest_sessions row to the
+    # new account (and emit a goal row). This is non-fatal — a failure
+    # here must NOT block the signup response.
+    try:
+        _guest_raw = request.cookies.get(GUEST_COOKIE)
+        if _guest_raw:
+            _g = auth_db.get_guest_session(_guest_raw)
+            if _g is not None and _g.get("id") is not None:
+                auth_db.mark_guest_converted(int(_g["id"]), int(user["id"]))
+    except Exception:
+        # Never let conversion bookkeeping break the signup.
+        logger.exception("mark_guest_converted failed during signup")
+
     _clear_guest_cookie(response)   # guest → real account: retire the guest session
     auth_db.audit("signup", user_id=user["id"], ip_addr=ip,
                   detail={"username": user["username"]})
@@ -417,6 +432,46 @@ async def me(request: Request):
         "last_seen_at": user["last_seen_at"],
         "predictions_count": auth_db.count_user_predictions(user["id"]),
     }
+
+
+# ─── Phase 8.G · session introspection + sliding-renewal ────────────────────
+# Used by the Console account chip to drive the live countdown + the idle
+# warning modal. Returns just the expiry — never returns the raw token.
+@router.get("/session")
+async def session_info(request: Request):
+    """Return the current session's expiry + created_at + a derived
+    `idle_warning_at` so the client can schedule its warning modal without
+    a second clock-syncing round trip."""
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="not authenticated")
+    info = auth_db.session_introspect(token)
+    if info is None:
+        raise HTTPException(status_code=401, detail="not authenticated")
+    return info
+
+
+@router.post("/extend")
+async def extend(request: Request):
+    """Slide the session expiry forward by SESSION_LIFETIME (or the user's
+    configured `session_absolute_ttl_seconds` in account_settings, if set).
+
+    Cap: cannot exceed the absolute TTL above the session's `created_at`.
+    Once a session has lived its full absolute lifetime, extension is
+    refused with 409 — the client should sign out and back in.
+    """
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="not authenticated")
+    result = auth_db.extend_session(token)
+    if result is None:
+        raise HTTPException(status_code=401, detail="not authenticated")
+    if result.get("error") == "absolute_cap_reached":
+        raise HTTPException(
+            status_code=409,
+            detail="session absolute lifetime reached; please sign in again",
+        )
+    return result
 
 
 @router.get("/history")

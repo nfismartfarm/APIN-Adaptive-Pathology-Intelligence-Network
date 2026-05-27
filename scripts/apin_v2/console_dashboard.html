@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="__APIN_CSRF_TOKEN__">
+<title>Dashboard &middot; APIN Console</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Phase 8.F · Console Dashboard · industry-grade landing page.
+   The Console previously redirected from /account/api to /keys, so users had
+   no real home. This page replaces that gap with:
+     - Welcome strip with predictions count
+     - 4-tile quick-stats grid (keys, alerts, webhooks, sandbox)
+     - Recent activity feed (audit log)
+     - Quick-action cards
+     - System status footer
+   Same paper aesthetic as console_settings.html / keys.html — self-host
+   font rules, Fraunces headings, Inter body, JetBrains Mono mono. */
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/fonts/inter-w400.woff2') format('woff2'),local('Inter');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/fonts/inter-w500.woff2') format('woff2'),local('Inter Medium');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;
+  src:url('/fonts/inter-w600.woff2') format('woff2'),local('Inter SemiBold');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;
+  src:url('/fonts/inter-w700.woff2') format('woff2'),local('Inter Bold');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w400.woff2') format('woff2'),local('JetBrains Mono');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w500.woff2') format('woff2'),local('JetBrains Mono Medium');}
+:root{
+  --paper:#fbf9f3; --paper-deep:#e9e2d1; --paper-edge:#c7bca9;
+  --ink:#1a1612; --ink-soft:#5a5246;
+  --accent-green:#2f6f3e; --accent-ochre:#b87d1e; --accent-crimson:#b01820;
+  --accent-blue:#2d6a96;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:0 4px 12px rgba(0,0,0,0.06);
+  --shadow-lg:0 12px 32px rgba(0,0,0,0.12);
+  --radius:10px;
+  --radius-sm:6px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:#f4efe6;color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;min-height:100vh}
+[hidden]{display:none !important}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;text-align:left}
+a{color:var(--accent-green);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent-blue);outline-offset:2px}
+
+/* ── Layout ──────────────────────────────────────────────────────── */
+.page{max-width:1120px;margin:0 auto;padding:24px 24px 80px}
+.crumbs{font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);margin-bottom:8px}
+.crumbs a{color:var(--accent-green);font-style:normal}
+
+/* ── Hero / Welcome ──────────────────────────────────────────────── */
+.hero{background:linear-gradient(135deg,#fbf9f3 0%,#f4efe6 100%);
+  border:1px solid var(--paper-edge);border-radius:14px;
+  padding:32px 36px;margin-bottom:22px;box-shadow:var(--shadow-md);
+  display:grid;grid-template-columns:1fr auto;gap:28px;align-items:center}
+.hero h1{font-family:'Fraunces',serif;font-weight:500;font-size:36px;
+  letter-spacing:-0.018em;line-height:1.05;margin-bottom:8px}
+.hero h1 .username{color:var(--accent-green)}
+.hero .greeting{font-family:'Fraunces',serif;font-style:italic;
+  font-size:17px;color:var(--ink-soft);margin-bottom:14px}
+.hero .meta{display:flex;gap:18px;font-size:13px;color:var(--ink-soft);
+  font-family:'JetBrains Mono',monospace;flex-wrap:wrap}
+.hero .meta span{display:inline-flex;align-items:center;gap:6px}
+.hero .meta span::before{content:'';width:6px;height:6px;border-radius:50%;
+  background:var(--accent-green);display:inline-block}
+.hero .meta .dot-warn::before{background:var(--accent-ochre)}
+.hero .meta .dot-err::before{background:var(--accent-crimson)}
+.hero-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch}
+.hero-btn{background:var(--ink);color:#fbf9f3;border-radius:8px;
+  padding:10px 16px;font-weight:500;font-size:13px;text-align:center;
+  transition:background .15s,transform .1s;border:1px solid var(--ink)}
+.hero-btn:hover{background:#2a2520;text-decoration:none;color:#fbf9f3}
+.hero-btn:active{transform:translateY(1px)}
+.hero-btn.secondary{background:transparent;color:var(--ink);
+  border:1px solid var(--paper-edge)}
+.hero-btn.secondary:hover{background:var(--paper);color:var(--ink)}
+
+/* ── Stat tiles ──────────────────────────────────────────────────── */
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;
+  margin-bottom:22px}
+.tile{background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow-sm);
+  transition:transform .12s,box-shadow .12s,border-color .12s;
+  display:block;color:var(--ink)}
+.tile:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);
+  border-color:#a59885;text-decoration:none;color:var(--ink)}
+.tile .label{font-family:'Fraunces',serif;font-style:italic;
+  font-size:13px;color:var(--ink-soft);margin-bottom:8px}
+.tile .value{font-family:'Fraunces',serif;font-weight:500;font-size:38px;
+  line-height:1;letter-spacing:-0.02em;margin-bottom:10px}
+.tile .value.skel{color:var(--paper-edge)}
+.tile .sub{font-size:12px;color:var(--ink-soft);
+  font-family:'JetBrains Mono',monospace}
+.tile .badge{display:inline-block;font-size:11px;font-weight:600;
+  padding:2px 8px;border-radius:10px;
+  font-family:'JetBrains Mono',monospace;margin-left:6px}
+.tile.alert .badge{background:var(--accent-crimson);color:#fff}
+.tile.ok .badge{background:var(--accent-green);color:#fff}
+
+/* ── Two-column grid ─────────────────────────────────────────────── */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px;
+  margin-bottom:22px}
+.card{background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:var(--radius);padding:24px 28px;box-shadow:var(--shadow-sm)}
+.card header{display:flex;justify-content:space-between;align-items:baseline;
+  margin-bottom:14px;padding-bottom:12px;border-bottom:1px dashed var(--paper-edge)}
+.card h2{font-family:'Fraunces',serif;font-weight:500;font-size:20px;
+  letter-spacing:-0.005em}
+.card .card-hint{font-family:'Fraunces',serif;font-style:italic;
+  font-size:13px;color:var(--ink-soft);margin-top:2px}
+.card .card-action{font-size:12px;font-family:'JetBrains Mono',monospace;
+  color:var(--accent-green)}
+
+/* Activity feed */
+.activity{list-style:none}
+.activity-item{display:grid;grid-template-columns:auto 1fr auto;gap:12px;
+  padding:10px 0;border-top:1px dashed var(--paper-edge);align-items:start}
+.activity-item:first-child{border-top:none}
+.activity-icon{width:28px;height:28px;border-radius:50%;
+  background:var(--paper-deep);display:flex;align-items:center;
+  justify-content:center;font-size:13px;color:var(--ink-soft);font-weight:600;
+  font-family:'JetBrains Mono',monospace;margin-top:2px}
+.activity-icon.create{background:#d8ecd8;color:var(--accent-green)}
+.activity-icon.rotate{background:#fae7c8;color:var(--accent-ochre)}
+.activity-icon.disable,.activity-icon.delete{background:#f6cfd2;
+  color:var(--accent-crimson)}
+.activity-icon.update{background:#d4e4ef;color:var(--accent-blue)}
+.activity-body .title{font-weight:500;font-size:13.5px;margin-bottom:2px}
+.activity-body .meta{font-size:12px;color:var(--ink-soft);
+  font-family:'JetBrains Mono',monospace}
+.activity-time{font-size:11.5px;color:var(--ink-soft);
+  font-family:'JetBrains Mono',monospace;white-space:nowrap;margin-top:4px}
+.activity-empty{text-align:center;padding:24px 12px;color:var(--ink-soft);
+  font-family:'Fraunces',serif;font-style:italic;font-size:14px}
+
+/* Quick actions / shortcuts */
+.actions{display:grid;grid-template-columns:1fr;gap:10px;list-style:none}
+.action-item{display:grid;grid-template-columns:auto 1fr auto;gap:14px;
+  padding:14px 16px;border:1px solid var(--paper-edge);border-radius:8px;
+  align-items:center;transition:border-color .12s,background .12s;
+  color:var(--ink)}
+.action-item:hover{background:#fefcf6;border-color:#a59885;
+  text-decoration:none;color:var(--ink)}
+.action-glyph{width:32px;height:32px;border-radius:8px;
+  background:var(--paper-deep);color:var(--ink);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.action-glyph svg{width:18px;height:18px}
+.action-glyph.green{background:#d8ecd8;color:var(--accent-green)}
+.action-glyph.ochre{background:#fae7c8;color:var(--accent-ochre)}
+.action-glyph.blue{background:#d4e4ef;color:var(--accent-blue)}
+.action-glyph.crimson{background:#f6cfd2;color:var(--accent-crimson)}
+.action-body .title{font-weight:500;font-size:13.5px;margin-bottom:2px}
+.action-body .desc{font-size:12.5px;color:var(--ink-soft)}
+.action-arrow{color:var(--ink-soft);display:flex;align-items:center}
+.action-arrow svg{width:16px;height:16px}
+
+/* ── Tile leading icons (Phase 8.G) ───────────────────────────────── */
+.tile-head{display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:8px}
+.tile-icon{width:34px;height:34px;border-radius:9px;
+  background:var(--paper-deep);color:var(--ink-soft);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.tile-icon svg{width:18px;height:18px}
+.tile-icon.green{background:#d8ecd8;color:var(--accent-green)}
+.tile-icon.ochre{background:#fae7c8;color:var(--accent-ochre)}
+.tile-icon.blue{background:#d4e4ef;color:var(--accent-blue)}
+.tile-icon.crimson{background:#f6cfd2;color:var(--accent-crimson)}
+.tile .label{margin-bottom:0}
+.tile-cta{display:inline-flex;align-items:center;gap:6px;
+  font-family:'Fraunces',serif;font-weight:500;font-size:24px;
+  letter-spacing:-0.02em;line-height:1.2}
+.tile-cta svg{width:18px;height:18px}
+
+/* ── Activity feed icon sizing ────────────────────────────────────── */
+.activity-icon svg{width:14px;height:14px}
+
+/* ── Hero CTA inline icons ────────────────────────────────────────── */
+.hero-btn{display:inline-flex;align-items:center;gap:8px;justify-content:center}
+.hero-btn svg{width:14px;height:14px}
+
+/* ── Footer / system status ──────────────────────────────────────── */
+.sysrow{background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:var(--radius);padding:16px 22px;display:flex;gap:24px;
+  align-items:center;justify-content:space-between;flex-wrap:wrap;
+  font-size:13px;color:var(--ink-soft);font-family:'JetBrains Mono',monospace}
+.sysrow .group{display:flex;gap:18px;flex-wrap:wrap}
+.sysrow .pip{display:inline-flex;align-items:center;gap:6px}
+.sysrow .pip::before{content:'';width:7px;height:7px;border-radius:50%;
+  background:var(--accent-green)}
+.sysrow .pip.warn::before{background:var(--accent-ochre)}
+.sysrow .pip.err::before{background:var(--accent-crimson)}
+.sysrow .pip.unknown::before{background:var(--paper-edge)}
+
+/* ── Skeleton state ──────────────────────────────────────────────── */
+.skel-box{background:linear-gradient(90deg,#eee9dc 0%,#f6f1e4 50%,#eee9dc 100%);
+  background-size:200% 100%;animation:shimmer 1.4s linear infinite;
+  border-radius:4px;color:transparent}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* ── Responsive ──────────────────────────────────────────────────── */
+@media (max-width:920px){
+  .tiles{grid-template-columns:repeat(2,1fr)}
+  .grid-2{grid-template-columns:1fr}
+  .hero{grid-template-columns:1fr;text-align:left}
+  .hero-actions{flex-direction:row;align-items:stretch}
+  .hero-btn{flex:1}
+}
+@media (max-width:520px){
+  .tiles{grid-template-columns:1fr}
+  .hero h1{font-size:28px}
+  .hero{padding:24px 22px}
+  .card{padding:20px 22px}
+}
+</style>
+</head>
+<body>
+<!-- @ICON_SPRITE@ -->
+<!-- @CONSOLE_NAV@ -->
+<main class="page">
+
+  <p class="crumbs"><a href="/dashboard">dashboard</a> &middot; API Console</p>
+
+  <!-- ── HERO ───────────────────────────────────────────────────── -->
+  <section class="hero">
+    <div>
+      <h1>Welcome back, <span class="username" id="dash-username">&hellip;</span></h1>
+      <p class="greeting" id="dash-greeting">Loading your console&hellip;</p>
+      <div class="meta">
+        <span id="dash-pred-count">&hellip; predictions</span>
+        <span id="dash-member-since">&hellip;</span>
+        <span id="dash-last-seen">&hellip;</span>
+      </div>
+    </div>
+    <div class="hero-actions">
+      <a class="hero-btn" href="/account/api/keys#create">
+        <svg aria-hidden="true"><use href="#i-plus"/></svg>
+        New API key
+      </a>
+      <a class="hero-btn secondary" href="/account/api/quickstart">
+        <svg aria-hidden="true"><use href="#i-book"/></svg>
+        Quickstart guide
+      </a>
+    </div>
+  </section>
+
+  <!-- ── STAT TILES ─────────────────────────────────────────────── -->
+  <section class="tiles" aria-label="Account stats">
+    <a class="tile" href="/account/api/keys">
+      <div class="tile-head">
+        <div class="label">API keys</div>
+        <span class="tile-icon green" aria-hidden="true">
+          <svg><use href="#i-key"/></svg>
+        </span>
+      </div>
+      <div class="value" id="stat-keys">&ndash;</div>
+      <div class="sub" id="stat-keys-sub">&hellip;</div>
+    </a>
+    <a class="tile" id="tile-alerts" href="/account/api/alerts">
+      <div class="tile-head">
+        <div class="label">Unread alerts</div>
+        <span class="tile-icon crimson" aria-hidden="true">
+          <svg><use href="#i-alert"/></svg>
+        </span>
+      </div>
+      <div class="value" id="stat-alerts">&ndash;</div>
+      <div class="sub" id="stat-alerts-sub">&hellip;</div>
+    </a>
+    <a class="tile" href="/account/api/webhooks">
+      <div class="tile-head">
+        <div class="label">Webhook endpoints</div>
+        <span class="tile-icon ochre" aria-hidden="true">
+          <svg><use href="#i-webhook"/></svg>
+        </span>
+      </div>
+      <div class="value" id="stat-webhooks">&ndash;</div>
+      <div class="sub" id="stat-webhooks-sub">&hellip;</div>
+    </a>
+    <a class="tile" href="/account/api/sandbox">
+      <div class="tile-head">
+        <div class="label">Try the API</div>
+        <span class="tile-icon blue" aria-hidden="true">
+          <svg><use href="#i-flask"/></svg>
+        </span>
+      </div>
+      <div class="tile-cta">
+        Sandbox
+        <svg aria-hidden="true"><use href="#i-chevron-right"/></svg>
+      </div>
+      <div class="sub">10 endpoints, live</div>
+    </a>
+  </section>
+
+  <!-- ── ACTIVITY + QUICK ACTIONS ───────────────────────────────── -->
+  <section class="grid-2">
+
+    <article class="card" aria-label="Recent activity">
+      <header>
+        <div>
+          <h2>Recent activity</h2>
+          <p class="card-hint">Hash-chained audit log, last 10 events</p>
+        </div>
+        <!-- Phase 8.H fix · was "View all →" deep-linking to the most
+             recent event's key — which broke when that key got deleted.
+             Now links to the keys list page (always exists, lets users
+             drill into any key's per-key audit panel). -->
+        <a class="card-action" href="/account/api/keys" id="link-view-all-activity">All keys &rarr;</a>
+      </header>
+      <ul class="activity" id="activity-feed">
+        <li class="activity-empty" id="activity-loading">Loading audit trail&hellip;</li>
+      </ul>
+    </article>
+
+    <article class="card" aria-label="Quick actions">
+      <header>
+        <div>
+          <h2>What's next</h2>
+          <p class="card-hint">Common workflows</p>
+        </div>
+      </header>
+      <ul class="actions">
+        <li><a class="action-item" href="/account/api/keys#create">
+          <span class="action-glyph green" aria-hidden="true">
+            <svg><use href="#i-key"/></svg>
+          </span>
+          <div class="action-body">
+            <div class="title">Issue a new API key</div>
+            <div class="desc">Live or test, with scopes &amp; expiry</div>
+          </div>
+          <span class="action-arrow" aria-hidden="true">
+            <svg><use href="#i-chevron-right"/></svg>
+          </span>
+        </a></li>
+        <li><a class="action-item" href="/account/api/webhooks#create">
+          <span class="action-glyph ochre" aria-hidden="true">
+            <svg><use href="#i-webhook"/></svg>
+          </span>
+          <div class="action-body">
+            <div class="title">Configure webhooks</div>
+            <div class="desc">HMAC-signed event delivery</div>
+          </div>
+          <span class="action-arrow" aria-hidden="true">
+            <svg><use href="#i-chevron-right"/></svg>
+          </span>
+        </a></li>
+        <li><a class="action-item" href="/account/api/sandbox">
+          <span class="action-glyph blue" aria-hidden="true">
+            <svg><use href="#i-flask"/></svg>
+          </span>
+          <div class="action-body">
+            <div class="title">Try in the sandbox</div>
+            <div class="desc">10 endpoints, no setup, your real keys</div>
+          </div>
+          <span class="action-arrow" aria-hidden="true">
+            <svg><use href="#i-chevron-right"/></svg>
+          </span>
+        </a></li>
+        <li><a class="action-item" href="/account/api/settings">
+          <span class="action-glyph" aria-hidden="true">
+            <svg><use href="#i-settings"/></svg>
+          </span>
+          <div class="action-body">
+            <div class="title">Tune account settings</div>
+            <div class="desc">Sudo TTL, IP allowlist, daily caps</div>
+          </div>
+          <span class="action-arrow" aria-hidden="true">
+            <svg><use href="#i-chevron-right"/></svg>
+          </span>
+        </a></li>
+        <li><a class="action-item" href="/docs">
+          <span class="action-glyph crimson" aria-hidden="true">
+            <svg><use href="#i-book"/></svg>
+          </span>
+          <div class="action-body">
+            <div class="title">Read the API docs</div>
+            <div class="desc">REST reference, error catalog, contract</div>
+          </div>
+          <span class="action-arrow" aria-hidden="true">
+            <svg><use href="#i-chevron-right"/></svg>
+          </span>
+        </a></li>
+      </ul>
+    </article>
+
+  </section>
+
+  <!-- ── SYSTEM ROW ─────────────────────────────────────────────── -->
+  <section class="sysrow" aria-label="System status">
+    <div class="group">
+      <span class="pip" id="sys-api">API</span>
+      <span class="pip" id="sys-worker">Webhook worker</span>
+      <span class="pip" id="sys-db">Database</span>
+    </div>
+    <div class="group">
+      <span id="sys-version">v2 &middot; &hellip;</span>
+      <span><a href="/health">health &rarr;</a></span>
+      <span><a href="/status">status &rarr;</a></span>
+    </div>
+  </section>
+
+</main>
+<script src="/static/console_dashboard.js"></script>
+</body>
+</html>

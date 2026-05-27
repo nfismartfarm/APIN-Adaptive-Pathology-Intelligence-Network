@@ -1,0 +1,3919 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>APIN API Documentation</title>
+<meta name="description" content="APIN HTTP API reference. Endpoint catalogue, live playground, and integration guides for the Adaptive Pathological Intelligence Network.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/favicon.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ══════════════ DESIGN TOKENS (mirror status.html / health.html) ══════════════ */
+:root{
+  --paper-deep:#e9e2d1;
+  --paper:#f4efe6;
+  --paper-light:#fbf9f3;
+  --paper-shadow:#d8cfbc;
+  --ink:#1a1612;
+  --ink-body:#3a3228;
+  --ink-meta:#7a6f60;
+  --ink-faint:#a79c89;
+  --line:#c7bca9;
+  --line-soft:#d6cebe;
+  --green:#2f6f3e;
+  --green-soft:#4a9d5f;
+  --green-pale:#e1ecd9;
+  --ochre:#c98a2b;
+  --ochre-pale:#f3e3c3;
+  --crimson:#b3402f;
+  --crimson-pale:#f0d4c8;
+  --blue:#2c5c84;
+  --blue-pale:#d8e3ee;
+  --radius:7px;
+  --shadow-soft:0 1px 2px rgba(46,40,30,.06);
+  --shadow-mid:0 2px 8px rgba(46,40,30,.10);
+  --shadow-stamp:0 4px 12px rgba(46,40,30,.16);
+}
+[data-theme="night-field"]{
+  /* Deep neutral charcoal base (less green-tinted than v1), with
+     warm parchment ink for legibility. Accents stay close to the
+     light-mode hues so the visual identity is preserved. */
+  --paper-deep:#0c0e10;
+  --paper:#15181c;
+  --paper-light:#1c2026;
+  --paper-shadow:#0a0c0e;
+  --ink:#f2ecdb;
+  --ink-body:#d5cdb8;
+  --ink-meta:#9c937e;
+  --ink-faint:#615a4a;
+  --line:#2a3038;
+  --line-soft:#222831;
+  --green:#7fc093;
+  --green-soft:#a4dbb4;
+  --green-pale:#1a2b22;
+  --ochre:#e0a558;
+  --ochre-pale:#2c2110;
+  --crimson:#e07d6f;
+  --crimson-pale:#33150f;
+  --blue:#8eb9d8;
+  --blue-pale:#16222d;
+  --shadow-soft:0 1px 2px rgba(0,0,0,.35);
+  --shadow-mid:0 2px 10px rgba(0,0,0,.45);
+  --shadow-stamp:0 6px 18px rgba(0,0,0,.55);
+}
+/* Solid background-color (NOT a gradient) so the CSS transition
+   fallback can interpolate it smoothly. CSS cannot animate between
+   two linear-gradient values; the gradient version snapped and made
+   the rest of the page look out of sync. */
+[data-theme="night-field"] .masthead{
+  background-color:#181c21;
+}
+[data-theme="night-field"] .masthead::before{
+  background:rgba(127,192,147,.16);
+  border-left-color:rgba(127,192,147,.35);
+  border-right-color:rgba(127,192,147,.35);
+}
+[data-theme="night-field"] .entry{
+  background-color:#1c2026;
+}
+[data-theme="night-field"] code{background:#0e1115;color:var(--ink);}
+[data-theme="night-field"] .code-block pre{background:#0a0c0f;}
+[data-theme="night-field"] .code-block .lang-tabs{background:#0e1115;}
+[data-theme="night-field"] .response-body{background:#0e1115;}
+[data-theme="night-field"] .schema-tree{background:#0e1115;}
+[data-theme="night-field"] .diagram{background:#0a0c0f;color:var(--ink-body);}
+[data-theme="night-field"] kbd{
+  background:#1c2026;border-color:#3a3f48;
+  color:var(--ink);box-shadow:inset 0 -1px 0 rgba(0,0,0,.4);
+}
+[data-theme="night-field"] .tooltip-card{
+  background:#1c2026;box-shadow:0 4px 22px rgba(0,0,0,.6);
+}
+[data-theme="night-field"] .field input,
+[data-theme="night-field"] .field textarea,
+[data-theme="night-field"] .field select{
+  background:#0e1115;color:var(--ink);border-color:#2c333d;
+}
+[data-theme="night-field"] .field input:focus,
+[data-theme="night-field"] .field textarea:focus,
+[data-theme="night-field"] .field select:focus{
+  box-shadow:0 0 0 3px rgba(127,192,147,.18);
+}
+[data-theme="night-field"] .file-drop{background:#0e1115;border-color:#2c333d;}
+[data-theme="night-field"] .palette{background:#1c2026;}
+[data-theme="night-field"] .palette-input{background:transparent;color:var(--ink);}
+[data-theme="night-field"] .shortcuts-modal{background:#1c2026;}
+[data-theme="night-field"] .chip{background:#1c2026;color:var(--ink-body);border-color:#2c333d;}
+[data-theme="night-field"] .chip:hover{background:#22272d;color:var(--ink);}
+
+/* View Transition API: when supported (Chrome 111+, Edge, Safari 18+)
+   the browser snapshots the page before + after the theme swap and
+   crossfades the entire page as one image. Every pixel changes
+   together; nothing looks "blocky". The CSS rules below tune that
+   crossfade. Browsers without support fall back to the per-element
+   CSS transitions further down. */
+@view-transition{ navigation: none; }   /* opt-in; we trigger manually */
+::view-transition-old(root),
+::view-transition-new(root){
+  animation-duration:.42s;
+  animation-timing-function:cubic-bezier(.4,0,.2,1);
+}
+/* If the user prefers reduced motion, snap instantly. */
+@media (prefers-reduced-motion: reduce){
+  ::view-transition-old(root),
+  ::view-transition-new(root){ animation-duration:0s; }
+}
+
+/* CSS-transition fallback (Firefox, older Safari). We list every
+   surface that changes colour. Using `transition: ... !important`
+   would be brittle; we instead apply it via a body class that
+   only exists during the swap window. */
+body.theme-transitioning,
+body.theme-transitioning *{
+  transition:background-color .42s cubic-bezier(.4,0,.2,1),
+             color .42s cubic-bezier(.4,0,.2,1),
+             border-color .42s cubic-bezier(.4,0,.2,1),
+             fill .42s cubic-bezier(.4,0,.2,1),
+             stroke .42s cubic-bezier(.4,0,.2,1),
+             box-shadow .42s cubic-bezier(.4,0,.2,1) !important;
+}
+/* But never let the transition kick in on elements that are already
+   running their own animation (entries fading in, stamps dropping,
+   inkblot fades). Animations win. */
+body.theme-transitioning .entry,
+body.theme-transitioning .stamp,
+body.theme-transitioning .copy.copied,
+body.theme-transitioning .proc-step{
+  transition-property:background-color, color, border-color, box-shadow;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;scroll-padding-top:78px;}
+body{
+  background:var(--paper);
+  font-family:'Inter',system-ui,sans-serif;
+  color:var(--ink-body);
+  -webkit-font-smoothing:antialiased;
+  line-height:1.6;
+  min-height:100vh;
+  font-size:15px;
+}
+.serif{font-family:'Fraunces',Georgia,serif;color:var(--ink);font-weight:500;letter-spacing:-.01em;}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}
+
+/* ── selection ─────────────────────────────── */
+::selection{background:var(--green-pale);color:var(--ink);}
+
+/* ══════════════ CUSTOM SCROLLBARS ══════════════
+   Replace the OS-default grey scrollbars with parchment + sage so
+   the chrome matches the field-laboratory aesthetic. Two variants:
+   the page-level scrollbar (10 px, with a track) and the narrower
+   sidebar / inner-element scrollbars (6 px, trackless).
+   Firefox uses the standard scrollbar-* properties; WebKit / Blink
+   browsers use the ::-webkit-scrollbar family. */
+
+/* scrollbar-gutter keeps a constant gutter even when content does
+   not overflow, so toggling content density does not shift the
+   layout horizontally. */
+html{
+  scrollbar-gutter:stable;
+  scrollbar-width:thin;
+  scrollbar-color:var(--line) var(--paper-deep);
+}
+
+/* Page-level scrollbar (WebKit / Blink). The track has a 1px sage
+   hairline on its left edge so the bar feels like part of the page
+   margin rather than a foreign element. */
+::-webkit-scrollbar{
+  width:11px;height:11px;background:var(--paper-deep);
+}
+::-webkit-scrollbar-track{
+  background:var(--paper-deep);
+  border-left:1px solid var(--line-soft);
+}
+::-webkit-scrollbar-thumb{
+  background:var(--line);
+  border:2px solid var(--paper-deep);
+  border-radius:6px;
+  min-height:40px;
+  transition:background .16s ease;
+}
+::-webkit-scrollbar-thumb:hover{ background:var(--green-soft); }
+::-webkit-scrollbar-thumb:active{ background:var(--green); }
+::-webkit-scrollbar-corner{ background:var(--paper-deep); }
+
+/* Side-column scrollbars: narrower, no track. Applied to nav.side,
+   aside.rail, and any other inner scrollable element. */
+nav.side, aside.rail{
+  scrollbar-color:var(--line-soft) transparent;
+}
+nav.side::-webkit-scrollbar,
+aside.rail::-webkit-scrollbar{
+  width:6px;height:6px;background:transparent;
+}
+nav.side::-webkit-scrollbar-track,
+aside.rail::-webkit-scrollbar-track{
+  background:transparent;border:none;
+}
+nav.side::-webkit-scrollbar-thumb,
+aside.rail::-webkit-scrollbar-thumb{
+  background:var(--line-soft);
+  border:none;border-radius:3px;
+  min-height:30px;
+}
+nav.side::-webkit-scrollbar-thumb:hover,
+aside.rail::-webkit-scrollbar-thumb:hover{ background:var(--green-soft); }
+
+/* Inner scrollable surfaces: code blocks, schema tree, palette list,
+   response panel. Slightly more visible than the side rails (those
+   bars must read as bars on hover, not vanish into the chrome). */
+.code-block pre,
+.palette-list,
+.schema-tree,
+.response-body{
+  scrollbar-width:thin;
+  scrollbar-color:var(--line) transparent;
+}
+.code-block pre::-webkit-scrollbar,
+.palette-list::-webkit-scrollbar,
+.schema-tree::-webkit-scrollbar,
+.response-body::-webkit-scrollbar{
+  width:7px;height:7px;background:transparent;
+}
+.code-block pre::-webkit-scrollbar-track,
+.palette-list::-webkit-scrollbar-track,
+.schema-tree::-webkit-scrollbar-track,
+.response-body::-webkit-scrollbar-track{
+  background:transparent;border:none;
+}
+.code-block pre::-webkit-scrollbar-thumb,
+.palette-list::-webkit-scrollbar-thumb,
+.schema-tree::-webkit-scrollbar-thumb,
+.response-body::-webkit-scrollbar-thumb{
+  background:var(--line);
+  border:1px solid transparent;
+  background-clip:padding-box;
+  border-radius:4px;
+}
+.code-block pre::-webkit-scrollbar-thumb:hover,
+.palette-list::-webkit-scrollbar-thumb:hover,
+.schema-tree::-webkit-scrollbar-thumb:hover,
+.response-body::-webkit-scrollbar-thumb:hover{
+  background:var(--green-soft);
+}
+
+/* Dark-mode variants: the track recedes (matches the deeper paper),
+   the thumb stays the same line colour so it remains legible. */
+[data-theme="night-field"]{ scrollbar-color:var(--line) var(--paper-deep); }
+[data-theme="night-field"] ::-webkit-scrollbar,
+[data-theme="night-field"] ::-webkit-scrollbar-track,
+[data-theme="night-field"] ::-webkit-scrollbar-corner{
+  background:var(--paper-deep);
+}
+[data-theme="night-field"] ::-webkit-scrollbar-thumb{
+  background:var(--line);border-color:var(--paper-deep);
+}
+[data-theme="night-field"] ::-webkit-scrollbar-thumb:hover{
+  background:var(--green-soft);
+}
+[data-theme="night-field"] nav.side::-webkit-scrollbar-thumb,
+[data-theme="night-field"] aside.rail::-webkit-scrollbar-thumb{
+  background:var(--line);
+}
+
+/* ── scroll-progress hairline (A13) ────────── */
+.scroll-progress{
+  position:fixed;top:0;left:0;height:1.5px;width:0;
+  background:var(--green);z-index:1000;transition:width .12s linear;
+}
+
+/* ══════════════ MASTHEAD ══════════════ */
+.masthead{
+  background:var(--paper-light);
+  border-bottom:1px solid var(--line);
+  position:sticky;top:0;z-index:100;
+  backdrop-filter:saturate(140%) blur(6px);
+}
+.masthead::before{
+  content:"";position:absolute;top:-8px;left:50%;
+  width:120px;height:20px;transform:translateX(-50%) rotate(-2.4deg);
+  background:rgba(74,157,95,.28);
+  border-left:1px dashed rgba(47,111,62,.40);
+  border-right:1px dashed rgba(47,111,62,.40);
+  pointer-events:none;
+}
+.masthead-inner{
+  max-width:1380px;margin:0 auto;padding:14px 22px;
+  display:flex;align-items:center;gap:14px;
+}
+.brand{display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit;}
+.brand img{
+  width:36px;height:36px;border-radius:7px;
+  border:1px solid var(--line);background:var(--paper);object-fit:cover;
+}
+.brand .wordmark strong{
+  font-family:'Fraunces',serif;font-size:18px;color:var(--ink);
+  letter-spacing:.02em;display:block;line-height:1.1;
+}
+.brand .wordmark span{
+  font-family:'Fraunces',serif;font-style:italic;font-size:11.5px;
+  color:var(--green);
+}
+.masthead .crumbs{
+  font-size:12.5px;color:var(--ink-meta);letter-spacing:.02em;
+}
+.masthead .actions{
+  margin-left:auto;display:flex;align-items:center;gap:10px;
+}
+.btn{
+  font:inherit;font-size:12.5px;font-weight:600;letter-spacing:.02em;
+  padding:6px 12px;border:1px solid var(--line);
+  background:var(--paper);color:var(--ink-body);
+  border-radius:5px;cursor:pointer;text-decoration:none;
+  display:inline-flex;align-items:center;gap:6px;
+  transition:border-color .14s ease, background .14s ease, transform .14s ease;
+}
+.btn:hover{border-color:var(--green);background:var(--paper-light);}
+.btn:active{transform:translateY(1px);}
+.btn--green{background:var(--green);color:var(--paper-light);border-color:var(--green);}
+.btn--green:hover{background:#265a32;border-color:#265a32;}
+.btn--ghost{background:transparent;}
+.btn .kbd{font-size:10.5px;opacity:.72;padding:1px 4px;border:1px solid var(--line);border-radius:3px;background:var(--paper);}
+
+/* search trigger looks like a search bar, not a button */
+.search-trigger{
+  display:flex;align-items:center;gap:8px;
+  font-size:12.5px;color:var(--ink-meta);
+  padding:6px 10px 6px 12px;border:1px solid var(--line);
+  background:var(--paper-light);border-radius:5px;cursor:pointer;
+  min-width:200px;
+}
+.search-trigger:hover{border-color:var(--green);}
+.search-trigger .kbd{
+  margin-left:auto;font-size:10.5px;border:1px solid var(--line);
+  border-radius:3px;padding:1px 5px;background:var(--paper);
+  font-family:'JetBrains Mono',monospace;
+}
+
+/* ══════════════ LAYOUT ══════════════ */
+.layout{
+  display:grid;
+  grid-template-columns:240px minmax(0,1fr) 240px;
+  gap:36px;
+  max-width:1380px;margin:0 auto;padding:24px 22px 60px;
+  align-items:start;
+}
+nav.side{
+  position:sticky;top:78px;max-height:calc(100vh - 96px);
+  overflow-y:auto;padding-right:6px;
+  font-size:13.5px;
+}
+aside.rail{
+  position:sticky;top:78px;max-height:calc(100vh - 96px);
+  overflow-y:auto;padding-left:6px;
+  font-size:12.5px;
+}
+main.content{
+  min-width:0;
+}
+@media (max-width:1100px){
+  .layout{grid-template-columns:200px minmax(0,1fr);}
+  aside.rail{display:none;}
+}
+@media (max-width:760px){
+  .layout{grid-template-columns:1fr;gap:18px;padding:18px 14px 50px;}
+  nav.side{position:relative;top:0;max-height:none;}
+}
+
+/* ══════════════ NAV ══════════════ */
+nav.side .group{
+  font-family:'Fraunces',serif;
+  font-size:11px;text-transform:uppercase;
+  letter-spacing:.18em;color:var(--ink-meta);
+  margin:18px 0 6px;padding-left:6px;
+}
+nav.side .group:first-child{margin-top:0;}
+nav.side a{
+  display:flex;align-items:center;gap:8px;
+  padding:5px 10px 5px 14px;border-radius:4px;
+  color:var(--ink-body);text-decoration:none;font-size:13px;
+  position:relative;line-height:1.4;
+}
+nav.side a::before{
+  content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);
+  width:0;height:14px;background:var(--green);border-radius:2px;
+  transition:width .14s ease-out;
+}
+nav.side a:hover{color:var(--ink);}
+nav.side a:hover::before{width:3px;}
+nav.side a.active{color:var(--ink);font-weight:600;background:var(--paper-light);}
+nav.side a.active::before{width:3px;}
+nav.side a .method{
+  font-family:'JetBrains Mono',monospace;font-size:9.5px;
+  font-weight:600;padding:1px 4px;border-radius:3px;
+  color:var(--paper);letter-spacing:.04em;
+}
+/* Base method pill: applies anywhere the class is used.
+   The nav-specific override below shrinks it for the dense nav list. */
+.method{
+  display:inline-block;
+  font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-weight:700;font-size:11px;
+  padding:3px 8px;border-radius:4px;
+  color:#fff;letter-spacing:.06em;
+  text-transform:uppercase;line-height:1.2;
+  box-shadow:inset 0 -2px 0 rgba(0,0,0,.16);
+  vertical-align:middle;
+}
+.method-GET{background:var(--green);}
+.method-POST{background:var(--ochre);color:#fff;}
+.method-DELETE{background:var(--crimson);}
+.method-PATCH{background:var(--blue);}
+.method-PUT{background:var(--blue);}
+/* Larger pill inside the entry header: more visual presence. */
+.entry-title-block .method{
+  font-size:12.5px;padding:4px 11px;border-radius:5px;letter-spacing:.08em;
+}
+
+/* ══════════════ RAIL ══════════════ */
+aside.rail h4{
+  font-family:'Fraunces',serif;
+  font-size:11px;text-transform:uppercase;letter-spacing:.18em;
+  color:var(--ink-meta);margin:0 0 8px;font-weight:600;
+}
+aside.rail .toc{margin-bottom:24px;}
+aside.rail .toc a{
+  display:block;padding:4px 0 4px 12px;color:var(--ink-meta);
+  text-decoration:none;font-size:12.5px;line-height:1.35;
+  border-left:1px solid var(--line-soft);
+  transition:color .12s ease, border-color .12s ease;
+}
+aside.rail .toc a:hover, aside.rail .toc a.active{
+  color:var(--ink);border-left-color:var(--green);
+}
+aside.rail .toc a[data-depth="3"]{padding-left:24px;font-size:12px;}
+aside.rail .toc a[data-depth="4"]{padding-left:36px;font-size:11.5px;}
+aside.rail .toc a.toc-head{
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;
+  font-weight:600;color:var(--ink);
+  border-left-color:var(--green);padding-left:10px;
+  margin-bottom:4px;letter-spacing:.02em;
+}
+aside.rail .toc-empty{
+  padding:8px 10px;font-size:11.5px;color:var(--ink-faint);
+  font-style:italic;background:var(--paper-light);
+  border:1px dashed var(--line);border-radius:5px;
+}
+
+.recent-calls{margin-bottom:20px;}
+.recent-calls .empty{
+  font-size:11.5px;color:var(--ink-faint);
+  padding:8px 10px;background:var(--paper-light);
+  border:1px dashed var(--line);border-radius:5px;
+}
+.recent-call{
+  display:flex;align-items:center;gap:6px;
+  padding:5px 0;font-size:11.5px;border-bottom:1px dotted var(--line-soft);
+  font-family:'JetBrains Mono',monospace;
+}
+.recent-call:last-child{border-bottom:none;}
+.recent-call .m{font-weight:600;padding:0 4px;border-radius:3px;font-size:9px;color:var(--paper);}
+.recent-call .s{font-weight:600;}
+.recent-call .s-ok{color:var(--green);}
+.recent-call .s-err{color:var(--crimson);}
+.recent-call .p{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-meta);}
+.recent-call .t{color:var(--ink-faint);font-size:10.5px;}
+
+.field-guide{font-size:12.5px;}
+.field-guide a{
+  display:block;padding:6px 0;color:var(--ink-body);
+  text-decoration:none;line-height:1.35;
+  border-bottom:1px dotted var(--line-soft);
+}
+.field-guide a:hover{color:var(--green);}
+.field-guide a:last-child{border-bottom:none;}
+.field-guide a::before{content:"↳ ";color:var(--ink-faint);margin-right:2px;}
+
+/* ══════════════ CONTENT ══════════════ */
+main.content > .preamble{
+  padding-bottom:28px;border-bottom:1px solid var(--line);margin-bottom:32px;
+}
+main.content h1.page-title{
+  font-family:'Fraunces',serif;font-size:34px;color:var(--ink);
+  font-weight:560;letter-spacing:-.02em;line-height:1.15;margin-bottom:8px;
+}
+main.content .page-sub{
+  font-size:15px;color:var(--ink-meta);max-width:65ch;
+}
+.badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+
+/* download / action chips: proper buttons, not text links. */
+.chip-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;align-items:center;}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:'Inter',sans-serif;font-size:12px;font-weight:600;
+  padding:6px 12px;border-radius:18px;
+  border:1px solid var(--line);background:var(--paper-light);
+  color:var(--ink-body);text-decoration:none;
+  cursor:pointer;letter-spacing:.02em;
+  transition:transform .12s ease, border-color .12s ease,
+             background .12s ease, color .12s ease,
+             box-shadow .12s ease;
+  font-variant-numeric:tabular-nums;
+}
+.chip:hover{transform:translateY(-1px);border-color:var(--green);
+  background:var(--paper);color:var(--ink);
+  box-shadow:0 2px 6px rgba(46,40,30,.08);}
+.chip:active{transform:translateY(0);}
+.chip--solid{
+  background:var(--green);border-color:var(--green);color:#fff;
+  cursor:default;
+}
+.chip--solid:hover{
+  background:var(--green);border-color:var(--green);color:#fff;
+  transform:none;box-shadow:none;
+}
+.chip--download{
+  background:var(--paper-light);border-color:var(--line);
+}
+.chip--download:hover{
+  background:var(--green-pale);border-color:var(--green);color:var(--green);
+}
+.chip--ghost{
+  background:transparent;border-color:var(--line-soft);
+  color:var(--ink-meta);
+}
+.chip--ghost:hover{
+  background:var(--paper-light);color:var(--ink);
+  border-color:var(--line);
+}
+.chip svg{flex-shrink:0;}
+.badge{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11.5px;font-weight:600;letter-spacing:.02em;
+  padding:3px 8px;border-radius:11px;
+  border:1px solid var(--line);background:var(--paper-light);color:var(--ink-body);
+}
+.badge--green{background:var(--green-pale);border-color:var(--green-soft);color:var(--green);}
+.badge--ochre{background:var(--ochre-pale);border-color:var(--ochre);color:#9c6717;}
+.badge--crimson{background:var(--crimson-pale);border-color:var(--crimson);color:var(--crimson);}
+.badge--blue{background:var(--blue-pale);border-color:var(--blue);color:var(--blue);}
+.badge a{color:inherit;text-decoration:none;}
+.badge a:hover{text-decoration:underline;}
+
+/* ── ENTRY (was "plate"; renamed for the build) ── */
+.entry{
+  background:var(--paper-light);
+  border:1px solid var(--line);border-radius:var(--radius);
+  padding:26px 28px;margin-bottom:38px;
+  box-shadow:var(--shadow-soft);
+  position:relative;scroll-margin-top:78px;
+  opacity:0;transform:translateY(12px);
+  animation:entry-fade .42s cubic-bezier(.22,1,.36,1) forwards;
+}
+.entry.section-block{padding:22px 26px;}
+@keyframes entry-fade{to{opacity:1;transform:translateY(0);}}
+/* A1: stagger above the fold via inline animation-delay set in JS */
+.entry::before{
+  content:attr(data-entry-number);
+  position:absolute;top:-10px;right:18px;
+  font-family:'Fraunces',serif;font-style:italic;
+  font-size:11px;color:var(--ink-meta);
+  background:var(--paper);padding:1px 8px;
+  border:1px solid var(--line);border-radius:11px;
+  letter-spacing:.04em;
+}
+.entry-header{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:14px;
+  padding-bottom:14px;margin-bottom:18px;
+  border-bottom:1px solid var(--line-soft);
+}
+.entry-title-block{flex:1;min-width:0;}
+.entry-title-block h2{
+  font-family:'Fraunces',serif;font-size:23px;color:var(--ink);
+  font-weight:560;letter-spacing:-.01em;line-height:1.2;margin-bottom:6px;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.entry-title-block .anchor{
+  opacity:.45;font-size:14px;color:var(--ink-meta);
+  text-decoration:none;transition:opacity .12s ease, color .12s ease;
+  cursor:pointer;font-weight:400;
+}
+.entry-title-block:hover .anchor, .entry-title-block .anchor:focus,
+.entry-title-block .anchor:hover{opacity:1;color:var(--green);outline:none;}
+.entry-title-block .path{
+  font-family:'JetBrains Mono',monospace;font-size:14.5px;
+  color:var(--ink);background:var(--paper);
+  padding:2px 8px;border-radius:5px;border:1px solid var(--line);
+  font-weight:500;
+}
+.entry-title-block .summary{
+  font-size:14px;color:var(--ink-meta);max-width:62ch;margin-top:4px;
+}
+.entry-status{
+  display:flex;flex-direction:column;align-items:flex-end;gap:6px;
+  font-size:11.5px;color:var(--ink-meta);
+}
+.status-dot{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;
+}
+.status-dot::before{
+  content:"";width:8px;height:8px;border-radius:50%;
+  background:var(--ink-faint);box-shadow:0 0 0 2px var(--paper-light);
+  animation:pulse 2.4s ease-in-out infinite;
+}
+.status-dot.live::before{background:var(--green-soft);}
+.status-dot.warn::before{background:var(--ochre);}
+.status-dot.down::before{background:var(--crimson);}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 2px var(--paper-light);}50%{box-shadow:0 0 0 6px rgba(74,157,95,.18);}}
+
+.facts{
+  display:flex;flex-wrap:wrap;gap:8px 14px;margin-bottom:18px;
+  font-size:12.5px;color:var(--ink-meta);
+}
+.fact{display:inline-flex;gap:5px;align-items:center;}
+.fact::before{content:"●";color:var(--ink-faint);font-size:8px;margin-right:2px;}
+
+/* ── HEADINGS inside content ── */
+.entry h3, main.content h2.section{
+  font-family:'Fraunces',serif;font-size:17px;color:var(--ink);
+  font-weight:560;margin:22px 0 10px;letter-spacing:-.005em;
+  display:flex;align-items:baseline;gap:8px;
+  scroll-margin-top:78px;
+}
+.entry h3 .§, main.content h2.section .§{
+  font-family:'Fraunces',serif;font-style:italic;font-weight:400;
+  font-size:14px;color:var(--ink-meta);
+}
+.entry h3 .perma, main.content h2.section .perma{
+  font-size:11.5px;color:var(--ink-faint);text-decoration:none;
+  opacity:.35;transition:opacity .12s ease, color .12s ease;cursor:pointer;
+  font-weight:400;
+}
+.entry h3:hover .perma, .entry h3:focus-within .perma,
+.entry h3 .perma:hover, main.content h2.section:hover .perma,
+main.content h2.section .perma:hover{opacity:1;color:var(--green);outline:none;}
+.entry h4{
+  font-family:'Fraunces',serif;font-size:15px;color:var(--ink);
+  font-weight:560;margin:16px 0 6px;letter-spacing:-.005em;
+  scroll-margin-top:78px;
+}
+.entry h5{
+  font-family:'Inter',sans-serif;font-size:12px;color:var(--ink);
+  font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  margin:14px 0 4px;
+}
+.entry p, main.content p{margin-bottom:10px;max-width:68ch;color:var(--ink-body);}
+.entry p strong{color:var(--ink);font-weight:600;}
+
+/* In-prose links across the docs body. Subtle by default, decisive
+   on hover. NOT applied to .anchor, .perma, .term, .chip, .badge,
+   nav/rail/footer/code (each has its own style). */
+.entry p > a, .entry li > a, .entry dd > a,
+.entry .summary > a, .entry h3 > a:not(.perma),
+.note a, blockquote a, dl.defs a, .tbl a{
+  color:var(--green);text-decoration:none;
+  border-bottom:1px solid rgba(74,157,95,.40);
+  padding-bottom:1px;
+  transition:border-bottom-color .14s ease, background .14s ease, color .14s ease;
+}
+.entry p > a:hover, .entry li > a:hover, .entry dd > a:hover,
+.entry .summary > a:hover, .note a:hover, blockquote a:hover,
+dl.defs a:hover, .tbl a:hover{
+  border-bottom-color:var(--green);
+  background:rgba(74,157,95,.10);
+  color:var(--ink);
+}
+
+/* "See also" row: chip-styled cross-references, not bare links. */
+.see-also-row{
+  display:flex;flex-wrap:wrap;gap:6px 8px;margin-top:6px;
+}
+.see-also-chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;
+  padding:4px 10px;border-radius:14px;
+  background:var(--paper);border:1px solid var(--line);
+  color:var(--ink-body);text-decoration:none;
+  transition:border-color .14s ease, background .14s ease,
+             color .14s ease, transform .12s ease;
+}
+.see-also-chip::before{
+  content:"↳";color:var(--green);font-family:'Inter',sans-serif;
+  font-size:11px;line-height:1;
+}
+.see-also-chip:hover{
+  border-color:var(--green);background:var(--green-pale);
+  color:var(--green);transform:translateY(-1px);
+}
+
+/* ── INLINE CODE, KBD, ABBR ── */
+code{
+  font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13.5px;
+  background:var(--paper-deep);padding:1px 6px;border-radius:4px;
+  color:var(--ink);
+}
+kbd{
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;
+  background:var(--paper);border:1px solid var(--line);
+  border-bottom-width:2px;border-radius:4px;padding:1px 6px;
+  color:var(--ink);box-shadow:var(--shadow-soft);
+  font-weight:500;
+}
+abbr[title]{
+  border-bottom:1px dotted var(--ink-meta);cursor:help;
+  text-decoration:none;
+}
+
+/* ── tooltip term (C2) ── */
+.term{
+  border-bottom:1px dotted var(--green);cursor:help;
+  position:relative;color:var(--ink);
+  transition:border-bottom-width .14s ease;
+}
+.term:hover, .term:focus{border-bottom-width:2px;outline:none;}
+.tooltip-card{
+  position:absolute;bottom:calc(100% + 8px);left:50%;
+  transform:translateX(-50%) translateY(4px);
+  background:var(--paper-light);border:1px solid var(--line);
+  border-radius:6px;padding:8px 11px;
+  font-size:12px;color:var(--ink-body);
+  width:260px;max-width:80vw;
+  box-shadow:var(--shadow-mid);
+  pointer-events:none;opacity:0;visibility:hidden;
+  transition:opacity .16s ease-out, transform .16s ease-out, visibility 0s linear .16s;
+  z-index:90;line-height:1.5;text-align:left;font-weight:400;
+}
+.tooltip-card::after{
+  content:"";position:absolute;top:100%;left:50%;
+  transform:translateX(-50%);
+  border:6px solid transparent;border-top-color:var(--line);
+}
+/* Tooltip variant: appears BELOW the term. Used when the natural
+   above-position would overflow the viewport (top of page, masthead
+   collision, etc). JS adds .tooltip-below to the term. */
+.term.tooltip-below .tooltip-card{
+  bottom:auto;top:calc(100% + 8px);
+  transform:translateX(-50%) translateY(-4px);
+}
+.term.tooltip-below .tooltip-card::after{
+  top:auto;bottom:100%;
+  border-top-color:transparent;border-bottom-color:var(--line);
+}
+.term:hover .tooltip-card, .term:focus .tooltip-card{
+  opacity:1;visibility:visible;
+  transform:translateX(-50%) translateY(0);
+  transition:opacity .16s ease-out, transform .16s ease-out, visibility 0s;
+}
+
+/* ── CODE BLOCKS (T4 + C6) ── */
+.code-block{
+  background:var(--paper);border:1px solid var(--line);
+  border-radius:6px;margin:10px 0;overflow:hidden;
+  position:relative;
+}
+.code-block .lang-tabs{
+  display:flex;background:var(--paper-deep);
+  border-bottom:1px solid var(--line);
+}
+.code-block .lang-tabs button{
+  font:inherit;font-size:11.5px;font-weight:500;
+  padding:6px 14px;background:transparent;border:none;
+  cursor:pointer;color:var(--ink-meta);
+  border-right:1px solid var(--line-soft);
+  transition:background .12s ease, color .12s ease;
+  font-family:'JetBrains Mono',monospace;
+}
+.code-block .lang-tabs button:hover{background:var(--paper-light);color:var(--ink);}
+.code-block .lang-tabs button.active{
+  background:var(--paper-light);color:var(--ink);font-weight:600;
+}
+.code-block .copy{
+  position:absolute;top:4px;right:4px;
+  background:transparent;border:1px solid transparent;border-radius:4px;
+  padding:4px 8px;font-size:11px;cursor:pointer;
+  color:var(--ink-meta);font-family:'Inter',sans-serif;
+  display:inline-flex;align-items:center;gap:4px;
+  opacity:.4;transition:opacity .14s ease, border-color .14s ease;
+}
+.code-block:hover .copy{opacity:1;}
+.code-block .copy:hover{border-color:var(--line);background:var(--paper-light);}
+.code-block .copy.stamped{animation:stamp .16s ease-out;}
+@keyframes stamp{0%{transform:translateY(0);}40%{transform:translateY(2px);}100%{transform:translateY(0);}}
+.code-block .copy .inkblot{
+  position:absolute;top:50%;right:calc(100% + 6px);
+  transform:translateY(-50%);font-size:10.5px;font-weight:600;
+  color:var(--green);font-style:italic;
+  opacity:0;transition:opacity .2s ease-out;
+  pointer-events:none;white-space:nowrap;
+}
+.code-block .copy.copied .inkblot{
+  opacity:1;animation:inkblot-fade 1.3s ease-out forwards;
+}
+@keyframes inkblot-fade{
+  0%{opacity:0;transform:translateY(-50%) translateX(-3px);}
+  20%{opacity:1;transform:translateY(-50%) translateX(0);}
+  80%{opacity:1;}
+  100%{opacity:0;transform:translateY(-50%) translateX(3px);}
+}
+.code-block pre{
+  margin:0;padding:14px 16px;overflow-x:auto;
+  font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  color:var(--ink);line-height:1.55;
+  background:var(--paper);
+}
+.code-block pre code{background:transparent;padding:0;border-radius:0;font-size:inherit;}
+/* simple syntax tinting */
+.tok-key{color:var(--blue);}
+.tok-str{color:var(--green);}
+.tok-num{color:var(--ochre);}
+.tok-bool{color:var(--crimson);}
+.tok-cmt{color:var(--ink-faint);font-style:italic;}
+
+/* ── NOTE CALLOUTS (T5) ── */
+.note{
+  border:1px solid var(--line);border-left:3px solid var(--ink-faint);
+  background:var(--paper-light);border-radius:5px;
+  padding:11px 14px;margin:12px 0;font-size:13.5px;
+  position:relative;
+}
+.note .label{
+  font-family:'Fraunces',serif;font-size:10.5px;
+  text-transform:uppercase;letter-spacing:.18em;
+  color:var(--ink-meta);font-weight:600;margin-bottom:3px;
+  display:flex;align-items:center;gap:5px;
+}
+.note p:last-child{margin-bottom:0;}
+.note--info{border-left-color:var(--blue);background:var(--blue-pale);}
+.note--info .label{color:var(--blue);}
+.note--tip{border-left-color:var(--green);background:var(--green-pale);}
+.note--tip .label{color:var(--green);}
+.note--warn{border-left-color:var(--ochre);background:var(--ochre-pale);}
+.note--warn .label{color:#8a5d0e;}
+.note--danger{border-left-color:var(--crimson);background:var(--crimson-pale);}
+.note--danger .label{color:var(--crimson);}
+
+/* Behaviour-notes list — bullet items inside the .note--info callout.
+   Tight line-height, generous left padding so the disc markers align
+   with the label above. <code> tokens inherit the doc's monospace
+   inline style. <strong> bumps the weight subtly so the eye lands on
+   the key phrase per bullet. */
+.behaviour-notes .bn-list{margin:6px 0 0 0;padding-left:20px}
+.behaviour-notes .bn-list li{margin:4px 0;line-height:1.6;font-size:13.5px;color:var(--ink)}
+.behaviour-notes .bn-list li strong{font-weight:600;color:var(--ink-deep,var(--ink))}
+.behaviour-notes .bn-list li code{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;
+  background:var(--ink-very-faint,rgba(0,0,0,0.04));padding:1px 5px;border-radius:3px}
+
+/* ── QUOTE (T6) ── */
+blockquote{
+  border-left:3px solid var(--line);
+  padding:6px 0 6px 16px;margin:12px 0;
+  font-family:'Fraunces',serif;font-size:15.5px;font-style:italic;
+  color:var(--ink);line-height:1.5;
+}
+blockquote cite{
+  display:block;font-size:11.5px;font-style:normal;color:var(--ink-meta);
+  margin-top:4px;letter-spacing:.04em;
+}
+blockquote cite::before{content:"· ";}
+
+/* ── TABLES (T7) ── */
+.tbl{
+  width:100%;border-collapse:collapse;margin:10px 0 14px;
+  font-size:13px;
+}
+.tbl th, .tbl td{
+  text-align:left;padding:8px 10px;
+  border-bottom:1px solid var(--line-soft);vertical-align:top;
+}
+.tbl th{
+  font-family:'Fraunces',serif;font-weight:600;color:var(--ink);
+  font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;
+  border-bottom:1px solid var(--line);
+}
+.tbl td.mono, .tbl th.mono{font-family:'JetBrains Mono',monospace;font-size:12px;}
+.tbl tr:last-child td{border-bottom:none;}
+.tbl .req{color:var(--crimson);font-size:11px;font-weight:600;margin-left:2px;}
+.tbl tbody tr:hover{background:var(--paper);}
+
+/* ── LISTS (T8) ── */
+.entry ul, .entry ol, main.content ul, main.content ol{
+  padding-left:22px;margin:8px 0;
+}
+.entry ul li, main.content ul li{
+  margin-bottom:4px;list-style-type:square;
+}
+.entry ul li::marker, main.content ul li::marker{color:var(--green);}
+.entry ol li, main.content ol li{margin-bottom:4px;}
+.entry ol li::marker, main.content ol li::marker{
+  color:var(--ink-meta);font-family:'JetBrains Mono',monospace;
+}
+
+/* ── DEFINITION LIST (T9) ── */
+dl.defs{margin:10px 0;}
+dl.defs dt{
+  font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  color:var(--ink);font-weight:500;margin-top:8px;
+  display:flex;align-items:baseline;gap:8px;
+}
+dl.defs dt .ty{
+  font-family:'Inter',sans-serif;font-size:10.5px;
+  color:var(--green);background:var(--green-pale);
+  padding:1px 6px;border-radius:3px;font-weight:600;
+  letter-spacing:.02em;
+}
+dl.defs dt .opt{
+  font-family:'Inter',sans-serif;font-size:10.5px;
+  color:var(--ink-meta);font-style:italic;
+}
+dl.defs dd{
+  margin-left:12px;font-size:13px;color:var(--ink-body);
+  padding-bottom:4px;border-left:1px solid var(--line-soft);
+  padding-left:10px;
+}
+
+/* ══════════════ PLAYGROUND (C1) ══════════════ */
+.playground{
+  border:1px solid var(--line);border-radius:6px;
+  background:var(--paper);margin:12px 0 18px;overflow:hidden;
+}
+.playground-header{
+  background:var(--paper-deep);padding:6px 12px;
+  border-bottom:1px solid var(--line);
+  font-family:'Fraunces',serif;font-size:11.5px;
+  letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-meta);display:flex;align-items:center;gap:10px;
+}
+.playground-header::before{content:"▸";color:var(--green);}
+.playground-form{
+  padding:14px 16px;display:grid;gap:10px;
+}
+.field{
+  display:grid;grid-template-columns:140px 1fr auto;gap:10px;
+  align-items:center;font-size:13px;
+}
+.field label{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink);}
+.field label .req{color:var(--crimson);}
+.field input, .field select, .field textarea{
+  font:inherit;font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  padding:5px 9px;border:1px solid var(--line);border-radius:4px;
+  background:var(--paper-light);color:var(--ink);width:100%;
+  transition:border-color .14s ease;
+}
+.field input:focus, .field select:focus, .field textarea:focus{
+  outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(74,157,95,.14);
+}
+.field .ty{font-size:10.5px;color:var(--ink-meta);font-style:italic;}
+.field .file-drop{
+  border:1.5px dashed var(--line);border-radius:5px;
+  padding:14px 16px;text-align:center;color:var(--ink-meta);
+  cursor:pointer;font-size:12.5px;background:var(--paper-light);
+  transition:border-color .14s ease, background .14s ease;
+}
+.field .file-drop.dragover{border-color:var(--green);background:var(--green-pale);color:var(--green);}
+.field .file-drop.has-file{border-style:solid;border-color:var(--green);color:var(--green);}
+.optional-fields{
+  border:1px dashed var(--line);border-radius:5px;
+  padding:6px 10px;margin-top:4px;background:var(--paper-light);
+}
+.optional-fields summary{
+  cursor:pointer;font-size:12.5px;color:var(--green);
+  font-weight:600;letter-spacing:.02em;user-select:none;
+  list-style:none;outline:none;padding:2px 0;
+}
+.optional-fields summary::-webkit-details-marker{display:none;}
+.optional-fields[open] summary{margin-bottom:8px;border-bottom:1px solid var(--line-soft);padding-bottom:6px;}
+.optional-fields .optional-body{display:grid;gap:10px;}
+
+.playground-actions{
+  padding:10px 16px;background:var(--paper-light);
+  border-top:1px solid var(--line-soft);
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.playground-actions .key-picker{
+  flex:1;font-size:12px;color:var(--ink-meta);
+  display:flex;align-items:center;gap:8px;
+}
+.playground-actions .key-picker select{
+  font:inherit;font-family:'JetBrains Mono',monospace;font-size:12px;
+  padding:4px 8px;border:1px solid var(--line);border-radius:4px;
+  background:var(--paper);color:var(--ink);
+}
+.try-btn{
+  background:var(--green);color:var(--paper-light);
+  border:1px solid var(--green);border-radius:5px;
+  padding:7px 18px;font:inherit;font-weight:600;font-size:13px;
+  letter-spacing:.04em;cursor:pointer;position:relative;
+  overflow:hidden;transition:background .14s ease;
+}
+.try-btn:hover{background:#265a32;}
+.try-btn:active{transform:translateY(1px);}
+.try-btn[disabled]{background:var(--ink-faint);border-color:var(--ink-faint);cursor:wait;}
+.try-btn::before{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);
+  transform:translateX(-100%);transition:transform 0s;
+}
+.try-btn.pressed::before{transform:translateX(100%);transition:transform .22s ease-out;}
+
+/* spinner */
+.spinner{
+  width:14px;height:14px;border:2px solid rgba(255,255,255,.4);
+  border-top-color:#fff;border-radius:50%;
+  animation:spin .9s linear infinite;display:inline-block;margin-right:6px;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* response panel (A7) */
+.response-panel{
+  border-top:1px solid var(--line);
+  max-height:0;overflow:hidden;
+  transition:max-height .32s cubic-bezier(.4,0,.2,1);
+  background:var(--paper-light);
+}
+.response-panel.open{max-height:1200px;}
+.response-inner{padding:14px 16px;}
+.response-meta{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  font-size:12px;color:var(--ink-meta);
+  font-family:'JetBrains Mono',monospace;margin-bottom:10px;
+  position:relative;
+}
+.response-meta .http{
+  font-weight:700;padding:2px 8px;border-radius:4px;font-size:11.5px;
+}
+.response-meta .http.ok{background:var(--green-pale);color:var(--green);}
+.response-meta .http.err{background:var(--crimson-pale);color:var(--crimson);}
+.response-meta .rid{color:var(--ink-meta);}
+
+/* OK/REJECTED stamps (A8, A9) */
+.stamp{
+  position:absolute;right:0;top:-6px;
+  font-family:'Fraunces',serif;font-style:italic;font-weight:700;
+  font-size:14px;letter-spacing:.04em;
+  padding:3px 12px;border:2px solid;border-radius:4px;
+  opacity:0;transform:rotate(-3deg) scale(.6);
+  transition:opacity .24s ease-out, transform .24s cubic-bezier(.18,.89,.32,1.28);
+  text-transform:uppercase;
+}
+.stamp.show{opacity:.85;transform:rotate(-3deg) scale(1);}
+.stamp.ok{color:var(--green);border-color:var(--green);}
+.stamp.err{color:var(--crimson);border-color:var(--crimson);}
+
+.response-body{
+  font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  background:var(--paper);border:1px solid var(--line-soft);
+  border-radius:5px;padding:12px 14px;max-height:480px;overflow:auto;
+  color:var(--ink);line-height:1.55;
+}
+.response-body.has-error{background:var(--crimson-pale);}
+
+/* ── Schema tree (C7) ── */
+.schema-tree{
+  font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  background:var(--paper);border:1px solid var(--line-soft);
+  border-radius:5px;padding:10px 12px;margin:8px 0;
+  max-height:520px;overflow:auto;color:var(--ink);
+}
+.schema-node{margin:1px 0;}
+.schema-node .tw{
+  display:inline-block;width:14px;color:var(--ink-faint);cursor:pointer;
+  transition:transform .14s ease;user-select:none;text-align:center;
+}
+.schema-node.expanded > .tw{transform:rotate(90deg);}
+.schema-node .k{color:var(--blue);}
+.schema-node .v-str{color:var(--green);}
+.schema-node .v-num{color:var(--ochre);}
+.schema-node .v-bool{color:var(--crimson);}
+.schema-node .v-null{color:var(--ink-faint);font-style:italic;}
+.schema-node .punct{color:var(--ink-meta);}
+.schema-node-children{
+  margin-left:18px;border-left:1px dashed var(--line-soft);
+  padding-left:8px;display:none;
+}
+.schema-node.expanded > .schema-node-children{display:block;}
+
+/* ══════════════ SEARCH PALETTE (C5) ══════════════ */
+.palette-backdrop{
+  position:fixed;inset:0;background:rgba(26,22,18,.30);
+  z-index:200;display:none;backdrop-filter:blur(2px);
+}
+.palette-backdrop.open{display:flex;justify-content:center;align-items:flex-start;}
+.palette{
+  margin-top:80px;background:var(--paper-light);
+  border:1px solid var(--line);border-radius:8px;
+  width:min(560px,90vw);box-shadow:var(--shadow-stamp);
+  overflow:hidden;
+  transform:translateY(-16px);opacity:0;
+  transition:transform .26s cubic-bezier(.4,0,.2,1), opacity .26s ease-out;
+}
+.palette-backdrop.open .palette{transform:translateY(0);opacity:1;}
+.palette-input{
+  width:100%;padding:13px 16px;border:none;
+  background:transparent;font:inherit;font-size:15px;
+  color:var(--ink);border-bottom:1px solid var(--line);outline:none;
+}
+.palette-input::placeholder{color:var(--ink-faint);}
+.palette-list{max-height:55vh;overflow:auto;padding:6px 0;}
+.palette-item{
+  padding:8px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;
+  font-size:13.5px;color:var(--ink-body);
+}
+.palette-item.active, .palette-item:hover{background:var(--paper);color:var(--ink);}
+.palette-item .m{
+  font-family:'JetBrains Mono',monospace;font-size:9.5px;
+  font-weight:600;padding:1px 5px;border-radius:3px;color:var(--paper);
+}
+.palette-item .p{font-family:'JetBrains Mono',monospace;color:var(--ink-meta);font-size:12px;}
+.palette-item .d{margin-left:auto;font-size:11.5px;color:var(--ink-faint);}
+.palette-item mark{background:var(--green-pale);color:var(--ink);font-weight:600;}
+.palette-empty{padding:16px;text-align:center;color:var(--ink-faint);font-size:13px;font-style:italic;}
+.palette-footer{
+  padding:6px 16px;background:var(--paper);
+  border-top:1px solid var(--line-soft);
+  font-size:11px;color:var(--ink-meta);
+  display:flex;gap:14px;justify-content:flex-end;
+}
+.palette-footer kbd{font-size:10px;padding:0 4px;}
+
+/* ══════════════ SHORTCUTS MODAL (N1) ══════════════ */
+.shortcuts-backdrop{
+  position:fixed;inset:0;background:rgba(26,22,18,.30);
+  z-index:200;display:none;justify-content:center;align-items:center;
+  backdrop-filter:blur(2px);
+}
+.shortcuts-backdrop.open{display:flex;}
+.shortcuts-modal{
+  background:var(--paper-light);border:1px solid var(--line);
+  border-radius:8px;padding:22px 26px;width:min(440px,90vw);
+  box-shadow:var(--shadow-stamp);
+}
+.shortcuts-modal h3{
+  font-family:'Fraunces',serif;font-size:18px;color:var(--ink);
+  margin-bottom:14px;
+}
+.shortcuts-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:6px 0;border-bottom:1px dotted var(--line-soft);font-size:13px;
+}
+.shortcuts-row:last-child{border-bottom:none;}
+.shortcuts-row .keys{display:flex;gap:4px;}
+
+/* ══════════════ FOOTER ══════════════ */
+footer.ribbon{
+  max-width:1380px;margin:18px auto 0;padding:18px 22px 24px;
+  font-size:11.5px;color:var(--ink-meta);
+  border-top:1px solid var(--line);
+}
+footer.ribbon .ribbon-row{
+  display:flex;align-items:center;justify-content:center;
+  flex-wrap:wrap;gap:8px;line-height:1.6;
+}
+footer.ribbon .ribbon-sep{color:var(--ink-faint);}
+footer.ribbon a{
+  color:var(--green);text-decoration:none;font-weight:500;
+  border-bottom:1px solid transparent;transition:border-bottom-color .14s ease;
+}
+footer.ribbon a:hover{border-bottom-color:var(--green);}
+footer.ribbon kbd{font-size:10.5px;padding:0 5px;}
+
+/* ══════════════ PROCEDURE BOX (T14) ══════════════ */
+.procedure{
+  counter-reset:step;margin:14px 0;
+}
+.proc-step{
+  display:grid;grid-template-columns:32px 1fr;gap:12px;
+  padding:10px 12px;border:1px solid var(--line);border-radius:5px;
+  background:var(--paper-light);margin-bottom:8px;
+  counter-increment:step;
+  position:relative;opacity:0;transform:translateX(-8px);
+  animation:step-in .3s ease-out forwards;
+}
+.proc-step:nth-child(1){animation-delay:.05s;}
+.proc-step:nth-child(2){animation-delay:.12s;}
+.proc-step:nth-child(3){animation-delay:.19s;}
+.proc-step:nth-child(4){animation-delay:.26s;}
+.proc-step:nth-child(5){animation-delay:.33s;}
+.proc-step:nth-child(6){animation-delay:.40s;}
+@keyframes step-in{to{opacity:1;transform:translateX(0);}}
+.proc-step::before{
+  content:counter(step);
+  font-family:'Fraunces',serif;font-weight:600;font-size:18px;
+  color:var(--green);text-align:center;line-height:1;padding-top:2px;
+  border-right:1px solid var(--line-soft);padding-right:8px;
+}
+.proc-step .text{font-size:13.5px;line-height:1.5;}
+
+/* ASCII / SVG diagram block (T13) */
+.diagram{
+  font-family:'JetBrains Mono',monospace;font-size:11px;
+  background:var(--paper);border:1px solid var(--line);
+  border-radius:6px;padding:14px 16px;margin:14px 0;
+  white-space:pre;overflow-x:auto;color:var(--ink);line-height:1.4;
+}
+
+/* ── ANCHOR PERMA LINKS ── */
+.has-perma{position:relative;}
+.perma-pop{
+  position:absolute;background:var(--green);color:#fff;
+  font-size:11px;padding:3px 10px;border-radius:3px;
+  opacity:0;pointer-events:none;
+  transition:opacity .2s ease;
+}
+.perma-pop.show{opacity:1;}
+
+/* ── PRINT MODE (C12) ── */
+@media print{
+  .masthead .actions, nav.side, aside.rail,
+  .playground, .palette-backdrop, .shortcuts-backdrop,
+  .scroll-progress, footer.ribbon .no-print{display:none !important;}
+  .layout{display:block;max-width:none;padding:0;}
+  .masthead{position:static;border-bottom:1.5px solid #000;}
+  .entry{
+    border:1px solid #999;background:#fff;
+    page-break-inside:avoid;box-shadow:none;
+    margin:14px 0;padding:14px 18px;
+    animation:none;opacity:1;transform:none;
+  }
+  .code-block .copy, .anchor, .perma{display:none !important;}
+  body{font-size:11pt;background:#fff;color:#000;}
+  .entry-title-block h2{color:#000;}
+  a{color:#000;text-decoration:underline;}
+  .entry::before{background:#fff;border-color:#000;}
+}
+
+/* responsive playground stacking */
+@media (max-width:640px){
+  .field{grid-template-columns:1fr;}
+  .field label{font-size:11.5px;}
+}
+</style>
+  <!-- Stage 6 · telemetry library · /api/telemetry/ingest -->
+  <script src="/static/telemetry.js?v=stage6c" defer></script>
+</head>
+
+<body data-theme="light">
+<div class="scroll-progress" id="scroll-progress"></div>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <a class="brand" href="/" aria-label="APIN home">
+      <img src="/logo.png" alt="APIN logo">
+      <div class="wordmark">
+        <strong>APIN</strong>
+        <span>API Documentation</span>
+      </div>
+    </a>
+    <span class="crumbs">Field Laboratory · Documentation</span>
+    <div class="actions">
+      <button class="search-trigger" id="search-trigger" aria-label="Search the docs">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <span>Search</span>
+        <span class="kbd">⌘K</span>
+      </button>
+      <a class="btn btn--ghost" href="/openapi.json" target="_blank" rel="noopener" title="Raw OpenAPI 3.1 schema">openapi.json</a>
+      <button class="btn btn--ghost" id="theme-toggle" title="Toggle theme (T)">◐</button>
+      <!-- Sign-in button removed: /docs is public reference content. The
+           in-content guidance ("Sign in via /landing, then POST /api/keys")
+           remains in the Authentication primer section, where it's
+           contextually relevant. The header CTA was misleading on a
+           docs page that any visitor can read end-to-end without auth. -->
+
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="side" id="nav" aria-label="Documentation index"></nav>
+  <main class="content" id="content">
+    <div class="preamble">
+      <h1 class="page-title serif">APIN API Documentation</h1>
+      <p class="page-sub">
+        The full HTTP reference for the
+        <span class="term" tabindex="0">Adaptive Pathological Intelligence Network<span class="tooltip-card">APIN: the ensemble that diagnoses okra and brassica leaf diseases. Four signals (DINOv3-ConvNeXt, EfficientNet, DINOv2, PSV) fuse through a stacking MLP gate.</span></span>.
+        Every endpoint is documented with parameter schemas, response shapes, error codes, and a working playground. The catalogue below covers <strong id="endpoint-count">21</strong> endpoints, <strong>8</strong> guides, and a glossary.
+      </p>
+      <div class="chip-row">
+        <span class="chip chip--solid">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          API VERSION 1.0
+        </span>
+        <a class="chip chip--download" href="/openapi.json" target="_blank" rel="noopener" title="Open the raw OpenAPI 3.1 schema in a new tab">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+          openapi.json
+        </a>
+        <button class="chip chip--download" id="postman-badge" type="button" title="Download a Postman v2.1 collection. Insomnia imports the same file natively.">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Postman / Insomnia collection
+        </button>
+        <button class="chip chip--download" id="print-badge" type="button" title="Open print preview as a printable document">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Print docs
+        </button>
+        <a class="chip chip--ghost" href="/health" target="_blank" rel="noopener" title="Live health endpoint">/health</a>
+        <a class="chip chip--ghost" href="/status" target="_blank" rel="noopener" title="System status dashboard">/status</a>
+      </div>
+    </div>
+
+    <div id="rendered-content"></div>
+  </main>
+
+  <aside class="rail" id="rail">
+    <h4>On this page</h4>
+    <nav class="toc" id="toc" aria-label="Section index"></nav>
+
+    <h4>Recent calls</h4>
+    <div class="recent-calls" id="recent-calls"></div>
+
+    <h4 id="related-heading">Related to this entry</h4>
+    <nav class="field-guide" id="related-nav" aria-label="Related to current entry"></nav>
+  </aside>
+</div>
+
+<footer class="ribbon">
+  <div class="ribbon-row">
+    <span>© 2026 APIN · Field Laboratory, Kerala</span>
+    <span class="ribbon-sep">·</span>
+    <a href="/openapi.json" target="_blank" rel="noopener">openapi.json</a>
+    <span class="ribbon-sep">·</span>
+    <a href="/status" target="_blank" rel="noopener">/status</a>
+    <span class="ribbon-sep">·</span>
+    <a href="/health" target="_blank" rel="noopener">/health</a>
+    <span class="ribbon-sep no-print">·</span>
+    <span class="no-print"><kbd>?</kbd> shows keyboard shortcuts</span>
+  </div>
+</footer>
+
+<!-- ⌘K palette -->
+<div class="palette-backdrop" id="palette-backdrop" aria-hidden="true">
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Search">
+    <input class="palette-input" id="palette-input" placeholder="Search endpoints, paths, guides…" autocomplete="off">
+    <div class="palette-list" id="palette-list"></div>
+    <div class="palette-footer">
+      <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+      <span><kbd>↵</kbd> jump</span>
+      <span><kbd>Esc</kbd> close</span>
+    </div>
+  </div>
+</div>
+
+<!-- shortcuts modal -->
+<div class="shortcuts-backdrop" id="shortcuts-backdrop" aria-hidden="true">
+  <div class="shortcuts-modal" role="dialog" aria-modal="true" aria-label="Shortcuts">
+    <h3 class="serif">Keyboard shortcuts</h3>
+    <div class="shortcuts-row"><span>Open search</span><span class="keys"><kbd>⌘</kbd><kbd>K</kbd></span></div>
+    <div class="shortcuts-row"><span>Show this menu</span><kbd>?</kbd></div>
+    <div class="shortcuts-row"><span>Focus search bar</span><kbd>/</kbd></div>
+    <div class="shortcuts-row"><span>Next entry</span><kbd>j</kbd></div>
+    <div class="shortcuts-row"><span>Previous entry</span><kbd>k</kbd></div>
+    <div class="shortcuts-row"><span>Toggle theme</span><kbd>t</kbd></div>
+    <div class="shortcuts-row"><span>Close modal</span><kbd>Esc</kbd></div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   /docs page logic. Everything inline so this file ships as one
+   self-contained artifact (matches status.html + health.html pattern).
+   ════════════════════════════════════════════════════════════════════ */
+
+const BASE = location.origin;  // same-origin API calls
+
+/* ───────── ENDPOINT SPEC ─────────
+   Every endpoint is described by a single object. The renderer turns
+   the spec into the rendered HTML, the playground form, the code
+   samples, and the search-palette entry. */
+const ENDPOINTS = [
+  /* ═══ REFERENCE ═══ */
+  {
+    id:"version", group:"REFERENCE", method:"GET", path:"/api/version",
+    summary:"Service banner, model identity, and runtime details.",
+    description:`Returns the service version banner: which model is loaded, what
+classes it can diagnose, what compute device is in use, and the git commit
+of the running build. Use it to confirm a deployment matches what you
+expect before sending real traffic.`,
+    auth:"none",
+    persistsData:false,
+    facts:["Public", "Cacheable for 60 s on the client"],
+    params:[],
+    sampleResponse:{
+      api_version:"1.0",
+      request_id:"req_8a14b9c3d2e0f1a4",
+      endpoint:"/api/version",
+      ok:true,
+      processed_at:"2026-05-23T04:00:00.000Z",
+      processing_time_ms:0,
+      status_code:200,
+      data:{
+        service:"APIN - Adaptive Pathological Intelligence Network",
+        api_version:"1.0",
+        git_commit:"399e2bd",
+        model:{
+          name:"APIN okra/brassica 3-signal ensemble",
+          crop_scope:["okra","brassica"],
+          classes:["okra_yvmv","okra_powdery_mildew","okra_cercospora",
+            "okra_enation","okra_healthy","brassica_black_rot",
+            "brassica_downy_mildew","brassica_alternaria","brassica_healthy"],
+          n_classes:9, n_signals:4,
+          backbone:"DINOv3-ConvNeXt-Small"
+        },
+        runtime:{ device:"cuda", python:"3.13.11" },
+        contract:"v1.0 (stable)"
+      },
+      meta:{}
+    },
+    errors:[
+      {code:"internal_error",http:500,
+       why:"Server could not assemble the banner. Logged with request_id."}
+    ],
+    seeAlso:[
+      {id:"info", label:"/api/info"},
+      {id:"model-card", label:"/api/model/card"}
+    ]
+  },
+  {
+    id:"diseases", group:"REFERENCE", method:"GET", path:"/api/diseases",
+    summary:"Full disease catalogue: pathogen, symptoms, severity-keyed treatment, urgency.",
+    description:`The agronomic catalogue APIN diagnoses against. Each record carries
+the canonical class name, the responsible pathogen, a symptom description,
+and treatment + urgency dictionaries keyed by severity bucket
+(<code>mild</code>, <code>moderate</code>, <code>severe</code>).`,
+    auth:"none",
+    persistsData:false,
+    facts:["Public", "9 records (5 okra, 4 brassica)"],
+    params:[],
+    sampleResponse:{
+      api_version:"1.0", request_id:"req_…", endpoint:"/api/diseases",
+      ok:true, processed_at:"…Z", processing_time_ms:1, status_code:200,
+      data:{
+        crop_scope:["okra","brassica"], count:9,
+        diseases:[{ "class":"okra_yvmv", crop:"okra",
+          label:"Okra Yellow Vein Mosaic Virus", is_healthy:false,
+          pathogen_and_cause:"Begomovirus complex; transmitted by whitefly.",
+          symptoms:"Yellow vein networks with mosaic mottling, leaf curl, stunting.",
+          treatment:{mild:["…"],moderate:["…"],severe:["…"]},
+          prevention:["Resistant varieties (Arka Anamika, Parbhani Kranti).","…"],
+          urgency:{mild:"medium",moderate:"high",severe:"critical"},
+          urgency_reason:"Whitefly-vectored, spreads rapidly in warm weather."
+        }, "...8 more records..."],
+        severity_levels:["mild","moderate","severe"],
+        note:"Treatment and urgency are keyed by severity."
+      },
+      meta:{}
+    },
+    errors:[],
+    seeAlso:[
+      {id:"disease-detail", label:"/api/diseases/{class}"},
+      {anchor:"appendix-classes", label:"Full class list"}
+    ]
+  },
+  {
+    id:"disease-detail", group:"REFERENCE",
+    method:"GET", path:"/api/diseases/{disease_class}",
+    summary:"One disease record by canonical class name.",
+    description:`Returns a single disease record from the catalogue. The path
+parameter <code>disease_class</code> must be one of the 9 canonical class
+names (see <a href="#diseases">/api/diseases</a> for the full list).`,
+    auth:"none",
+    persistsData:false,
+    facts:["Public"],
+    pathParams:[
+      {name:"disease_class", type:"string", required:true,
+       placeholder:"okra_yvmv",
+       description:"Canonical class name. Example: <code>okra_yvmv</code>."}
+    ],
+    params:[],
+    playgroundExample:{ "disease_class":"okra_yvmv" },
+    sampleResponse:{
+      api_version:"1.0", request_id:"req_…", endpoint:"/api/diseases/{disease_class}",
+      ok:true, status_code:200,
+      data:{
+        "class":"okra_yvmv", crop:"okra",
+        label:"Okra Yellow Vein Mosaic Virus",
+        is_healthy:false,
+        pathogen_and_cause:"Begomovirus complex; transmitted by whitefly.",
+        symptoms:"Yellow vein networks with mosaic mottling, leaf curl, stunting.",
+        treatment:{mild:["..."],moderate:["..."],severe:["..."]},
+        urgency:{mild:"medium",moderate:"high",severe:"critical"}
+      }, meta:{}
+    },
+    errors:[
+      {code:"not_found",http:404,why:"No record with that class name. Call /api/diseases for the list."}
+    ],
+    seeAlso:[{id:"diseases",label:"/api/diseases"}]
+  },
+  {
+    id:"model-card", group:"REFERENCE", method:"GET", path:"/api/model/card",
+    summary:"Architecture, calibration, limitations, intended use.",
+    description:`The model card. Documents the four signals that fuse into a
+diagnosis, the calibration approach (per-class temperature scaling +
+conformal prediction sets), the OOD detector, and the honest limitations
+(including the finding that a single fine-tuned model matches the
+ensemble on raw accuracy; the ensemble's measured advantage is
+calibration, not peak accuracy).`,
+    auth:"none",
+    persistsData:false,
+    facts:["Public","Recommended reading before relying on confidence scores"],
+    params:[],
+    sampleResponse:null,
+    errors:[],
+    seeAlso:[{id:"benchmarks",label:"/api/benchmarks"},
+             {anchor:"appendix-tiers",label:"Confidence tiers"}]
+  },
+  {
+    id:"benchmarks", group:"REFERENCE", method:"GET", path:"/api/benchmarks",
+    summary:"Apples-to-apples comparison vs. external baselines (ResNet-50, ConvNeXt-Tiny, EfficientNet-B0).",
+    description:`The latest benchmark report. APIN's ensemble plus three external
+baselines are scored on the same 1,379-image held-out test set. The
+response includes per-model accuracy, macro-F1, and 15-bin ECE plus an
+<code>honest_finding</code> field that summarises what the numbers mean
+in plain language.`,
+    auth:"none",
+    persistsData:false,
+    facts:["Public", "Cacheable; regenerated only when models change"],
+    params:[],
+    sampleResponse:null,
+    errors:[
+      {code:"internal_error",http:500,
+       why:"Latest report exists on disk but is unreadable or malformed."}
+    ],
+    seeAlso:[{id:"model-card",label:"/api/model/card"}]
+  },
+
+  /* ═══ INFERENCE ═══ */
+  {
+    id:"warmup", group:"INFERENCE", method:"POST", path:"/api/warmup",
+    summary:"Idempotent trigger for lazy model loading.",
+    description:`Kicks off lazy-loading of every APIN signal. Safe to call at any
+time and from any client. The handler runs the heavy loaders in a worker
+thread so the event loop stays responsive. A short cooldown coalesces
+repeat callers (<code>coalesced: true</code>). The authoritative
+readiness probe remains <a href="/warmup/status" target="_blank" rel="noopener">GET /warmup/status</a>.`,
+    auth:"none",
+    persistsData:false,
+    facts:["Public", "Idempotent", "HTTP 202 Accepted"],
+    successStatus:202,
+    params:[],
+    sampleResponse:{
+      api_version:"1.0", request_id:"req_…", endpoint:"/api/warmup",
+      ok:true, status_code:202,
+      data:{
+        accepted:true, coalesced:false,
+        signals:[
+          {signal:"model2", status:"ready"},
+          {signal:"efficientnet", status:"ready"},
+          {signal:"dinov2", status:"ready"}
+        ],
+        check_status_at:"GET /warmup/status",
+        note:"Warmup is idempotent."
+      }, meta:{}
+    },
+    errors:[
+      {code:"service_unavailable",http:503,why:"Engine could not be constructed (missing weights, etc.)."}
+    ],
+    behaviourNotes:[
+      "<strong>Idempotent.</strong> Calling warmup on an already-warm process completes immediately and reports the existing readiness.",
+      "Concurrent callers are <strong>coalesced</strong> via a single in-flight lock — firing ten warmup calls in parallel triggers exactly one cold load.",
+      "Within the cooldown window (~10 s after the last load), repeat calls fast-path to a response carrying <code>coalesced:true</code> instead of re-running the loaders.",
+      "Authoritative readiness is reported by <code>GET /api/warmup/status</code>, not by this endpoint's body. /warmup just kicks the load; /warmup/status is what your retry loop should poll."
+    ],
+    seeAlso:[]
+  },
+  {
+    id:"predict-quick", group:"INFERENCE", method:"POST", path:"/api/predict/quick",
+    summary:"Single-image inference, lean payload, Bearer auth.",
+    description:`Runs the full APIN ensemble on one image and returns the lean
+payload shape: diagnosis, confidence, tier, top-3 classes, uncertainty
+breakdown, conformal prediction set, and quality flags. Excludes the
+heatmap and decision trace (those live on <code>/api/predict/full</code>).
+Designed for machine consumers who want fast responses and small JSON.`,
+    auth:"bearer",
+    persistsData:false,
+    facts:["Bearer auth", "Lean payload (~3 KB)", "Per-file cap 12 MB"],
+    params:[
+      {name:"file", type:"binary", required:true,
+       description:"Single leaf image (JPEG / PNG / WebP), max 12 MB.",
+       widget:"file"}
+    ],
+    sampleResponse:{
+      api_version:"1.0", request_id:"req_…", endpoint:"/api/predict/quick",
+      ok:true, status_code:200,
+      data:{
+        diagnosis:"okra_yvmv", confidence:0.92, tier:"1A",
+        top3:[
+          {"class":"okra_yvmv", probability:0.92},
+          {"class":"okra_powdery_mildew", probability:0.04},
+          {"class":"okra_healthy", probability:0.02}
+        ],
+        out_of_distribution:false,
+        mahalanobis_distance:14.2,
+        uncertainty:{aleatoric:0.03, epistemic:0.05},
+        conformal_prediction_set:["okra_yvmv"],
+        quality_flags:{}, failed_signals:[],
+        processing_time_ms:1840.0, mode:"quick",
+        explainability_available_at:"/api/predict/full",
+        authenticated_as:{ key_id:42, key_name:"drone-fleet-prod" }
+      }, meta:{}
+    },
+    errors:[
+      {code:"auth_required",http:401,why:"No Bearer token or X-API-Key header sent."},
+      {code:"auth_invalid",http:401,why:"Token is malformed, revoked, or unknown."},
+      {code:"invalid_parameter",http:400,why:"Image file is empty or unreadable."},
+      {code:"unsupported_media_type",http:415,why:"Bytes did not decode as JPEG/PNG/WebP."},
+      {code:"payload_too_large",http:413,why:"Image exceeds 12 MB."},
+      {code:"internal_error",http:500,why:"Inference pipeline raised. Quote the request_id."}
+    ],
+    seeAlso:[
+      {id:"predict-batch",label:"/api/predict/batch"},
+      {id:"predict-full",label:"/api/predict/full (full payload)"},
+      {id:"scan",label:"/api/scan (drone version)"}
+    ]
+  },
+  {
+    id:"predict-batch", group:"INFERENCE", method:"POST", path:"/api/predict/batch",
+    summary:"Up to 16 images in one call. Per-frame results in §6 paginated shape.",
+    description:`The batch sibling of <code>/api/predict/quick</code>. Send up to
+16 images in a single multipart request; receive a per-frame result
+array. Per-file cap is 12 MB and aggregate cap is 32 MB; the aggregate
+cap fires <em>mid-loop</em> and stops processing further frames with a
+clean <code>payload_too_large</code> rather than silently truncating.`,
+    auth:"bearer",
+    persistsData:false,
+    facts:["Bearer auth","Max 16 files","Aggregate 32 MB"],
+    params:[
+      {name:"files", type:"binary[]", required:true,
+       description:"Array of images. Send the same field name N times.",
+       widget:"file-multi"}
+    ],
+    sampleResponse:null,
+    errors:[
+      {code:"auth_required",http:401,why:"No Bearer token."},
+      {code:"auth_invalid",http:401,why:"Bad token."},
+      {code:"missing_parameter",http:400,why:"Zero files sent."},
+      {code:"payload_too_large",http:413,why:"Over 16 files OR over 32 MB aggregate."}
+    ],
+    behaviourNotes:[
+      "<strong>Per-frame errors are isolated.</strong> A single failing image returns <code>ok:false</code> for that item, but does not abort the batch — other frames continue and return successfully.",
+      "Items are returned in <strong>submission order</strong> (<code>index 0..N-1</code>), regardless of which finished first.",
+      "Frames are processed <strong>sequentially</strong>, not in parallel. Total batch latency ≈ sum of per-frame latencies; plan client timeouts accordingly.",
+      "The one exception to per-frame isolation: hitting the 32 MB aggregate cap mid-loop stops further processing — the offending index gets <code>payload_too_large</code>, subsequent indices are not attempted (so the response item count may be less than the files you submitted)."
+    ],
+    seeAlso:[{id:"predict-quick",label:"/api/predict/quick"}]
+  },
+  {
+    id:"predict-full", group:"INFERENCE", method:"POST", path:"/api/predict/full",
+    summary:"Rich-payload mirror: full APINResult + Grad-CAM heatmap. Okra/brassica only.",
+    description:`Bearer-authenticated mirror of the website's <code>/predict/full</code>.
+Same inference path, same okra/brassica scope, but envelope-wrapped and
+keyed by API token instead of session cookie. Tomato is intentionally
+out of scope on this endpoint; the cookie-authenticated browser endpoint
+remains the way to invoke the tomato pipeline.`,
+    auth:"bearer",
+    persistsData:false,
+    facts:["Bearer auth", "Full APINResult", "Includes Grad-CAM heatmap", "Okra + brassica only"],
+    params:[
+      {name:"file", type:"binary", required:true,
+       description:"Single leaf image (JPEG / PNG / WebP), max 12 MB.",
+       widget:"file"}
+    ],
+    sampleResponse:null,
+    errors:[
+      {code:"auth_required",http:401,why:"No Bearer token."},
+      {code:"auth_invalid",http:401,why:"Bad token."},
+      {code:"invalid_parameter",http:400,why:"Empty file."},
+      {code:"unsupported_media_type",http:415,why:"Unrecognised image format."},
+      {code:"payload_too_large",http:413,why:"Image > 12 MB."}
+    ],
+    behaviourNotes:[
+      "Response carries a base64-encoded Grad-CAM PNG in <code>data.gradcam_b64_png</code>. Typical full response weight is <strong>600 KB to 1.4 MB</strong> depending on heatmap detail; budget your read timeouts and JSON buffers with that in mind.",
+      "Decoded PNG is 224×224 RGB. Most clients downscale or render at original resolution; do not assume display-pixel size.",
+      "Cold start may auto-downgrade to a lighter inference tier. The response always includes <code>cold_start_tier_downgraded</code> as a boolean so you can flag low-confidence first calls in your UI.",
+      "Tomato classes are <strong>out of scope</strong> on this endpoint and will be misclassified into the okra/brassica space. Tomato lives behind the cookie-authenticated browser endpoint only."
+    ],
+    seeAlso:[{id:"predict-quick",label:"/api/predict/quick (lean)"}]
+  },
+
+  /* ═══ DRONE PERCEPTION ═══ */
+  {
+    id:"scan", group:"DRONE PERCEPTION", method:"POST", path:"/api/scan",
+    summary:"Single drone frame + GPS → diagnosis + RFC 7946 GeoJSON Feature.",
+    description:`The flagship perception endpoint. Send one leaf frame and its
+GPS metadata; receive a diagnosis, a persisted scan record, and a single
+GeoJSON Feature ready to drop into a Mapbox / QGIS / Leaflet layer.
+Coordinates are emitted in RFC 7946 order: <code>[longitude, latitude]</code>.`,
+    auth:"bearer",
+    persistsData:true,
+    facts:["Bearer auth", "Persists to your scans table", "Per-file cap 12 MB", "GeoJSON Feature in response"],
+    successStatus:201,
+    params:[
+      {name:"file", type:"binary", required:true,
+       description:"Drone frame (JPEG / PNG / WebP), max 12 MB.",
+       widget:"file"},
+      {name:"latitude", type:"float", required:true,
+       description:"WGS84 latitude in degrees. Range: -90 to 90.",
+       widget:"text", placeholder:"12.5283"},
+      {name:"longitude", type:"float", required:true,
+       description:"WGS84 longitude in degrees. Range: -180 to 180.",
+       widget:"text", placeholder:"76.6975"},
+      {name:"altitude_m", type:"float", required:false,
+       description:"Altitude above mean sea level in metres. May be negative.",
+       widget:"text", placeholder:"50"},
+      {name:"heading_deg", type:"float", required:false,
+       description:"Drone heading in degrees. Range: [0, 360).",
+       widget:"text", placeholder:"270"},
+      {name:"accuracy_m", type:"float", required:false,
+       description:"GPS accuracy in metres. Must be >= 0.",
+       widget:"text", placeholder:"2.5"},
+      {name:"captured_at", type:"ISO-8601 string", required:false,
+       description:"When the frame was taken. Defaults to server now() if omitted.",
+       widget:"text", placeholder:"2026-05-23T10:30:00Z"},
+      {name:"flight_id", type:"string", required:false,
+       description:"Free-form identifier for grouping scans into a flight.",
+       widget:"text", placeholder:"flight-A1"},
+      {name:"persist_image", type:"bool (true/false)", required:false,
+       description:"If 'true', the raw image bytes are stored. Default: false (forgotten after inference).",
+       widget:"text", placeholder:"false"}
+    ],
+    sampleResponse:null,
+    errors:[
+      {code:"auth_required",http:401,why:"No Bearer token."},
+      {code:"auth_invalid",http:401,why:"Bad token."},
+      {code:"missing_parameter",http:400,why:"latitude or longitude missing."},
+      {code:"invalid_parameter",http:400,why:"Out-of-range coordinate, NaN, malformed ISO timestamp, heading not in [0, 360)."},
+      {code:"unsupported_media_type",http:415,why:"Bytes did not decode."},
+      {code:"payload_too_large",http:413,why:"Image > 12 MB."}
+    ],
+    behaviourNotes:[
+      "<strong>Raw image bytes are NOT stored by default.</strong> Pass <code>persist_image=true</code> as a form field to keep the upload — required if you want to fetch the original image later via <code>/api/scans/{scan_uid}</code>.",
+      "GeoJSON output emits coordinates in <strong>RFC 7946 order: <code>[longitude, latitude]</code></strong> — the opposite of the common <code>[lat, lng]</code> convention. Mapbox, QGIS, and Leaflet expect 7946 order, so the response drops in directly.",
+      "Coordinates are validated server-side: <code>latitude</code> in [-90, 90], <code>longitude</code> in [-180, 180], <code>heading_deg</code> in [0, 360). Out-of-range values return <code>invalid_parameter</code> with the field name attached.",
+      "The returned <code>scan_uid</code> is the only handle for later retrieval or deletion. Persist it client-side; there is no API to look up a scan by its image content."
+    ],
+    seeAlso:[
+      {id:"scan-batch",label:"/api/scan/batch"},
+      {id:"scans-list",label:"/api/scans"},
+      {anchor:"guide-drone",label:"Drone integration walkthrough"},
+      {anchor:"guide-qgis",label:"GeoJSON in QGIS guide"}
+    ]
+  },
+  {
+    id:"scan-batch", group:"DRONE PERCEPTION",
+    method:"POST", path:"/api/scan/batch",
+    summary:"Up to 16 frames + manifest → FeatureCollection.",
+    description:`Send a batch of frames in one request along with a JSON
+<code>manifest</code> describing each frame's GPS. Returns a paginated
+result list plus a single FeatureCollection that aggregates every
+successful frame. The manifest's order must match the file order.`,
+    auth:"bearer",
+    persistsData:true,
+    facts:["Bearer auth", "Max 16 frames", "Aggregate 32 MB", "Returns FeatureCollection"],
+    successStatus:201,
+    params:[
+      {name:"files", type:"binary[]", required:true,
+       description:"Drone frames. Send the same field name N times.",
+       widget:"file-multi"},
+      {name:"manifest", type:"JSON string", required:true,
+       description:'JSON array of objects, same order and length as `files`. Each carries the GPS for one frame.',
+       widget:"textarea",
+       placeholder:'[{"latitude":12.50,"longitude":76.70,"captured_at":"2026-05-23T10:31:00Z"}, {"latitude":12.51,"longitude":76.71}]'},
+      {name:"flight_id", type:"string", required:false,
+       description:"Default flight_id applied to every frame whose manifest entry omits one.",
+       widget:"text"},
+      {name:"persist_image", type:"bool", required:false,
+       description:"Persist raw bytes for every frame.",
+       widget:"text", placeholder:"false"}
+    ],
+    sampleResponse:null,
+    errors:[
+      {code:"auth_required",http:401},
+      {code:"auth_invalid",http:401},
+      {code:"missing_parameter",http:400,why:"Files or manifest missing."},
+      {code:"invalid_parameter",http:400,why:"Manifest length does not match file count, or per-frame geo is invalid."},
+      {code:"payload_too_large",http:413,why:"Over 16 files OR over 32 MB aggregate."}
+    ],
+    behaviourNotes:[
+      "<strong>Same per-frame error isolation as <code>/api/predict/batch</code></strong>: a single failing frame returns <code>ok:false</code> for that item but does not abort the batch.",
+      "The <code>manifest</code> array must be the same length as <code>files</code> and is matched by index. Mismatched lengths return <code>invalid_parameter</code> with the field name attached.",
+      "Failed frames appear in <code>items</code> with <code>ok:false</code> but are <strong>excluded from the aggregated FeatureCollection</strong> — only successful inferences contribute features.",
+      "Frames are processed sequentially. Total batch latency ≈ sum of per-frame latencies; plan client timeouts accordingly.",
+      "The returned <code>feature_collection</code> is RFC 7946 compliant — drop directly into Mapbox / QGIS / Leaflet layers."
+    ],
+    seeAlso:[{id:"scan",label:"/api/scan"},{anchor:"guide-mission",label:"Building a multi-frame mission"}]
+  },
+  {
+    id:"scans-list", group:"DRONE PERCEPTION", method:"GET", path:"/api/scans",
+    summary:"List your scans with filters; optionally attach a FeatureCollection.",
+    description:`Paginated list of the caller's scans, newest first. Filterable
+by <code>flight_id</code>, <code>diagnosis</code>, and a captured-at
+range. Pass <code>as_geojson=1</code> to also attach a FeatureCollection
+of the returned scans.`,
+    auth:"bearer",
+    persistsData:false,
+    facts:["Bearer auth", "Cursor: captured_at DESC", "page_size: 1-200"],
+    params:[
+      {name:"page", type:"int (>=1)", required:false, widget:"text", placeholder:"1"},
+      {name:"page_size", type:"int (1-200)", required:false, widget:"text", placeholder:"50"},
+      {name:"flight_id", type:"string", required:false, widget:"text"},
+      {name:"diagnosis", type:"string", required:false, widget:"text", placeholder:"okra_yvmv"},
+      {name:"since", type:"ISO-8601", required:false, widget:"text"},
+      {name:"until", type:"ISO-8601", required:false, widget:"text"},
+      {name:"as_geojson", type:"0 | 1", required:false, widget:"text", placeholder:"0"}
+    ],
+    queryStyle:true,
+    sampleResponse:null,
+    errors:[{code:"auth_required",http:401},{code:"auth_invalid",http:401}],
+    seeAlso:[{id:"scan-get",label:"/api/scans/{uid}"}]
+  },
+  {
+    id:"scan-get", group:"DRONE PERCEPTION", method:"GET", path:"/api/scans/{scan_uid}",
+    summary:"Retrieve one scan by uid. ?include=result,image attaches extras.",
+    description:`Look up one scan by its public <code>scan_uid</code> (the
+36-character <code>scn_…</code> identifier returned at scan creation).
+Pass <code>?include=result</code> to attach the full APINResult JSON, or
+<code>?include=image</code> for the base64-encoded raw image (only present
+if the scan was persisted with <code>persist_image=true</code>).`,
+    auth:"bearer",
+    persistsData:false,
+    facts:["Bearer auth", "Per-user isolated"],
+    pathParams:[
+      {name:"scan_uid",type:"string",required:true,
+       description:"The <code>scn_…</code> identifier returned by /api/scan."}
+    ],
+    params:[
+      {name:"include", type:"comma-separated", required:false,
+       widget:"text", placeholder:"result,image",
+       description:"Optional extras to attach. Recognised: <code>result</code>, <code>image</code>."}
+    ],
+    queryStyle:true,
+    sampleResponse:null,
+    errors:[
+      {code:"auth_required",http:401},
+      {code:"auth_invalid",http:401},
+      {code:"not_found",http:404,why:"No active scan with that uid on your account. (404 not 403 to avoid existence leaks.)"}
+    ],
+    seeAlso:[{id:"scans-list",label:"/api/scans"}]
+  },
+  {
+    id:"scan-delete", group:"DRONE PERCEPTION",
+    method:"DELETE", path:"/api/scans/{scan_uid}",
+    summary:"Soft-delete a scan. Right-to-erasure friendly.",
+    description:`Marks the scan as deleted by setting <code>deleted_at</code>.
+The row remains in the database for audit but disappears from list/get
+queries. Calling DELETE a second time on the same uid returns 404.`,
+    auth:"bearer",
+    persistsData:false,
+    facts:["Bearer auth", "Soft delete", "Idempotent-by-404"],
+    pathParams:[
+      {name:"scan_uid",type:"string",required:true,
+       description:"The <code>scn_…</code> identifier."}
+    ],
+    params:[],
+    sampleResponse:null,
+    errors:[
+      {code:"auth_required",http:401},
+      {code:"auth_invalid",http:401},
+      {code:"not_found",http:404}
+    ],
+    behaviourNotes:[
+      "<strong>Soft delete only.</strong> The record is marked with a <code>deleted_at</code> timestamp; the row stays in the database for audit purposes. Admin tooling can restore it from the DB if needed.",
+      "Soft-deleted scans are <strong>filtered out</strong> of <code>/api/scans</code> list responses and <code>/api/scans/{uid}</code> retrieval — they're invisible to client APIs once deleted.",
+      "Calling DELETE on a scan that was already soft-deleted (or never existed) returns <code>404 not_found</code> — the operation is <em>idempotent-by-404</em>, not idempotent-by-200. Branch your retry logic accordingly.",
+      "Returns 404 (not 403) when targeting a scan that belongs to a different account, to avoid leaking existence of other users' scan_uids."
+    ],
+    seeAlso:[{id:"scan-get",label:"/api/scans/{uid} (GET)"}]
+  },
+
+  /* ═══ KEY MANAGEMENT ═══ */
+  {
+    id:"keys-create", group:"KEY MANAGEMENT", method:"POST", path:"/api/keys",
+    summary:"Mint a new API key. Token shown ONCE.",
+    description:`Creates a new Bearer token bound to your account. Requires a
+session cookie (sign in via <a href="/landing">/landing</a> first). The
+raw token is returned exactly once in the response; subsequent reads
+expose only the prefix. Cap is 20 active keys per account; revoke an old
+one before minting beyond the limit.`,
+    auth:"cookie",
+    persistsData:true,
+    facts:["Session cookie required", "Token shown once", "Cap: 20 active keys"],
+    successStatus:201,
+    params:[
+      {name:"name", type:"string", required:true,
+       description:"Human label, 1-64 chars. Example: 'drone-fleet-prod'.",
+       widget:"text", placeholder:"drone-fleet-prod"}
+    ],
+    bodyStyle:"json",
+    sampleResponse:null,
+    errors:[
+      {code:"auth_required",http:401,why:"No session cookie. Sign in first."},
+      {code:"auth_expired",http:401,why:"Session expired. Sign in again."},
+      {code:"missing_parameter",http:400,why:"Field 'name' missing."},
+      {code:"invalid_parameter",http:400,why:"Name > 64 chars OR active-key cap reached."}
+    ],
+    behaviourNotes:[
+      "<strong>The raw token is returned exactly once</strong> in <code>data.token</code>. Subsequent reads (via <code>/api/keys</code> list) expose only <code>token_prefix</code> (the first 12 chars). There is no API to recover a forgotten token — mint a new one and revoke the old.",
+      "New keys are active <strong>immediately</strong>; no propagation delay. The very next request bearing the token will authenticate.",
+      "Account cap: <strong>20 active keys</strong>. Hitting the cap returns <code>invalid_parameter</code> — revoke an old key first via <code>/api/keys/{id}</code> DELETE.",
+      "The <code>token_prefix</code> is safe to log and store — it identifies which key was used in a request without exposing the secret half. The usage console uses it for the key-attribution column."
+    ],
+    seeAlso:[
+      {id:"keys-list",label:"/api/keys (GET)"},
+      {anchor:"guide-auth",label:"Authentication primer"}
+    ]
+  },
+  {
+    id:"keys-list", group:"KEY MANAGEMENT", method:"GET", path:"/api/keys",
+    summary:"List your active keys (prefix only, never raw tokens).",
+    description:`Paginated list of your active API keys. Raw tokens are NOT
+returned. Only the public prefix is shown, plus the name, created_at, and
+last_used_at timestamps.`,
+    auth:"cookie",
+    persistsData:false,
+    facts:["Session cookie required", "§6 paginated shape"],
+    params:[],
+    sampleResponse:null,
+    errors:[{code:"auth_required",http:401},{code:"auth_expired",http:401}],
+    seeAlso:[{id:"keys-create",label:"/api/keys (POST)"}]
+  },
+  {
+    id:"keys-delete", group:"KEY MANAGEMENT",
+    method:"DELETE", path:"/api/keys/{key_id}",
+    summary:"Revoke (soft-delete) a key by integer id.",
+    description:`Marks a key revoked by setting <code>revoked_at</code>. Existing
+requests already in flight finish; new requests authenticate as failed
+immediately. The id is the integer <code>id</code> from
+<code>GET /api/keys</code>, not the prefix.`,
+    auth:"cookie",
+    persistsData:false,
+    facts:["Session cookie required"],
+    pathParams:[
+      {name:"key_id",type:"int",required:true,description:"Integer id from /api/keys."}
+    ],
+    params:[],
+    sampleResponse:null,
+    errors:[
+      {code:"auth_required",http:401},
+      {code:"auth_expired",http:401},
+      {code:"not_found",http:404,why:"No active key with that id on your account."}
+    ],
+    behaviourNotes:[
+      "Revocation is <strong>instant</strong>. The very next request bearing the revoked token returns <code>401 auth_invalid</code> — no propagation delay.",
+      "In-flight requests at the moment of revocation are <strong>NOT aborted</strong>. They complete normally and are logged against the (now-revoked) key id, which is why <code>last_used_at</code> may advance slightly after a DELETE.",
+      "Calling DELETE on an already-revoked key returns <code>404 not_found</code> — same idempotent-by-404 pattern as the scan delete endpoint.",
+      "Use the integer <code>id</code> field from <code>GET /api/keys</code>, not the <code>token_prefix</code>. The prefix is a display string; the id is the stable handle."
+    ],
+    seeAlso:[{id:"keys-list",label:"/api/keys"}]
+  },
+
+  /* ═══ FEEDBACK ═══ */
+  {
+    id:"feedback", group:"FEEDBACK", method:"POST", path:"/api/feedback",
+    summary:"Submit a correction or confirmation against a past prediction.",
+    description:`Logs a feedback event into the retrain buffer. Anonymous
+feedback is accepted (mirrors the website's public feedback button); if
+a valid Bearer key is sent, the feedback is tagged with your user_id and
+shows up in your retraining-influence dashboard. Once the buffer fills
+past the §10 thresholds, the stacking MLP is eligible for retraining.`,
+    auth:"bearer-optional",
+    persistsData:true,
+    facts:["Bearer auth optional", "JSON body"],
+    successStatus:201,
+    params:[
+      {name:"is_correct", type:"bool", required:true,
+       description:"true if the previous diagnosis was correct, false if not.",
+       widget:"text", placeholder:"false"},
+      {name:"predicted_class", type:"string", required:false,
+       description:"The class APIN previously returned.",
+       widget:"text", placeholder:"okra_yvmv"},
+      {name:"correct_class", type:"string", required:false,
+       description:"Required when is_correct=false. Must be a canonical class name.",
+       widget:"text", placeholder:"okra_healthy"},
+      {name:"geographic_hint", type:"string", required:false,
+       description:"Optional location string for clonal-amplification weighting.",
+       widget:"text"}
+    ],
+    bodyStyle:"json",
+    sampleResponse:null,
+    errors:[
+      {code:"validation_failed",http:422,
+       why:"Body shape wrong: is_correct missing, correct_class missing when is_correct=false, predicted == correct (ambiguous), or unknown class name."},
+      {code:"auth_invalid",http:401,why:"Bearer token sent but invalid (does NOT silently downgrade to anonymous)."}
+    ],
+    seeAlso:[{id:"feedback-stats",label:"/api/feedback/stats"}]
+  },
+  {
+    id:"feedback-stats", group:"FEEDBACK", method:"GET", path:"/api/feedback/stats",
+    summary:"Aggregated feedback counters and retrain-readiness gate state.",
+    description:`Aggregated counters across the feedback buffer plus the boolean
+<code>ready_for_retrain</code> and a human-readable
+<code>retrain_gate_reason</code> explaining which thresholds are met or
+missing. Thresholds: ≥ 10 wrong corrections total AND ≥ 3 classes with
+≥ 3 corrections each.`,
+    auth:"none",
+    persistsData:false,
+    facts:["Public"],
+    params:[],
+    sampleResponse:null,
+    errors:[],
+    seeAlso:[{id:"retrain-history",label:"/api/retrain/history"}]
+  },
+  {
+    id:"retrain-history", group:"FEEDBACK", method:"GET", path:"/api/retrain/history",
+    summary:"Last 20 retrain events, oldest-first within the window.",
+    description:`History of retraining events. Useful when debugging why a
+diagnosis suddenly shifted, since a recent retrain event in this log is the
+prime suspect. The rate-limit constant
+(<code>rate_limit_seconds</code>) is the minimum gap between retraining
+runs.`,
+    auth:"none",
+    persistsData:false,
+    facts:["Public", "Up to 20 events returned"],
+    params:[],
+    sampleResponse:null,
+    errors:[],
+    seeAlso:[{id:"feedback-stats",label:"/api/feedback/stats"}]
+  },
+
+  /* ═══ INFO MIRROR ═══ */
+  {
+    id:"info", group:"REFERENCE", method:"GET", path:"/api/info",
+    summary:"Calibration internals: signal reliability, per-class temperatures, conformal thresholds.",
+    description:`Envelope-wrapped mirror of the website's <code>/apin/info</code>.
+Returns the calibration internals every signal carries plus a
+<code>what_these_mean</code> dictionary that explains each field in plain
+language. This is the recommended way for machine clients to introspect
+the live model state.`,
+    auth:"none",
+    persistsData:false,
+    facts:["Public", "Mirror of /apin/info with envelope + glossary"],
+    params:[],
+    sampleResponse:null,
+    errors:[
+      {code:"service_unavailable",http:503,why:"Engine cold; call /api/warmup and retry."}
+    ],
+    seeAlso:[{id:"model-card",label:"/api/model/card"}]
+  }
+];
+
+/* ───────── GUIDES ─────────
+   Long-form prose. Cross-linked from endpoint "See also" sections. */
+const GUIDES = [
+  { id:"guide-quickstart", group:"GUIDES", title:"Quick start in 5 lines",
+    summary:"From zero to first diagnosis." },
+  { id:"guide-auth", group:"GUIDES", title:"Authentication primer",
+    summary:"Bearer tokens vs. session cookies, scopes, and rotation." },
+  { id:"guide-errors", group:"GUIDES", title:"Errors and retries",
+    summary:"How to interpret the §3 envelope and when to retry." },
+  { id:"guide-ratelimits", group:"GUIDES", title:"Rate limits and budgets",
+    summary:"What the warmup cooldown does, per-batch caps, and aggregate limits." },
+  { id:"guide-drone", group:"GUIDES", title:"Drone integration walkthrough",
+    summary:"From flight plan to GeoJSON Feature in a fleet UI." },
+  { id:"guide-qgis", group:"GUIDES", title:"GeoJSON output in QGIS / Mapbox / Leaflet",
+    summary:"Drop the response straight into common GIS tools." },
+  { id:"guide-mission", group:"GUIDES", title:"Building a multi-frame mission",
+    summary:"Use /api/scan/batch with a manifest, then aggregate." },
+  { id:"guide-migration", group:"GUIDES", title:"Migrating from /predict/full to /api/predict/full",
+    summary:"What changes in the response shape and how to read it." }
+];
+
+/* ───────── APPENDIX ───────── */
+const APPENDIX = [
+  { id:"appendix-classes", title:"Full class list" },
+  { id:"appendix-tiers", title:"Confidence tiers (1A..5)" },
+  { id:"appendix-errors", title:"Error taxonomy (§4)" },
+  { id:"appendix-glossary", title:"Glossary" }
+];
+
+/* ───────── shared maps ───────── */
+const ENDPOINTS_BY_ID = Object.fromEntries(ENDPOINTS.map(e => [e.id, e]));
+const GROUP_ORDER = ["REFERENCE","INFERENCE","DRONE PERCEPTION","KEY MANAGEMENT","FEEDBACK","GUIDES","APPENDIX"];
+
+/* ─────────────────────────────────────────────────────────────────
+   UTILITIES
+   ───────────────────────────────────────────────────────────────── */
+const $  = (sel, root=document) => root.querySelector(sel);
+const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+const escape = (s) => String(s ?? "")
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+
+/* Glossary used by the post-render term-wrapping pass. Every key here
+   is matched (case-insensitive, whole-word) inside .prose and inside
+   description fields, and replaced with a Wikipedia-style dotted-
+   underlined span carrying a tooltip card. Definitions kept short
+   (one to two sentences); the full entry lives at #appendix-glossary. */
+const TERM_GLOSSARY = {
+  "Bearer token": "A 128-bit secret starting apin_, sent in the Authorization header to authenticate machine API calls.",
+  "Mahalanobis": "A distance measure APIN's out-of-distribution detector uses. Large values mark the input as unlike anything in training.",
+  "conformal prediction set": "The smallest set of class labels that jointly achieves the contracted miscoverage rate.",
+  "GeoJSON": "RFC 7946. The interchange format for geographic features used in this API. Coordinates are [longitude, latitude].",
+  "FeatureCollection": "A GeoJSON wrapper around a list of Feature objects. Returned by batch and list endpoints.",
+  "Feature": "An RFC 7946 GeoJSON object with a geometry, properties bag, and a feature type.",
+  "Grad-CAM": "Gradient-weighted Class Activation Mapping. The heatmap technique APIN uses to show which pixels drove a diagnosis.",
+  "OOD": "Out-of-distribution. Inputs the model was not trained for. When true, APIN abstains.",
+  "PSV": "Plant Signal Vector. APIN's engineered-feature signal: leaf shape, color statistics, vein patterns.",
+  "stacking MLP": "The small multi-layer perceptron that fuses per-signal outputs into a final class distribution.",
+  "ECE": "Expected Calibration Error. The mean gap between predicted confidence and observed accuracy across bins.",
+  "WGS84": "The geographic coordinate system GPS reports. Latitude in [-90, 90], longitude in [-180, 180].",
+  "ISO-8601": "The ISO standard for date/time strings. Example: 2026-05-23T10:30:00Z.",
+  "idempotent": "An operation safe to retry: calling it twice has the same effect as calling it once.",
+  "envelope": "The fixed JSON shape every /api/ response uses (9-key success or 8-key error). The same nine keys appear on every successful response; errors carry the eight base keys plus an error object.",
+  "DINOv3-ConvNeXt": "The primary backbone in APIN's ensemble: a ConvNeXt small architecture fine-tuned on DINOv3 self-supervised features.",
+  "EfficientNet": "One of the four APIN signals. A compact, efficient image classification backbone.",
+  "DINOv2": "Self-supervised vision backbone used as one of the four APIN signals (frozen + linear head).",
+  "softmax": "The activation that turns a vector of logits into a probability distribution that sums to 1.",
+  "logits": "The raw pre-softmax model outputs. Higher = more confident in that class.",
+  "Bearer": "The token scheme used in the Authorization header. Sent as: Authorization: Bearer <token>.",
+  "X-API-Version": "The header APIN emits (and accepts) to mark the contract version. Always 1.0 today.",
+  "multipart/form-data": "The HTTP body encoding used for file uploads. Standard since RFC 7578.",
+  "Mapbox": "A web mapping platform. APIN's GeoJSON output drops directly into a Mapbox GL JS source.",
+  "QGIS": "Open-source desktop GIS. APIN's GeoJSON files load via Layer / Add Vector Layer.",
+  "Leaflet": "A lightweight web mapping library. Renders APIN GeoJSON via L.geoJSON()."
+};
+
+/* After every renderEntry/renderGuide call, walk the .prose and
+   .summary text nodes and wrap any glossary term found. Skips text
+   that's already inside a .term span, a <code>, an <a>, or a
+   <pre>/<kbd>/<abbr>. Idempotent (the `data-termed="1"` flag stops
+   re-wrapping). */
+function wrapGlossaryTermsIn(rootEl){
+  if(!rootEl) return;
+  const terms = Object.keys(TERM_GLOSSARY)
+    .sort((a,b) => b.length - a.length); // longer first so "Bearer token" wins over "Bearer"
+  const skipTags = new Set(["CODE","PRE","KBD","ABBR","A","SCRIPT","STYLE","BUTTON"]);
+  const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, {
+    acceptNode(n){
+      if(!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      let p = n.parentNode;
+      while(p && p !== rootEl){
+        if(p.nodeType === 1){
+          if(skipTags.has(p.tagName)) return NodeFilter.FILTER_REJECT;
+          if(p.classList && (p.classList.contains("term") ||
+                              p.dataset.termed === "1")) return NodeFilter.FILTER_REJECT;
+        }
+        p = p.parentNode;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const targets = [];
+  while(walker.nextNode()) targets.push(walker.currentNode);
+  for(const node of targets){
+    const text = node.nodeValue;
+    let earliest = null;
+    for(const t of terms){
+      const re = new RegExp("\\b" + t.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&") + "\\b", "i");
+      const m = re.exec(text);
+      if(m && (!earliest || m.index < earliest.index)){
+        earliest = { index: m.index, length: m[0].length, term: t, matched: m[0] };
+      }
+    }
+    if(!earliest) continue;
+    // Split the text node and inject a .term span at the earliest match.
+    const before = text.slice(0, earliest.index);
+    const matched = text.slice(earliest.index, earliest.index + earliest.length);
+    const after = text.slice(earliest.index + earliest.length);
+    const frag = document.createDocumentFragment();
+    if(before) frag.appendChild(document.createTextNode(before));
+    const span = document.createElement("span");
+    span.className = "term";
+    span.tabIndex = 0;
+    span.dataset.termed = "1";
+    span.appendChild(document.createTextNode(matched));
+    const card = document.createElement("span");
+    card.className = "tooltip-card";
+    card.textContent = TERM_GLOSSARY[earliest.term];
+    span.appendChild(card);
+    frag.appendChild(span);
+    if(after) frag.appendChild(document.createTextNode(after));
+    node.parentNode.replaceChild(frag, node);
+  }
+}
+
+function jsonHighlight(value, depth=0){
+  // recursive HTML for a JSON tree with collapsible children
+  if(value === null) return '<span class="v-null">null</span>';
+  if(typeof value === "boolean") return `<span class="v-bool">${value}</span>`;
+  if(typeof value === "number") return `<span class="v-num">${value}</span>`;
+  if(typeof value === "string") return `<span class="v-str">${JSON.stringify(value)}</span>`;
+  if(Array.isArray(value)){
+    if(value.length === 0) return '<span class="punct">[]</span>';
+    const items = value.map((v,i) =>
+      `<div class="schema-node"><span class="tw">▸</span>${
+        (v !== null && typeof v === "object")
+          ? `<span class="punct">[${i}]</span>`
+          : `<span class="punct">[${i}]</span> ${jsonHighlight(v)}`
+      }${(v !== null && typeof v === "object")
+          ? `<div class="schema-node-children">${jsonHighlight(v)}</div>`
+          : ``}</div>`).join("");
+    return `<span class="punct">[</span>${items}<span class="punct">]</span>`;
+  }
+  if(typeof value === "object"){
+    const keys = Object.keys(value);
+    if(keys.length === 0) return '<span class="punct">{}</span>';
+    const items = keys.map(k => {
+      const v = value[k];
+      const isObj = (v !== null && typeof v === "object");
+      return `<div class="schema-node${depth < 1 ? ' expanded' : ''}">`+
+        `<span class="tw">${isObj ? '▸' : '·'}</span>`+
+        `<span class="k">"${escape(k)}"</span><span class="punct">: </span>`+
+        (isObj
+          ? `<span class="punct">${Array.isArray(v) ? '[…]' : '{…}'}</span>`+
+            `<div class="schema-node-children">${jsonHighlight(v, depth+1)}</div>`
+          : jsonHighlight(v, depth+1))+
+        `</div>`;
+    }).join("");
+    return `${items}`;
+  }
+  return escape(String(value));
+}
+
+function methodPill(method){
+  return `<span class="method method-${method}">${method}</span>`;
+}
+
+function fmtBytes(n){
+  if(n < 1024) return n + " B";
+  if(n < 1024*1024) return (n/1024).toFixed(1) + " KB";
+  return (n/1024/1024).toFixed(2) + " MB";
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   STATE (localStorage backed where useful)
+   ───────────────────────────────────────────────────────────────── */
+const STATE = {
+  theme: localStorage.getItem("apin-docs-theme") || "light",
+  apiKey: localStorage.getItem("apin-docs-key") || "",
+  apiKeyHistory: JSON.parse(localStorage.getItem("apin-docs-key-history") || "[]"),
+  recentCalls: JSON.parse(localStorage.getItem("apin-docs-recent") || "[]")
+};
+
+function saveKey(token, name){
+  if(!token) return;
+  STATE.apiKey = token;
+  localStorage.setItem("apin-docs-key", token);
+  const prefix = token.slice(0,12);
+  const existing = STATE.apiKeyHistory.findIndex(h => h.prefix === prefix);
+  if(existing >= 0) STATE.apiKeyHistory.splice(existing, 1);
+  STATE.apiKeyHistory.unshift({prefix, name: name || "saved", added: Date.now()});
+  STATE.apiKeyHistory = STATE.apiKeyHistory.slice(0, 8);
+  localStorage.setItem("apin-docs-key-history", JSON.stringify(STATE.apiKeyHistory));
+}
+
+function pushRecent(call){
+  STATE.recentCalls.unshift(call);
+  STATE.recentCalls = STATE.recentCalls.slice(0, 10);
+  localStorage.setItem("apin-docs-recent", JSON.stringify(STATE.recentCalls));
+  renderRecentCalls();
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   RENDERERS
+   ───────────────────────────────────────────────────────────────── */
+
+function renderNav(){
+  const nav = $("#nav");
+  const groups = {};
+  for(const g of GROUP_ORDER) groups[g] = [];
+  for(const ep of ENDPOINTS) groups[ep.group].push(ep);
+  for(const g of GUIDES) groups["GUIDES"].push({...g, _isGuide:true});
+  for(const a of APPENDIX) groups["APPENDIX"].push({...a, _isAppendix:true});
+
+  const html = GROUP_ORDER.map(g => {
+    const items = groups[g] || [];
+    if(items.length === 0) return "";
+    const links = items.map(it => {
+      if(it._isGuide || it._isAppendix){
+        return `<a href="#${it.id}" data-target="${it.id}">${escape(it.title)}</a>`;
+      }
+      return `<a href="#${it.id}" data-target="${it.id}">
+        <span class="method method-${it.method}">${it.method}</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">${escape(it.path.replace(/^\/api\//,'/'))}</span>
+      </a>`;
+    }).join("");
+    return `<div class="group">${g}</div>${links}`;
+  }).join("");
+  nav.innerHTML = html;
+}
+
+function renderEntry(ep, index){
+  const successStatus = ep.successStatus || 200;
+  const facts = (ep.facts || []).map(f => `<span class="fact">${escape(f)}</span>`).join("");
+
+  // Build the params table
+  const allParams = [...(ep.pathParams || []), ...(ep.params || [])];
+  const paramsHtml = allParams.length ? `
+    <table class="tbl">
+      <thead><tr><th class="mono">Field</th><th>Type</th><th>Req</th><th>Description</th></tr></thead>
+      <tbody>${allParams.map(p => `
+        <tr>
+          <td class="mono">${escape(p.name)}</td>
+          <td>${escape(p.type)}</td>
+          <td>${p.required ? '<span class="req">●</span>' : '<span style="color:var(--ink-faint)">○</span>'}</td>
+          <td>${p.description || ""}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>` : `<p style="color:var(--ink-meta);font-style:italic;font-size:13px">No request parameters.</p>`;
+
+  // Build errors table
+  const errs = (ep.errors || []);
+  const errsHtml = errs.length ? `
+    <table class="tbl">
+      <thead><tr><th>HTTP</th><th class="mono">error.code</th><th>When it fires</th></tr></thead>
+      <tbody>${errs.map(e => `
+        <tr>
+          <td><strong>${e.http}</strong></td>
+          <td class="mono">${escape(e.code)}</td>
+          <td>${e.why || "See contract §4."}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>` : `<p style="color:var(--ink-meta);font-style:italic;font-size:13px">No error paths beyond the global handlers.</p>`;
+
+  // Build see-also as chip row (was: bare links separated by " · ")
+  const saChips = (ep.seeAlso || []).map(s => {
+    const href = s.id ? `#${s.id}` : `#${s.anchor}`;
+    return `<a class="see-also-chip" href="${href}">${escape(s.label)}</a>`;
+  }).join("");
+  const sa = saChips ? `<div class="see-also-row">${saChips}</div>` : "";
+
+  // Behaviour notes — client-observable runtime semantics that aren't
+  // part of the request/response contract but matter for using the
+  // endpoint correctly. Each note is one HTML-allowed string.
+  const bnList = (ep.behaviourNotes || []);
+  const bnHtml = bnList.length ? `
+    <div class="note note--info behaviour-notes"><div class="label">Behaviour notes</div>
+      <ul class="bn-list">${bnList.map(n => `<li>${n}</li>`).join("")}</ul>
+    </div>` : "";
+
+  // Build code samples (will be generated dynamically from the playground form)
+  const codeBlockHtml = `
+    <div class="code-block" data-ep="${ep.id}" data-code-block>
+      <div class="lang-tabs">
+        <button class="active" data-lang="curl">cURL</button>
+        <button data-lang="python">Python</button>
+        <button data-lang="js">JavaScript</button>
+        <button data-lang="sdk">DroneSDK</button>
+      </div>
+      <button class="copy" data-copy>⎘ copy<span class="inkblot">copied</span></button>
+      <pre><code class="lang-sample" data-code-out>${escape(generateSample(ep, "curl"))}</code></pre>
+    </div>`;
+
+  // Build response sample preview
+  const respSample = ep.sampleResponse ? `
+    <h4>Example response  <span style="font-family:'Inter';font-size:11.5px;color:var(--ink-meta)">(${successStatus} ${successStatus===201?"Created":successStatus===202?"Accepted":"OK"})</span></h4>
+    <div class="schema-tree" data-schema-tree>${jsonHighlight(ep.sampleResponse)}</div>
+  ` : `
+    <h4>Example response</h4>
+    <p style="color:var(--ink-meta);font-style:italic;font-size:13px">Run the playground below to see a real response from your local server.</p>
+  `;
+
+  // Build playground form
+  const playgroundHtml = renderPlayground(ep);
+
+  return `
+  <article class="entry has-perma" id="${ep.id}" data-entry-number="Entry №${String(index+1).padStart(2,'0')}" data-ep="${ep.id}">
+    <header class="entry-header">
+      <div class="entry-title-block">
+        <h2 class="serif">
+          ${methodPill(ep.method)}
+          <span class="path mono">${escape(ep.path)}</span>
+          <a href="#${ep.id}" class="anchor" data-perma="${ep.id}" title="Permalink">#</a>
+        </h2>
+        <p class="summary">${ep.summary}</p>
+      </div>
+      <div class="entry-status">
+        <span class="status-dot" data-status-dot data-ep="${ep.id}">checking…</span>
+        <span>introduced in <strong>v1.0</strong></span>
+      </div>
+    </header>
+
+    <div class="facts">${facts}</div>
+
+    <h3 id="${ep.id}--overview"><span class="§">§</span> Overview <a class="perma" href="#${ep.id}--overview">#</a></h3>
+    <div class="prose">${ep.description}</div>
+
+    <h3 id="${ep.id}--auth"><span class="§">§</span> Authentication <a class="perma" href="#${ep.id}--auth">#</a></h3>
+    ${renderAuthBlock(ep)}
+
+    <h3 id="${ep.id}--request"><span class="§">§</span> Request <a class="perma" href="#${ep.id}--request">#</a></h3>
+    ${paramsHtml}
+
+    <h3 id="${ep.id}--code"><span class="§">§</span> Code samples <a class="perma" href="#${ep.id}--code">#</a></h3>
+    ${codeBlockHtml}
+
+    <h3 id="${ep.id}--response"><span class="§">§</span> Response <a class="perma" href="#${ep.id}--response">#</a></h3>
+    ${respSample}
+
+    <h3 id="${ep.id}--errors"><span class="§">§</span> Errors <a class="perma" href="#${ep.id}--errors">#</a></h3>
+    ${errsHtml}
+
+    ${bnList.length ? `
+    <h3 id="${ep.id}--behaviour"><span class="§">§</span> Behaviour notes <a class="perma" href="#${ep.id}--behaviour">#</a></h3>
+    ${bnHtml}` : ''}
+
+    <h3 id="${ep.id}--try"><span class="§">§</span> Try it live <a class="perma" href="#${ep.id}--try">#</a></h3>
+    ${playgroundHtml}
+
+    ${sa ? `<h3 id="${ep.id}--see"><span class="§">§</span> See also <a class="perma" href="#${ep.id}--see">#</a></h3>${sa}` : ''}
+  </article>`;
+}
+
+function renderAuthBlock(ep){
+  switch(ep.auth){
+    case "bearer":
+      return `<p>Send <code>Authorization: Bearer &lt;token&gt;</code> or <code>X-API-Key: &lt;token&gt;</code>. Mint a key via <a href="#keys-create">POST /api/keys</a> after signing in. A missing key returns <code>401 auth_required</code>; an unknown or revoked key returns <code>401 auth_invalid</code>.</p>`;
+    case "bearer-optional":
+      return `<p>Bearer auth is <strong>optional</strong> on this endpoint. Anonymous requests are accepted (preserves the website's public flow). If you DO send a token, it must be valid: an explicitly bad token returns <code>401 auth_invalid</code> rather than silently downgrading to anonymous.</p>`;
+    case "cookie":
+      return `<p>Requires a session cookie. Sign in via <a href="/landing">/landing</a> from the same browser. Machine clients should prefer Bearer-authenticated endpoints; the cookie path is for the dashboard UI.</p>`;
+    case "none":
+    default:
+      return `<p>Public. No authentication required.</p>`;
+  }
+}
+
+function renderPlayground(ep){
+  const fields = [...(ep.pathParams || []), ...(ep.params || [])];
+  if(fields.length === 0 && ep.auth === "none"){
+    return `
+    <div class="playground" data-playground data-ep="${ep.id}">
+      <div class="playground-header">Playground</div>
+      <div class="playground-actions">
+        <span class="key-picker">No parameters required.</span>
+        <button class="try-btn" data-try>Run ${ep.method} ${ep.path}</button>
+      </div>
+      <div class="response-panel" data-resp></div>
+    </div>`;
+  }
+
+  // PVA N5: group required vs optional so a fresh form is minimal,
+  // and optional fields reveal behind a "+ show optional fields" toggle.
+  const requiredFields = fields.filter(p => p.required);
+  const optionalFields = fields.filter(p => !p.required);
+  const renderField = (p) => {
+    const placeholder = p.placeholder ? `placeholder="${escape(p.placeholder)}"` : "";
+    let widget;
+    if(p.widget === "file"){
+      widget = `<div class="file-drop" data-file-drop data-name="${escape(p.name)}">
+        Drop a file here, or click to select
+        <input type="file" name="${escape(p.name)}" data-file-input style="display:none" accept="image/jpeg,image/png,image/webp">
+      </div>`;
+    } else if(p.widget === "file-multi"){
+      widget = `<div class="file-drop" data-file-drop data-multi data-name="${escape(p.name)}">
+        Drop one or more files here, or click to select (max 16)
+        <input type="file" name="${escape(p.name)}" data-file-input multiple style="display:none" accept="image/jpeg,image/png,image/webp">
+      </div>`;
+    } else if(p.widget === "textarea"){
+      // Pre-fill the textarea with the placeholder value so the
+      // playground works on first click. The user can clear it if
+      // they want to test the empty-body error path.
+      const initial = p.placeholder ? escape(p.placeholder) : "";
+      widget = `<textarea name="${escape(p.name)}" rows="3" ${placeholder}>${initial}</textarea>`;
+    } else {
+      // Required fields with a placeholder example get pre-filled.
+      // Optional fields stay empty so the user sees what's defaulted.
+      const initialVal = (p.required && p.placeholder) ? `value="${escape(p.placeholder)}" ` : "";
+      widget = `<input type="text" name="${escape(p.name)}" ${initialVal}${placeholder}>`;
+    }
+    return `<div class="field">
+      <label for="${escape(p.name)}">${escape(p.name)}${p.required ? '<span class="req">*</span>' : ''}</label>
+      ${widget}
+      <span class="ty">${escape(p.type)}</span>
+    </div>`;
+  };
+  const fieldsHtml = requiredFields.map(renderField).join("");
+  const optionalHtml = optionalFields.length ? `
+    <details class="optional-fields" data-optional-fields>
+      <summary>+ ${optionalFields.length} optional field${optionalFields.length === 1 ? "" : "s"} <span style="font-size:11px;color:var(--ink-faint);font-weight:400">(click to ${optionalFields.length === 1 ? "show" : "show all"})</span></summary>
+      <div class="optional-body">
+        ${optionalFields.map(renderField).join("")}
+      </div>
+    </details>` : "";
+
+  const needsAuth = ep.auth === "bearer" || ep.auth === "bearer-optional";
+  const keyPicker = needsAuth ? `
+    <span class="key-picker">
+      <span>Bearer key:</span>
+      <input type="text" data-key-input
+             placeholder="apin_…"
+             value="${escape(STATE.apiKey || "")}"
+             style="font-family:'JetBrains Mono',monospace;font-size:11.5px;width:180px">
+    </span>` : `<span class="key-picker">${ep.auth === "none" ? "No auth required" : "Session cookie required"}</span>`;
+
+  return `
+  <div class="playground" data-playground data-ep="${ep.id}">
+    <div class="playground-header">Playground</div>
+    <div class="playground-form" data-form>
+      ${fieldsHtml}
+      ${optionalHtml}
+    </div>
+    <div class="playground-actions">
+      ${keyPicker}
+      <button class="try-btn" data-try>Run ${ep.method} ${escape(ep.path)} →</button>
+    </div>
+    <div class="response-panel" data-resp></div>
+  </div>`;
+}
+
+/* generate code samples from the (possibly user-edited) playground state */
+function generateSample(ep, lang, snapshot){
+  const path = (snapshot && snapshot.path) || ep.path;
+  const method = ep.method;
+  const bodyJson = (snapshot && snapshot.bodyJson) || null;
+  const formFields = (snapshot && snapshot.formFields) || [];
+  const queryStr = (snapshot && snapshot.queryStr) || "";
+  const auth = ep.auth;
+  const tokenHint = "apin_REPLACE_WITH_YOUR_TOKEN";
+
+  if(lang === "curl"){
+    let out = `curl -X ${method} "${BASE}${path}${queryStr ? "?"+queryStr : ""}" \\\n  -H "X-API-Version: 1.0"`;
+    if(auth === "bearer" || auth === "bearer-optional"){
+      out += ` \\\n  -H "Authorization: Bearer ${tokenHint}"`;
+    }
+    if(ep.bodyStyle === "json" && bodyJson){
+      out += ` \\\n  -H "Content-Type: application/json" \\\n  -d '${bodyJson}'`;
+    } else if(formFields.length){
+      for(const f of formFields){
+        if(f.kind === "file") out += ` \\\n  -F "${f.name}=@${f.value}"`;
+        else out += ` \\\n  -F "${f.name}=${f.value}"`;
+      }
+    }
+    return out;
+  }
+  if(lang === "python"){
+    let out = `import requests\n\n`;
+    out += `headers = {"X-API-Version": "1.0"`;
+    if(auth === "bearer" || auth === "bearer-optional"){
+      out += `, "Authorization": "Bearer ${tokenHint}"`;
+    }
+    out += "}\n";
+    if(ep.bodyStyle === "json"){
+      out += `r = requests.${method.toLowerCase()}(\n  "${BASE}${path}${queryStr ? "?"+queryStr : ""}",\n  headers=headers,\n  json=${bodyJson || "{}"}\n)\nprint(r.status_code, r.json())`;
+    } else if(formFields.length){
+      const files = formFields.filter(f => f.kind === "file");
+      const datas = formFields.filter(f => f.kind !== "file");
+      if(files.length){
+        out += `files = [${files.map(f => `("${f.name}", open("${f.value}","rb"))`).join(", ")}]\n`;
+      }
+      if(datas.length){
+        out += `data = {${datas.map(f => `"${f.name}": ${JSON.stringify(f.value)}`).join(", ")}}\n`;
+      }
+      out += `r = requests.${method.toLowerCase()}(\n  "${BASE}${path}${queryStr ? "?"+queryStr : ""}",\n  headers=headers${files.length ? ",\n  files=files" : ""}${datas.length ? ",\n  data=data" : ""}\n)\nprint(r.status_code, r.json())`;
+    } else {
+      out += `r = requests.${method.toLowerCase()}("${BASE}${path}${queryStr ? "?"+queryStr : ""}", headers=headers)\nprint(r.status_code, r.json())`;
+    }
+    return out;
+  }
+  if(lang === "js"){
+    let out = `const headers = { "X-API-Version": "1.0"`;
+    if(auth === "bearer" || auth === "bearer-optional"){
+      out += `, "Authorization": "Bearer ${tokenHint}"`;
+    }
+    out += " };\n";
+    if(ep.bodyStyle === "json"){
+      out += `const r = await fetch("${BASE}${path}${queryStr ? "?"+queryStr : ""}", {\n  method: "${method}",\n  headers: { ...headers, "Content-Type": "application/json" },\n  body: JSON.stringify(${bodyJson || "{}"})\n});\nconst body = await r.json();\nconsole.log(r.status, body);`;
+    } else if(formFields.length){
+      out += `const fd = new FormData();\n`;
+      for(const f of formFields){
+        if(f.kind === "file"){
+          out += `// fd.append("${f.name}", fileInput.files[0]);\n`;
+        } else {
+          out += `fd.append("${f.name}", ${JSON.stringify(f.value)});\n`;
+        }
+      }
+      out += `const r = await fetch("${BASE}${path}${queryStr ? "?"+queryStr : ""}", { method: "${method}", headers, body: fd });\nconst body = await r.json();\nconsole.log(r.status, body);`;
+    } else {
+      out += `const r = await fetch("${BASE}${path}${queryStr ? "?"+queryStr : ""}", { method: "${method}", headers });\nconst body = await r.json();\nconsole.log(r.status, body);`;
+    }
+    return out;
+  }
+  if(lang === "sdk"){
+    // A tiny synthetic SDK to illustrate ergonomics; documented in the
+    // SDK guide section below.
+    let out = `import { ApinClient } from "@apin/sdk";\n\n`;
+    out += `const apin = new ApinClient({ token: "${tokenHint}" });\n`;
+    if(ep.id === "scan"){
+      out += `const result = await apin.scan({\n  file: leafFrame,\n  latitude: 12.5283, longitude: 76.6975,\n  altitude_m: 50, heading_deg: 270,\n  captured_at: "2026-05-23T10:30:00Z"\n});\nconsole.log(result.scan.diagnosis, result.geojson);`;
+    } else if(ep.id === "predict-quick"){
+      out += `const result = await apin.predictQuick(leafImage);\nconsole.log(result.diagnosis, result.confidence);`;
+    } else if(ep.id === "predict-batch"){
+      out += `const result = await apin.predictBatch([img1, img2, img3]);\nconsole.log(result.items);`;
+    } else if(ep.id === "scan-batch"){
+      out += `const result = await apin.scanBatch({ files: frames, manifest });\nconsole.log(result.feature_collection.features.length);`;
+    } else if(ep.id === "scans-list"){
+      out += `const result = await apin.listScans({ page: 1, page_size: 50, flight_id: "flight-A1" });\nconsole.log(result.items);`;
+    } else if(ep.id === "keys-create"){
+      out += `const key = await apin.createKey({ name: "drone-fleet-prod" });\nconsole.log(key.token);`;
+    } else {
+      out += `const result = await apin.${ep.id.replace(/-/g,"_")}();\nconsole.log(result);`;
+    }
+    out += `\n\n/* NOTE: @apin/sdk is an ILLUSTRATIVE example, not a real\n   npm package. It exists in these docs to show the ergonomic\n   shape a future official SDK would have. Today, the cURL /\n   Python / JavaScript tabs hit the same endpoints and ARE\n   ready to copy-paste. */`;
+    return out;
+  }
+  return "";
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   GUIDES + APPENDIX rendering
+   ───────────────────────────────────────────────────────────────── */
+
+function renderGuides(){
+  return `
+    <h2 class="section serif" id="guides-section">Guides
+      <a class="perma" href="#guides-section">#</a></h2>
+
+    <!-- Quick start -->
+    <article class="entry section-block" id="guide-quickstart" data-entry-number="Guide" data-ep="quickstart">
+      <header class="entry-header">
+        <div class="entry-title-block">
+          <h2 class="serif">Quick start in five lines
+            <a href="#guide-quickstart" class="anchor" data-perma="guide-quickstart">#</a></h2>
+          <p class="summary">From zero to a real diagnosis call. The shortest path uses the public endpoints and one authenticated call.</p>
+        </div>
+      </header>
+
+      <h3 id="guide-quickstart--probe"><span class="§">§</span> 1. Probe the service <a class="perma" href="#guide-quickstart--probe">#</a></h3>
+      <div class="code-block" data-code-block>
+        <div class="lang-tabs"><button class="active" data-lang="curl">cURL</button></div>
+        <button class="copy" data-copy>⎘ copy<span class="inkblot">copied</span></button>
+        <pre><code class="lang-sample" data-code-out>curl ${BASE}/api/version
+curl ${BASE}/api/info</code></pre>
+      </div>
+      <p>Both return the §2 envelope. <code>/api/version</code> is cheap; <code>/api/info</code> triggers a lazy model probe and is fine to cache for a minute.</p>
+
+      <h3 id="guide-quickstart--key"><span class="§">§</span> 2. Mint an API key <a class="perma" href="#guide-quickstart--key">#</a></h3>
+      <p>Sign in via <a href="/landing">/landing</a>, then POST a name to <a href="#keys-create">/api/keys</a>. The raw token is shown once.</p>
+
+      <h3 id="guide-quickstart--predict"><span class="§">§</span> 3. Run an inference <a class="perma" href="#guide-quickstart--predict">#</a></h3>
+      <div class="code-block" data-code-block>
+        <div class="lang-tabs"><button class="active" data-lang="curl">cURL</button></div>
+        <button class="copy" data-copy>⎘ copy<span class="inkblot">copied</span></button>
+        <pre><code class="lang-sample" data-code-out>curl -X POST ${BASE}/api/predict/quick \\
+  -H "Authorization: Bearer apin_REPLACE_WITH_TOKEN" \\
+  -F "file=@leaf.jpg"</code></pre>
+      </div>
+
+      <h3 id="guide-quickstart--inspect"><span class="§">§</span> 4. Inspect the response <a class="perma" href="#guide-quickstart--inspect">#</a></h3>
+      <p>Read <code>data.diagnosis</code>, <code>data.confidence</code>, and <code>data.tier</code>. If <code>tier</code> starts with "4" or "5", treat the result as <strong>abstained</strong>: APIN is signalling low confidence.</p>
+
+      <h3 id="guide-quickstart--scan"><span class="§">§</span> 5. Scan with GPS for the map <a class="perma" href="#guide-quickstart--scan">#</a></h3>
+      <p>When you have GPS metadata, prefer <a href="#scan">/api/scan</a>: it persists the result and returns a GeoJSON Feature ready for a drone fleet map.</p>
+
+      <div class="note note--warn"><div class="label">About the DroneSDK tab</div>
+        <p>The <code>DroneSDK</code> code samples in every endpoint reference <code>@apin/sdk</code>. That package <strong>does not exist on npm</strong>; the snippets are illustrative, showing the shape an official SDK would take. Today, copy the cURL, Python, or JavaScript tab instead. Those samples are real, runnable HTTP calls.</p>
+      </div>
+    </article>
+
+    <!-- Authentication primer -->
+    <article class="entry section-block" id="guide-auth" data-entry-number="Guide" data-ep="auth">
+      <header class="entry-header">
+        <div class="entry-title-block">
+          <h2 class="serif">Authentication primer
+            <a href="#guide-auth" class="anchor" data-perma="guide-auth">#</a></h2>
+          <p class="summary">Bearer tokens for machines, session cookies for the dashboard.</p>
+        </div>
+      </header>
+
+      <h3 id="guide-auth--two-paths"><span class="§">§</span> Two paths into the same model <a class="perma" href="#guide-auth--two-paths">#</a></h3>
+      <h4 id="guide-auth--two-paths--summary">Summary</h4>
+      <h5>What sends what</h5>
+      <p>APIN authenticates in two parallel ways:</p>
+      <ul>
+        <li><strong>Bearer tokens (<code>apin_…</code>)</strong>: machine-grade. Sent in the <code>Authorization</code> or <code>X-API-Key</code> header. Used by all the <code>/api/</code> endpoints intended for SDKs, drone ground stations, CI pipelines, and notebooks. Tokens are 128 bits of entropy, displayed once at creation, stored as sha256 hash in the database.</li>
+        <li><strong>Session cookies</strong>: browser-grade. Set by the <code>/auth/login</code> flow. Used by the website's inference upload and dashboard. Machine clients should NOT use cookie auth.</li>
+      </ul>
+
+      <h3 id="guide-auth--scopes"><span class="§">§</span> Scopes and limits <a class="perma" href="#guide-auth--scopes">#</a></h3>
+      <p>A Bearer token grants the same model access as its owner has. Per-account caps:</p>
+      <dl class="defs">
+        <dt>active keys per account <span class="ty">int</span></dt>
+        <dd>20. Revoke an old one before minting beyond the cap.</dd>
+        <dt>per-frame inference cap <span class="ty">bytes</span></dt>
+        <dd>12 MB per uploaded image.</dd>
+        <dt>per-batch aggregate cap <span class="ty">bytes</span></dt>
+        <dd>32 MB total per <code>/api/scan/batch</code> or <code>/api/predict/batch</code> request.</dd>
+        <dt>warmup cooldown <span class="ty">seconds</span></dt>
+        <dd>10 s between non-coalesced calls.</dd>
+      </dl>
+
+      <h3 id="guide-auth--rotate"><span class="§">§</span> Rotation and revocation <a class="perma" href="#guide-auth--rotate">#</a></h3>
+      <div class="procedure">
+        <div class="proc-step"><div class="text">Mint a new key with <code>POST /api/keys</code>. Save the raw token immediately.</div></div>
+        <div class="proc-step"><div class="text">Roll out the new token to your callers.</div></div>
+        <div class="proc-step"><div class="text">Watch <code>last_used_at</code> on the old key. When it stops advancing, revoke.</div></div>
+        <div class="proc-step"><div class="text">Revoke with <code>DELETE /api/keys/{key_id}</code>. The integer id comes from <code>GET /api/keys</code>.</div></div>
+      </div>
+
+      <div class="note note--warn"><div class="label">Warning</div>
+        <p>The raw token is returned exactly once. Treat it like a password. Subsequent reads expose only the <code>token_prefix</code>; you cannot recover a forgotten token.</p>
+      </div>
+
+      <h3 id="guide-auth--playground"><span class="§">§</span> Tokens in the playground <a class="perma" href="#guide-auth--playground">#</a></h3>
+      <p>When you paste a token into a playground form on this page, it is saved in your browser's <code>localStorage</code> so the field pre-fills next visit. The storage is same-origin only. Even so: do not paste production keys into the playground. Mint a dedicated playground key with a recognisable name (for example <code>docs-playground</code>) and revoke it when you are finished exploring.</p>
+    </article>
+
+    <!-- Errors and retries -->
+    <article class="entry section-block" id="guide-errors" data-entry-number="Guide" data-ep="errors">
+      <header class="entry-header">
+        <div class="entry-title-block">
+          <h2 class="serif">Errors and retries
+            <a href="#guide-errors" class="anchor" data-perma="guide-errors">#</a></h2>
+          <p class="summary">How to read the §3 error envelope and when to retry.</p>
+        </div>
+      </header>
+
+      <h3 id="guide-errors--shape"><span class="§">§</span> The §3 error envelope <a class="perma" href="#guide-errors--shape">#</a></h3>
+      <h4>Shape</h4>
+      <h5>Top-level fields</h5>
+      <p>Every error response on a <code>/api/</code> path follows the same eight-key shape:</p>
+      <div class="code-block" data-code-block>
+        <div class="lang-tabs"><button class="active" data-lang="curl">JSON</button></div>
+        <button class="copy" data-copy>⎘ copy<span class="inkblot">copied</span></button>
+        <pre><code class="lang-sample" data-code-out>{
+  "api_version": "1.0",
+  "request_id": "req_a14b9c…",
+  "endpoint": "/api/scan",
+  "ok": false,
+  "processed_at": "2026-05-23T04:00:00.000Z",
+  "processing_time_ms": 5,
+  "status_code": 400,
+  "error": {
+    "code": "invalid_parameter",
+    "message": "Field 'latitude' = 999 is above the maximum (90).",
+    "docs_url": "https://dxv-404-apin.hf.space/docs#errors",
+    "hint": "Pass a latitude in the WGS84 range -90 to 90.",
+    "field": "latitude"
+  }
+}</code></pre>
+      </div>
+      <p>Note: no top-level <code>detail</code>, no <code>data</code> on error responses. Branch on <code>error.code</code>, not on the HTTP status code alone.</p>
+
+      <h3 id="guide-errors--retry"><span class="§">§</span> When to retry <a class="perma" href="#guide-errors--retry">#</a></h3>
+      <table class="tbl">
+        <thead><tr><th>code</th><th>retry?</th><th>backoff</th><th>note</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">auth_required</td><td>no</td><td>n/a</td><td>Add the header before retrying.</td></tr>
+          <tr><td class="mono">auth_invalid</td><td>no</td><td>n/a</td><td>Mint a new key.</td></tr>
+          <tr><td class="mono">invalid_parameter</td><td>no</td><td>n/a</td><td>Fix the input.</td></tr>
+          <tr><td class="mono">payload_too_large</td><td>no</td><td>n/a</td><td>Downscale or split.</td></tr>
+          <tr><td class="mono">service_unavailable</td><td>yes</td><td>exponential, 1 s → 30 s, cap 5</td><td>Models still warming.</td></tr>
+          <tr><td class="mono">model_warming</td><td>yes</td><td>exponential, 2 s → 30 s, cap 8</td><td>Call /api/warmup once first.</td></tr>
+          <tr><td class="mono">rate_limited</td><td>yes</td><td>respect <code>Retry-After</code> header</td><td>You are over budget.</td></tr>
+          <tr><td class="mono">internal_error</td><td>yes</td><td>linear, 5 s × 3</td><td>If still failing, open a ticket with the request_id.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note note--info"><div class="label">Note</div>
+        <p>Every response carries <code>X-Request-Id</code> equal to <code>request_id</code> in the body. Quote that id in support tickets; the server log lines for the request are keyed by it.</p>
+      </div>
+    </article>
+
+    <!-- Rate limits guide -->
+    <article class="entry section-block" id="guide-ratelimits" data-entry-number="Guide" data-ep="rl">
+      <header class="entry-header">
+        <div class="entry-title-block">
+          <h2 class="serif">Rate limits and budgets
+            <a href="#guide-ratelimits" class="anchor" data-perma="guide-ratelimits">#</a></h2>
+          <p class="summary">Per-batch caps, the warmup cooldown, aggregate budgets.</p>
+        </div>
+      </header>
+      <h3 id="guide-ratelimits--caps"><span class="§">§</span> Hard caps <a class="perma" href="#guide-ratelimits--caps">#</a></h3>
+      <dl class="defs">
+        <dt>per-file image size <span class="ty">12 MB</span></dt>
+        <dd>Reject reason: <code>payload_too_large</code>. Downscale the longest side to ~2048 px before retrying.</dd>
+        <dt>per-batch frame count <span class="ty">16</span></dt>
+        <dd>Both <code>/api/predict/batch</code> and <code>/api/scan/batch</code>. Split jobs into batches of 16 or fewer.</dd>
+        <dt>per-batch aggregate bytes <span class="ty">32 MB</span></dt>
+        <dd>Checked mid-loop. If exceeded, the batch stops with a clean <code>payload_too_large</code> at the offending index.</dd>
+        <dt>warmup cooldown <span class="ty">10 s</span></dt>
+        <dd>Calls inside the cooldown are coalesced (<code>coalesced: true</code>) instead of triggering a second load.</dd>
+        <dt>active API keys per account <span class="ty">20</span></dt>
+        <dd>Revoke an old key first if you hit the cap.</dd>
+      </dl>
+    </article>
+
+    <!-- Drone integration walkthrough -->
+    <article class="entry section-block" id="guide-drone" data-entry-number="Guide" data-ep="drone">
+      <header class="entry-header">
+        <div class="entry-title-block">
+          <h2 class="serif">Drone integration walkthrough
+            <a href="#guide-drone" class="anchor" data-perma="guide-drone">#</a></h2>
+          <p class="summary">From flight plan to GeoJSON Feature in your fleet UI.</p>
+        </div>
+      </header>
+
+      <h3 id="guide-drone--overview"><span class="§">§</span> The end-to-end picture <a class="perma" href="#guide-drone--overview">#</a></h3>
+      <div class="diagram">
+[ drone flight ]    [ ground station ]    [ APIN /api/scan ]    [ your map UI ]
+       │                    │                    │                    │
+       │  captures frame    │                    │                    │
+       │ ─────────────────► │                    │                    │
+       │                    │  POST + GPS + img  │                    │
+       │                    │ ─────────────────► │                    │
+       │                    │                    │  ensemble infer    │
+       │                    │                    │  + persist scan    │
+       │                    │  201 + GeoJSON     │                    │
+       │                    │ ◄───────────────── │                    │
+       │                    │   add Feature      │                    │
+       │                    │ ─────────────────────────────────────►  │
+       │                    │                    │                    │ paint pin
+      </div>
+
+      <h3 id="guide-drone--checklist"><span class="§">§</span> Pre-flight checklist <a class="perma" href="#guide-drone--checklist">#</a></h3>
+      <div class="procedure">
+        <div class="proc-step"><div class="text">Confirm GPS lock and accuracy < 5 m. Pass <code>accuracy_m</code> with every scan; the map UI uses it to size the confidence radius around each pin.</div></div>
+        <div class="proc-step"><div class="text">Compute and pass <code>captured_at</code>. Use the drone's clock if available; the server-side fallback uses <code>now()</code> and tags <code>captured_at_source: "server"</code> in the response.</div></div>
+        <div class="proc-step"><div class="text">Pick a stable <code>flight_id</code> per sortie. It groups scans for later aggregation queries against <code>GET /api/scans?flight_id=…</code>.</div></div>
+        <div class="proc-step"><div class="text">Decide on <code>persist_image</code>. False (the default) is privacy-preserving. True keeps the raw frame so it can be re-analysed later (e.g. when the model is updated).</div></div>
+        <div class="proc-step"><div class="text">For dense flights, batch with <code>/api/scan/batch</code>. The manifest order must match the file order exactly.</div></div>
+      </div>
+
+      <h3 id="guide-drone--errors"><span class="§">§</span> Failure modes you will actually see <a class="perma" href="#guide-drone--errors">#</a></h3>
+      <table class="tbl">
+        <thead><tr><th>scenario</th><th>error.code</th><th>recovery</th></tr></thead>
+        <tbody>
+          <tr><td>Drone GPS dropout, lat = 0, lon = 0</td><td class="mono">invalid_parameter</td><td>Buffer until GPS returns; do not send sentinel coordinates.</td></tr>
+          <tr><td>Frame partially captured (truncated JPEG)</td><td class="mono">unsupported_media_type</td><td>Retry; the next frame will likely succeed.</td></tr>
+          <tr><td>Cold engine on first call of the day</td><td class="mono">service_unavailable</td><td>POST /api/warmup once at flight start.</td></tr>
+          <tr><td>Operator scanned a tomato leaf by accident</td><td>n/a</td><td>tier becomes 5 (abstain); diagnosis null. Display "could not identify" on map.</td></tr>
+        </tbody>
+      </table>
+    </article>
+
+    <!-- GeoJSON in QGIS guide -->
+    <article class="entry section-block" id="guide-qgis" data-entry-number="Guide" data-ep="qgis">
+      <header class="entry-header">
+        <div class="entry-title-block">
+          <h2 class="serif">GeoJSON output in QGIS, Mapbox, Leaflet
+            <a href="#guide-qgis" class="anchor" data-perma="guide-qgis">#</a></h2>
+          <p class="summary">Drop the response straight into common GIS tools.</p>
+        </div>
+      </header>
+      <h3 id="guide-qgis--qgis"><span class="§">§</span> QGIS <a class="perma" href="#guide-qgis--qgis">#</a></h3>
+      <p>Save the <code>data.feature_collection</code> (from <a href="#scans-list">GET /api/scans?as_geojson=1</a>) to a <code>.geojson</code> file. In QGIS, <em>Layer → Add Layer → Add Vector Layer</em>, point at the file. Style the layer by the <code>severity</code> attribute to colour pins by urgency.</p>
+      <h3 id="guide-qgis--mapbox"><span class="§">§</span> Mapbox GL JS <a class="perma" href="#guide-qgis--mapbox">#</a></h3>
+      <div class="code-block" data-code-block>
+        <div class="lang-tabs"><button class="active" data-lang="js">JavaScript</button></div>
+        <button class="copy" data-copy>⎘ copy<span class="inkblot">copied</span></button>
+        <pre><code class="lang-sample" data-code-out>const r = await fetch("/api/scans?as_geojson=1", { headers: { Authorization: "Bearer " + token } });
+const { data } = await r.json();
+map.addSource("apin-scans", { type: "geojson", data: data.feature_collection });
+map.addLayer({
+  id: "apin-pins", type: "circle", source: "apin-scans",
+  paint: {
+    "circle-radius": 6,
+    "circle-color": ["match", ["get","severity"],
+      "severe", "#b3402f",
+      "moderate", "#c98a2b",
+      "mild", "#2f6f3e",
+      /* default */ "#7a6f60"]
+  }
+});</code></pre>
+      </div>
+      <h3 id="guide-qgis--leaflet"><span class="§">§</span> Leaflet <a class="perma" href="#guide-qgis--leaflet">#</a></h3>
+      <div class="code-block" data-code-block>
+        <div class="lang-tabs"><button class="active" data-lang="js">JavaScript</button></div>
+        <button class="copy" data-copy>⎘ copy<span class="inkblot">copied</span></button>
+        <pre><code class="lang-sample" data-code-out>const fc = await (await fetch("/api/scans?as_geojson=1", { headers })).json();
+L.geoJSON(fc.data.feature_collection, {
+  pointToLayer: (f, latlng) => L.circleMarker(latlng, {
+    radius: 6, color: pickColor(f.properties.severity), weight: 1.5
+  })
+}).addTo(map);</code></pre>
+      </div>
+    </article>
+
+    <!-- Building a multi-frame mission -->
+    <article class="entry section-block" id="guide-mission" data-entry-number="Guide" data-ep="mission">
+      <header class="entry-header">
+        <div class="entry-title-block">
+          <h2 class="serif">Building a multi-frame mission
+            <a href="#guide-mission" class="anchor" data-perma="guide-mission">#</a></h2>
+          <p class="summary">Use /api/scan/batch with a manifest, then aggregate.</p>
+        </div>
+      </header>
+      <p>For dense flights, batch up to 16 frames per HTTP call. The manifest is a JSON array, one entry per frame, in the SAME order as the files:</p>
+      <div class="code-block" data-code-block>
+        <div class="lang-tabs"><button class="active" data-lang="js">JavaScript</button></div>
+        <button class="copy" data-copy>⎘ copy<span class="inkblot">copied</span></button>
+        <pre><code class="lang-sample" data-code-out>const fd = new FormData();
+frames.forEach(f => fd.append("files", f.blob));
+fd.append("manifest", JSON.stringify(frames.map(f => ({
+  latitude: f.lat, longitude: f.lon,
+  altitude_m: f.alt, captured_at: f.iso
+}))));
+fd.append("flight_id", "fleet-A.sortie-007");
+const r = await fetch("/api/scan/batch", { method: "POST", headers, body: fd });
+const { data } = await r.json();
+console.log(data.feature_collection.features.length, "features ready");</code></pre>
+      </div>
+      <p>Then aggregate per-flight with <code>GET /api/scans?flight_id=fleet-A.sortie-007&amp;as_geojson=1</code>.</p>
+    </article>
+
+    <!-- Migration guide -->
+    <article class="entry section-block" id="guide-migration" data-entry-number="Guide" data-ep="migration">
+      <header class="entry-header">
+        <div class="entry-title-block">
+          <h2 class="serif">Migrating from /predict/full to /api/predict/full
+            <a href="#guide-migration" class="anchor" data-perma="guide-migration">#</a></h2>
+          <p class="summary">What changes in the response shape and how to read it.</p>
+        </div>
+      </header>
+      <h3 id="guide-migration--shape"><span class="§">§</span> Shape diff <a class="perma" href="#guide-migration--shape">#</a></h3>
+      <table class="tbl">
+        <thead><tr><th>field on legacy /predict/full</th><th>field on /api/predict/full</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">response.diagnosis</td><td class="mono">response.data.diagnosis</td></tr>
+          <tr><td class="mono">response.confidence</td><td class="mono">response.data.confidence</td></tr>
+          <tr><td class="mono">response.tier</td><td class="mono">response.data.tier</td></tr>
+          <tr><td class="mono">response.gradcam_b64_png</td><td class="mono">response.data.gradcam_b64_png</td></tr>
+          <tr><td class="mono">response.routing</td><td class="mono">absent (not run; okra/brassica only)</td></tr>
+          <tr><td>error: <code>{detail, auth_required, reason}</code></td><td>error: §3 envelope (no <code>detail</code>; branch on <code>error.code</code>)</td></tr>
+        </tbody>
+      </table>
+      <h3 id="guide-migration--auth"><span class="§">§</span> Auth differences <a class="perma" href="#guide-migration--auth">#</a></h3>
+      <p>The legacy <code>/predict/full</code> reads a session cookie. The new <code>/api/predict/full</code> reads a Bearer token. If your client previously logged in via <code>/auth/login</code>, switch to minting an API key via <a href="#keys-create">/api/keys</a> instead.</p>
+      <h3 id="guide-migration--tomato"><span class="§">§</span> Tomato is not routed <a class="perma" href="#guide-migration--tomato">#</a></h3>
+      <p>The legacy endpoint routes tomato images into a separate pipeline. The new endpoint is okra/brassica only; tomato frames return a ROUTER_REJECTED tier. The cookie-authenticated browser endpoint remains the route into the tomato pipeline.</p>
+    </article>
+  `;
+}
+
+function renderAppendix(){
+  return `
+  <h2 class="section serif" id="appendix-section">Appendix
+    <a class="perma" href="#appendix-section">#</a></h2>
+
+  <article class="entry section-block" id="appendix-classes" data-entry-number="Appendix">
+    <header class="entry-header">
+      <div class="entry-title-block">
+        <h2 class="serif">Full class list
+          <a href="#appendix-classes" class="anchor" data-perma="appendix-classes">#</a></h2>
+        <p class="summary">All 9 canonical diagnosis labels APIN can emit.</p>
+      </div>
+    </header>
+    <table class="tbl">
+      <thead><tr><th class="mono">class</th><th>crop</th><th>label</th><th>healthy?</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">okra_yvmv</td><td>okra</td><td>Yellow Vein Mosaic Virus</td><td>no</td></tr>
+        <tr><td class="mono">okra_powdery_mildew</td><td>okra</td><td>Powdery Mildew</td><td>no</td></tr>
+        <tr><td class="mono">okra_cercospora</td><td>okra</td><td>Cercospora Leaf Spot</td><td>no</td></tr>
+        <tr><td class="mono">okra_enation</td><td>okra</td><td>Enation Leaf Curl</td><td>no</td></tr>
+        <tr><td class="mono">okra_healthy</td><td>okra</td><td>Healthy</td><td>yes</td></tr>
+        <tr><td class="mono">brassica_black_rot</td><td>brassica</td><td>Black Rot</td><td>no</td></tr>
+        <tr><td class="mono">brassica_downy_mildew</td><td>brassica</td><td>Downy Mildew</td><td>no</td></tr>
+        <tr><td class="mono">brassica_alternaria</td><td>brassica</td><td>Alternaria Leaf Spot</td><td>no</td></tr>
+        <tr><td class="mono">brassica_healthy</td><td>brassica</td><td>Healthy</td><td>yes</td></tr>
+      </tbody>
+    </table>
+  </article>
+
+  <article class="entry section-block" id="appendix-tiers" data-entry-number="Appendix">
+    <header class="entry-header">
+      <div class="entry-title-block">
+        <h2 class="serif">Confidence tiers (1A..5)
+          <a href="#appendix-tiers" class="anchor" data-perma="appendix-tiers">#</a></h2>
+        <p class="summary">How to interpret the tier field on every prediction.</p>
+      </div>
+    </header>
+    <table class="tbl">
+      <thead><tr><th>tier</th><th>meaning</th><th>action</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">1A</td><td>Clean, confident, all four signals agree.</td><td>Trust and act.</td></tr>
+        <tr><td class="mono">1B</td><td>Confident, three of four signals agree.</td><td>Trust; flag for spot-check at scale.</td></tr>
+        <tr><td class="mono">1C</td><td>Confident but conformal set has 2 classes.</td><td>Disambiguate with a second frame.</td></tr>
+        <tr><td class="mono">2A..2C</td><td>Moderate; signals split or conformal set wider.</td><td>Treat as advisory.</td></tr>
+        <tr><td class="mono">3A..3C</td><td>Weak; large Mahalanobis distance or signal failure.</td><td>Recapture; consult a specialist.</td></tr>
+        <tr><td class="mono">4A / 4B</td><td>Abstaining: out of distribution or quality-gate reject.</td><td>Do not act on diagnosis.</td></tr>
+        <tr><td class="mono">5</td><td>Hard abstention: no signal usable.</td><td>Take a new photo with the suggested guidance.</td></tr>
+      </tbody>
+    </table>
+    <div class="note note--info"><div class="label">Note</div>
+      <p>Tier 1A is the only tier we recommend acting on without human review at scale. For high-stakes decisions (treatment dispatch, quarantine), pair the model output with field officer review regardless of tier.</p>
+    </div>
+  </article>
+
+  <article class="entry section-block" id="appendix-errors" data-entry-number="Appendix">
+    <header class="entry-header">
+      <div class="entry-title-block">
+        <h2 class="serif">Error taxonomy (§4)
+          <a href="#appendix-errors" class="anchor" data-perma="appendix-errors">#</a></h2>
+        <p class="summary">Every error.code that can appear in a §3 envelope, with the HTTP status it maps to.</p>
+      </div>
+    </header>
+    <table class="tbl">
+      <thead><tr><th class="mono">error.code</th><th>HTTP</th><th>meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">auth_required</td><td>401</td><td>No credential sent on a protected route.</td></tr>
+        <tr><td class="mono">auth_invalid</td><td>401</td><td>Credential malformed, revoked, or unknown.</td></tr>
+        <tr><td class="mono">auth_expired</td><td>401</td><td>Session expired; sign in again.</td></tr>
+        <tr><td class="mono">forbidden</td><td>403</td><td>Authenticated but not allowed.</td></tr>
+        <tr><td class="mono">quota_exhausted</td><td>402</td><td>Usage budget reached.</td></tr>
+        <tr><td class="mono">guest_exhausted</td><td>401</td><td>Guest session free checks used up.</td></tr>
+        <tr><td class="mono">missing_parameter</td><td>400</td><td>Required field absent. <code>error.field</code> names it.</td></tr>
+        <tr><td class="mono">invalid_parameter</td><td>400</td><td>Value present but out of range, wrong type, or malformed.</td></tr>
+        <tr><td class="mono">validation_failed</td><td>422</td><td>Body shape violates the contract.</td></tr>
+        <tr><td class="mono">unsupported_media_type</td><td>415</td><td>Bytes did not decode in the expected format.</td></tr>
+        <tr><td class="mono">payload_too_large</td><td>413</td><td>File or aggregate size cap exceeded.</td></tr>
+        <tr><td class="mono">not_found</td><td>404</td><td>Resource absent OR not visible to caller.</td></tr>
+        <tr><td class="mono">rate_limited</td><td>429</td><td>Over budget; see <code>Retry-After</code>.</td></tr>
+        <tr><td class="mono">idempotency_conflict</td><td>409</td><td>Idempotency key reused with a different body.</td></tr>
+        <tr><td class="mono">model_warming</td><td>503</td><td>Lazy load in progress; retry after warmup completes.</td></tr>
+        <tr><td class="mono">model_unavailable</td><td>503</td><td>Model weights missing on disk.</td></tr>
+        <tr><td class="mono">inference_failed</td><td>500</td><td>Pipeline raised mid-inference. Logged with request_id.</td></tr>
+        <tr><td class="mono">internal_error</td><td>500</td><td>Catch-all for unhandled exceptions. Quote the request_id.</td></tr>
+        <tr><td class="mono">service_unavailable</td><td>503</td><td>Service degraded; retry with exponential backoff.</td></tr>
+      </tbody>
+    </table>
+  </article>
+
+  <article class="entry section-block" id="appendix-glossary" data-entry-number="Appendix">
+    <header class="entry-header">
+      <div class="entry-title-block">
+        <h2 class="serif">Glossary
+          <a href="#appendix-glossary" class="anchor" data-perma="appendix-glossary">#</a></h2>
+        <p class="summary">Every tooltip term has an authoritative definition here.</p>
+      </div>
+    </header>
+    <dl class="defs">
+      <dt>Adaptive Pathological Intelligence Network <span class="opt">(APIN)</span></dt>
+      <dd>The ensemble pipeline that diagnoses okra and brassica leaf disease from a single photograph. Four signals fuse through a stacking MLP.</dd>
+      <dt>Bearer token</dt>
+      <dd>A 128-bit secret string starting <code>apin_</code>, sent in the <code>Authorization</code> header to authenticate machine API calls.</dd>
+      <dt>conformal prediction set</dt>
+      <dd>The set of class labels that, jointly, achieve the contracted miscoverage rate. A set of size 1 means APIN is committed to a single label; a set of size 2 means the top two classes share enough probability mass to honestly cover the truth.</dd>
+      <dt>Feature <span class="opt">(GeoJSON)</span></dt>
+      <dd>An RFC 7946 object with <code>type: "Feature"</code>, a <code>geometry</code>, and a <code>properties</code> bag. APIN returns one Feature per scan.</dd>
+      <dt>FeatureCollection <span class="opt">(GeoJSON)</span></dt>
+      <dd>An RFC 7946 wrapper around an array of Features. APIN returns this on batch endpoints and on list responses with <code>as_geojson=1</code>.</dd>
+      <dt>Grad-CAM</dt>
+      <dd>Gradient-weighted Class Activation Mapping. The heatmap technique used on <code>/api/predict/full</code> and the website's <code>/predict/full</code> to show which pixels drove the diagnosis.</dd>
+      <dt>Mahalanobis distance</dt>
+      <dd>A distance measure used by APIN's out-of-distribution detector. Values above the learned threshold mark the input as unlike anything in the training distribution.</dd>
+      <dt>OOD <span class="opt">(out of distribution)</span></dt>
+      <dd>Inputs the model was not trained for. Flagged via the Mahalanobis detector. When true, APIN abstains.</dd>
+      <dt>PSV</dt>
+      <dd>Plant Signal Vector. APIN's engineered-feature signal: leaf shape, color statistics, vein patterns. One of the four signals in the ensemble.</dd>
+      <dt>severity</dt>
+      <dd>One of <code>mild</code>, <code>moderate</code>, <code>severe</code>. Used to key treatment dictionaries and to drive urgency on the map.</dd>
+      <dt>stacking MLP</dt>
+      <dd>The small multi-layer perceptron that fuses the per-signal outputs into a final class distribution.</dd>
+      <dt>tier <span class="opt">(1A..5)</span></dt>
+      <dd>APIN's overall confidence bucket. See the <a href="#appendix-tiers">tier appendix</a>.</dd>
+      <dt>WGS84</dt>
+      <dd>The geographic coordinate system GPS reports. Latitude in [-90, 90], longitude in [-180, 180].</dd>
+    </dl>
+  </article>`;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   PLAYGROUND BEHAVIOR
+   ───────────────────────────────────────────────────────────────── */
+function readForm(ep, playgroundEl){
+  const formEl = playgroundEl.querySelector("[data-form]");
+  const fields = [...(ep.pathParams || []), ...(ep.params || [])];
+  const formFields = []; // for code samples
+  const fd = new FormData();
+  const body = {};
+  let path = ep.path;
+  const queryPairs = [];
+
+  for(const p of fields){
+    const inp = formEl ? formEl.querySelector(`[name="${p.name}"]`) : null;
+    if(!inp) continue;
+
+    if(p.widget === "file" || p.widget === "file-multi"){
+      const files = inp.files;
+      if(files && files.length){
+        if(p.widget === "file-multi"){
+          for(const f of files){
+            fd.append(p.name, f);
+            formFields.push({ name:p.name, kind:"file", value:f.name });
+          }
+        } else {
+          fd.append(p.name, files[0]);
+          formFields.push({ name:p.name, kind:"file", value:files[0].name });
+        }
+      }
+    } else {
+      const val = inp.value.trim();
+      // Path-param substitution
+      if((ep.pathParams || []).some(pp => pp.name === p.name)){
+        if(val) path = path.replace("{" + p.name + "}", encodeURIComponent(val));
+        continue;
+      }
+      if(val === "" && !p.required) continue;
+      if(ep.queryStyle){
+        queryPairs.push(encodeURIComponent(p.name) + "=" + encodeURIComponent(val));
+      } else if(ep.bodyStyle === "json"){
+        // Coerce booleans + numbers reasonably
+        let coerced = val;
+        if(p.type && p.type.startsWith("bool")) coerced = (val === "true");
+        else if(p.type && (p.type.startsWith("int") || p.type.startsWith("float"))){
+          const n = Number(val); if(!Number.isNaN(n)) coerced = n;
+        }
+        body[p.name] = coerced;
+        formFields.push({ name:p.name, kind:"data", value:val });
+      } else {
+        fd.append(p.name, val);
+        formFields.push({ name:p.name, kind:"data", value:val });
+      }
+    }
+  }
+
+  return {
+    path,
+    queryStr: queryPairs.join("&"),
+    bodyJson: ep.bodyStyle === "json" ? JSON.stringify(body) : null,
+    formData: ep.bodyStyle === "json" ? null : fd,
+    formFields
+  };
+}
+
+async function runPlayground(ep, playgroundEl){
+  const tryBtn = playgroundEl.querySelector("[data-try]");
+  const respPanel = playgroundEl.querySelector("[data-resp]");
+
+  // PDA: block the call when any REQUIRED path-param field is empty.
+  // Otherwise the user sees a confusing 404 against /api/diseases/%7Bdisease_class%7D.
+  const missing = [];
+  for(const pp of (ep.pathParams || [])){
+    const inp = playgroundEl.querySelector(`[name="${pp.name}"]`);
+    if(pp.required && (!inp || !inp.value.trim())) missing.push(pp.name);
+  }
+  for(const p of (ep.params || [])){
+    if(!p.required) continue;
+    if(p.widget === "file" || p.widget === "file-multi"){
+      const inp = playgroundEl.querySelector(`[name="${p.name}"]`);
+      if(!inp || !inp.files || !inp.files.length) missing.push(p.name);
+    } else {
+      const inp = playgroundEl.querySelector(`[name="${p.name}"]`);
+      if(!inp || !inp.value.trim()) missing.push(p.name);
+    }
+  }
+  if(missing.length){
+    respPanel.classList.add("open");
+    respPanel.innerHTML = `
+      <div class="response-inner">
+        <div class="note note--warn"><div class="label">Required fields missing</div>
+          <p>Fill in: <code>${missing.map(m => escape(m)).join("</code>, <code>")}</code> before running.</p>
+        </div>
+      </div>`;
+    // Highlight the missing fields
+    for(const name of missing){
+      const inp = playgroundEl.querySelector(`[name="${name}"]`);
+      if(inp){
+        const el = inp.closest(".file-drop") || inp;
+        el.style.transition = "box-shadow .2s ease";
+        el.style.boxShadow = "0 0 0 3px rgba(179,64,47,.25)";
+        setTimeout(() => { el.style.boxShadow = ""; }, 1200);
+      }
+    }
+    return;
+  }
+
+  // Reset stamps
+  respPanel.innerHTML = "";
+  respPanel.classList.add("open");
+  tryBtn.classList.add("pressed");
+  setTimeout(() => tryBtn.classList.remove("pressed"), 240);
+  tryBtn.disabled = true;
+  const origLabel = tryBtn.innerHTML;
+  tryBtn.innerHTML = '<span class="spinner"></span>sending…';
+
+  const snap = readForm(ep, playgroundEl);
+
+  // Auth header
+  const headers = {"X-API-Version": "1.0"};
+  let tokenUsed = null;
+  if(ep.auth === "bearer" || ep.auth === "bearer-optional"){
+    const keyInput = playgroundEl.querySelector("[data-key-input]");
+    const token = keyInput ? keyInput.value.trim() : "";
+    if(token){
+      headers["Authorization"] = "Bearer " + token;
+      saveKey(token, ep.id);
+      tokenUsed = token;
+    }
+  }
+
+  const url = BASE + snap.path + (snap.queryStr ? "?"+snap.queryStr : "");
+  const init = {method: ep.method, headers};
+  if(ep.bodyStyle === "json" && snap.bodyJson){
+    init.headers["Content-Type"] = "application/json";
+    init.body = snap.bodyJson;
+  } else if(snap.formData && ep.method !== "GET" && ep.method !== "DELETE"){
+    init.body = snap.formData;
+  }
+
+  const t0 = performance.now();
+  let respText = null, respObj = null, respStatus = 0;
+  try{
+    const r = await fetch(url, init);
+    respStatus = r.status;
+    respText = await r.text();
+    try { respObj = JSON.parse(respText); } catch{ respObj = null; }
+  } catch(e){
+    respStatus = 0;
+    respObj = { network_error: String(e.message || e) };
+  }
+  const dt = Math.round(performance.now() - t0);
+
+  // Render response
+  const isOk = respStatus >= 200 && respStatus < 300;
+  const stampClass = isOk ? "ok" : "err";
+  const stampLabel = isOk ? "OK" : "rejected";
+  const rid = (respObj && respObj.request_id) || "(no request_id)";
+  respPanel.innerHTML = `
+    <div class="response-inner">
+      <div class="response-meta">
+        <span class="http ${stampClass}">${respStatus || "···"} ${isOk ? "OK" : "ERR"}</span>
+        <span>${dt} ms</span>
+        <span class="rid">${escape(rid)}</span>
+        <span class="stamp ${stampClass}">${stampLabel}</span>
+      </div>
+      <div class="response-body${isOk ? "" : " has-error"}">
+        <div class="schema-tree" data-schema-tree>${
+          respObj ? jsonHighlight(respObj) :
+                    `<pre style="font:inherit">${escape(respText || "(empty response)")}</pre>`
+        }</div>
+      </div>
+    </div>`;
+  // Trigger stamp animation
+  requestAnimationFrame(() => {
+    const stamp = respPanel.querySelector(".stamp");
+    if(stamp) stamp.classList.add("show");
+  });
+
+  tryBtn.disabled = false;
+  tryBtn.innerHTML = origLabel;
+
+  pushRecent({
+    when: Date.now(),
+    method: ep.method,
+    path: snap.path,
+    status: respStatus,
+    ms: dt
+  });
+
+  // Regenerate code samples to reflect what was actually sent
+  updateCodeBlock(ep, playgroundEl, snap);
+
+  // Wire schema-tree expansion on the new content
+  wireSchemaTrees(respPanel);
+}
+
+function updateCodeBlock(ep, scopeRoot, snap){
+  // Find the closest code block in the same entry
+  const entry = scopeRoot.closest("article.entry");
+  if(!entry) return;
+  const cb = entry.querySelector('.code-block[data-ep]');
+  if(!cb) return;
+  const active = cb.querySelector('.lang-tabs button.active');
+  const lang = active ? active.dataset.lang : "curl";
+  const out = cb.querySelector('[data-code-out]');
+  if(out) out.textContent = generateSample(ep, lang, snap);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   SEARCH PALETTE
+   ───────────────────────────────────────────────────────────────── */
+const SEARCH_INDEX = [
+  ...ENDPOINTS.map(e => ({
+    id:e.id, method:e.method, path:e.path,
+    title:`${e.method} ${e.path}`, summary:e.summary, group:e.group, kind:"endpoint"
+  })),
+  ...GUIDES.map(g => ({ id:g.id, title:g.title, summary:g.summary, group:"GUIDES", kind:"guide" })),
+  ...APPENDIX.map(a => ({ id:a.id, title:a.title, summary:"", group:"APPENDIX", kind:"appendix" }))
+];
+
+let paletteIndex = 0;
+function openPalette(){
+  $("#palette-backdrop").classList.add("open");
+  $("#palette-input").value = "";
+  $("#palette-input").focus();
+  renderPaletteResults("");
+}
+function closePalette(){ $("#palette-backdrop").classList.remove("open"); }
+function renderPaletteResults(q){
+  const list = $("#palette-list");
+  const ql = q.toLowerCase().trim();
+  const matches = !ql ? SEARCH_INDEX.slice(0, 14) : SEARCH_INDEX.filter(it => {
+    return it.title.toLowerCase().includes(ql)
+        || (it.summary || "").toLowerCase().includes(ql)
+        || it.id.toLowerCase().includes(ql);
+  }).slice(0, 30);
+  paletteIndex = 0;
+  if(matches.length === 0){
+    list.innerHTML = `<div class="palette-empty">no matches for "${escape(q)}"</div>`;
+    return;
+  }
+  list.innerHTML = matches.map((m,i) => {
+    const mPill = m.method ? `<span class="m method-${m.method}">${m.method}</span>` : "";
+    return `<div class="palette-item${i===0?' active':''}" data-id="${m.id}">
+      ${mPill}
+      <span>${escape(m.title)}</span>
+      <span class="d">${escape(m.group)}</span>
+    </div>`;
+  }).join("");
+}
+
+function paletteMove(dir){
+  const items = $$(".palette-item");
+  if(items.length === 0) return;
+  items[paletteIndex].classList.remove("active");
+  paletteIndex = (paletteIndex + dir + items.length) % items.length;
+  items[paletteIndex].classList.add("active");
+  items[paletteIndex].scrollIntoView({block:"nearest"});
+}
+function paletteSelect(){
+  const items = $$(".palette-item");
+  if(items.length === 0) return;
+  const id = items[paletteIndex].dataset.id;
+  location.hash = "#" + id;
+  closePalette();
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   RECENT CALLS RAIL
+   ───────────────────────────────────────────────────────────────── */
+function renderRecentCalls(){
+  const root = $("#recent-calls");
+  if(STATE.recentCalls.length === 0){
+    root.innerHTML = `<div class="empty">no playground calls yet</div>`;
+    return;
+  }
+  root.innerHTML = STATE.recentCalls.map(c => {
+    const ok = c.status >= 200 && c.status < 300;
+    return `<div class="recent-call">
+      <span class="m method-${c.method}">${c.method}</span>
+      <span class="p">${escape(c.path)}</span>
+      <span class="s ${ok ? 's-ok' : 's-err'}">${c.status || '···'}</span>
+      <span class="t">${c.ms}ms</span>
+    </div>`;
+  }).join("");
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   STATUS DOTS: poll /health every 30 s
+   ───────────────────────────────────────────────────────────────── */
+async function pollStatusDots(){
+  try{
+    const r = await fetch("/health", { headers: { Accept: "application/json" } });
+    if(!r.ok) throw new Error("health " + r.status);
+    const body = await r.json();
+    const status = (body && body.status) || (body && body.overall) || "ok";
+    const cls = status === "operational" || status === "ok" ? "live" :
+                status === "degraded" ? "warn" : "down";
+    $$('[data-status-dot]').forEach(el => {
+      el.classList.remove("live","warn","down");
+      el.classList.add(cls);
+      el.textContent = cls === "live" ? "live" : cls === "warn" ? "degraded" : "down";
+    });
+  } catch(e){
+    $$('[data-status-dot]').forEach(el => {
+      el.classList.remove("live","warn"); el.classList.add("down");
+      el.textContent = "down";
+    });
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   SCHEMA TREE EXPANSION
+   ───────────────────────────────────────────────────────────────── */
+function wireSchemaTrees(scope){
+  (scope || document).querySelectorAll('.schema-tree .schema-node').forEach(node => {
+    const tw = node.querySelector(":scope > .tw");
+    if(!tw) return;
+    if(tw.dataset.wired) return;
+    tw.dataset.wired = "1";
+    tw.addEventListener("click", () => {
+      node.classList.toggle("expanded");
+    });
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   COPY BUTTONS
+   ───────────────────────────────────────────────────────────────── */
+function wireCopyButtons(){
+  $$('.code-block [data-copy]').forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const code = btn.parentElement.querySelector('[data-code-out]');
+      if(!code) return;
+      try{
+        await navigator.clipboard.writeText(code.textContent);
+      } catch(e){
+        // fallback
+        const r = document.createRange();
+        r.selectNode(code);
+        getSelection().removeAllRanges(); getSelection().addRange(r);
+        document.execCommand("copy");
+        getSelection().removeAllRanges();
+      }
+      btn.classList.add("copied","stamped");
+      setTimeout(() => btn.classList.remove("stamped"), 180);
+      setTimeout(() => btn.classList.remove("copied"), 1300);
+    });
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   LANG TABS
+   ───────────────────────────────────────────────────────────────── */
+function wireLangTabs(){
+  $$('.code-block[data-ep] .lang-tabs button').forEach(btn => {
+    btn.addEventListener("click", () => {
+      const cb = btn.closest(".code-block");
+      cb.querySelectorAll('.lang-tabs button').forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const ep = ENDPOINTS_BY_ID[cb.dataset.ep];
+      const out = cb.querySelector('[data-code-out]');
+      const playground = cb.closest("article.entry").querySelector('[data-playground]');
+      const snap = playground ? readForm(ep, playground) : {};
+      out.textContent = generateSample(ep, btn.dataset.lang, snap);
+    });
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   FILE DROP ZONES
+   ───────────────────────────────────────────────────────────────── */
+function wireFileDrops(){
+  $$('[data-file-drop]').forEach(drop => {
+    const input = drop.querySelector('[data-file-input]');
+    drop.addEventListener("click", () => input.click());
+    drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("dragover"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
+    drop.addEventListener("drop", e => {
+      e.preventDefault(); drop.classList.remove("dragover");
+      const dt = new DataTransfer();
+      Array.from(e.dataTransfer.files).slice(0, drop.dataset.multi ? 16 : 1)
+        .forEach(f => dt.items.add(f));
+      input.files = dt.files;
+      updateFileDropLabel(drop);
+    });
+    input.addEventListener("change", () => updateFileDropLabel(drop));
+  });
+}
+function updateFileDropLabel(drop){
+  const input = drop.querySelector('[data-file-input]');
+  if(input.files && input.files.length){
+    drop.classList.add("has-file");
+    const names = Array.from(input.files).slice(0,3).map(f => f.name);
+    const more = input.files.length > 3 ? ` + ${input.files.length-3} more` : "";
+    const totalBytes = Array.from(input.files).reduce((a,f) => a+f.size, 0);
+    drop.firstChild.textContent = `${names.join(", ")}${more} · ${fmtBytes(totalBytes)}`;
+  } else {
+    drop.classList.remove("has-file");
+    drop.firstChild.textContent = drop.dataset.multi
+      ? "Drop one or more files here, or click to select (max 16)"
+      : "Drop a file here, or click to select";
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   TRY BUTTONS
+   ───────────────────────────────────────────────────────────────── */
+function wireTryButtons(){
+  $$('[data-try]').forEach(btn => {
+    btn.addEventListener("click", () => {
+      const pg = btn.closest("[data-playground]");
+      const ep = ENDPOINTS_BY_ID[pg.dataset.ep];
+      if(!ep) return;
+      runPlayground(ep, pg);
+    });
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   PERMALINK BUTTONS (N8)
+   ───────────────────────────────────────────────────────────────── */
+function wirePermalinks(){
+  // any "#" anchor that has data-perma copies the URL on click
+  $$('[data-perma], .perma').forEach(el => {
+    el.addEventListener("click", e => {
+      e.preventDefault();
+      const href = el.getAttribute("href");
+      if(!href) return;
+      const url = location.origin + location.pathname + href;
+      navigator.clipboard.writeText(url).catch(()=>{});
+      // Brief floating confirmation
+      const pop = document.createElement("span");
+      pop.className = "perma-pop";
+      pop.textContent = "link copied";
+      el.parentElement.appendChild(pop);
+      const r = el.getBoundingClientRect();
+      const pr = el.parentElement.getBoundingClientRect();
+      pop.style.left = (r.right - pr.left + 6) + "px";
+      pop.style.top  = (r.top - pr.top - 6) + "px";
+      requestAnimationFrame(() => pop.classList.add("show"));
+      setTimeout(() => pop.remove(), 1200);
+      // Update the URL bar to the anchor
+      history.replaceState(null, "", href);
+      const target = document.getElementById(href.slice(1));
+      if(target){
+        target.scrollIntoView({behavior:"smooth", block:"start"});
+        target.style.transition = "box-shadow .2s ease";
+        target.style.boxShadow = "0 0 0 3px rgba(74,157,95,.22)";
+        setTimeout(() => { target.style.boxShadow = ""; }, 700);
+      }
+    });
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   TOC + ACTIVE-LINK HIGHLIGHTING
+   ───────────────────────────────────────────────────────────────── */
+/* The "On this page" rail shows only the CURRENT entry's sections,
+   not every section of every endpoint. An IntersectionObserver
+   watches each article.entry; when one becomes the topmost in view
+   it becomes the active entry and we re-render the TOC against it. */
+let _activeEntryId = null;
+function renderTOCFor(entryEl){
+  const tocEl = $("#toc");
+  if(!entryEl){
+    tocEl.innerHTML = `<div class="toc-empty">scroll to an entry to see its sections</div>`;
+    return;
+  }
+  // Heading inside the entry: the entry's own title, plus h3[id]s (the § sections)
+  const titleEl = entryEl.querySelector(".entry-title-block h2");
+  const titleText = titleEl ? titleEl.textContent.replace(/#/g,"").trim().split(/\s+/).join(" ") : "(entry)";
+  const path = entryEl.querySelector(".entry-title-block .path");
+  const pathText = path ? path.textContent : "";
+  const sections = Array.from(entryEl.querySelectorAll("h3[id], h4[id]"));
+  const headHtml = `<a href="#${entryEl.id}" data-target="${entryEl.id}" data-depth="2" class="toc-head">
+    ${escape(pathText || titleText)}
+  </a>`;
+  const items = sections.map(h => {
+    const depth = h.tagName === "H3" ? 3 : 4;
+    return `<a href="#${h.id}" data-target="${h.id}" data-depth="${depth}">${
+      escape(h.textContent.replace(/[#§]/g,"").replace(/\s+/g," ").trim())
+    }</a>`;
+  }).join("");
+  tocEl.innerHTML = headHtml + items;
+}
+
+/* Populate the right rail's "Related to this entry" with the
+   current entry's seeAlso + a contextual guide cross-reference.
+   For appendix / guide entries we show the global directory of
+   guides + appendix so the rail isn't empty. */
+function renderRelatedFor(entryEl){
+  const root = $("#related-nav");
+  if(!root) return;
+  const heading = $("#related-heading");
+  const id = entryEl.id;
+
+  // Endpoint entries: use the endpoint spec's seeAlso array
+  const ep = ENDPOINTS_BY_ID[id];
+  if(ep){
+    if(heading) heading.textContent = "Related to this entry";
+    const items = ep.seeAlso || [];
+    if(items.length === 0){
+      root.innerHTML = `<div class="related-empty">No cross-references for this entry.</div>`;
+      return;
+    }
+    root.innerHTML = items.map(s => {
+      const href = s.id ? `#${s.id}` : `#${s.anchor}`;
+      return `<a href="${href}">${escape(s.label)}</a>`;
+    }).join("");
+    return;
+  }
+
+  // Guide entry: link to siblings + a couple of appendix items
+  if(id.startsWith("guide-")){
+    if(heading) heading.textContent = "Other guides";
+    const sibs = GUIDES.filter(g => g.id !== id);
+    root.innerHTML = sibs.map(g => `<a href="#${g.id}">${escape(g.title)}</a>`).join("") +
+      `<a href="#appendix-glossary">Glossary ↗</a>`;
+    return;
+  }
+
+  // Appendix entry: link to other appendix items + guides
+  if(id.startsWith("appendix-")){
+    if(heading) heading.textContent = "Other appendix items";
+    const sibs = APPENDIX.filter(a => a.id !== id);
+    root.innerHTML = sibs.map(a => `<a href="#${a.id}">${escape(a.title)}</a>`).join("") +
+      `<a href="#guides-section">↳ Browse guides</a>`;
+    return;
+  }
+
+  // Default fallback (e.g. group headings): show the guide index
+  if(heading) heading.textContent = "Field guide";
+  root.innerHTML = GUIDES.map(g => `<a href="#${g.id}">${escape(g.title)}</a>`).join("");
+}
+
+function setupEntryObserver(){
+  const entries = $$('main.content article.entry');
+  if(entries.length === 0){ return; }
+  // Pick the topmost entry by reading scroll positions on each update.
+  // (IntersectionObserver alone isn't great when many entries are partly visible.)
+  const updateActive = () => {
+    let chosen = entries[0];
+    for(const el of entries){
+      const r = el.getBoundingClientRect();
+      if(r.top <= 140){ chosen = el; }
+      else { break; }
+    }
+    if(chosen && chosen.id !== _activeEntryId){
+      _activeEntryId = chosen.id;
+      renderTOCFor(chosen);
+      renderRelatedFor(chosen);
+    }
+  };
+  updateActive();
+  window.addEventListener("scroll", () => {
+    requestAnimationFrame(updateActive);
+  }, { passive: true });
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   SCROLL PROGRESS + ACTIVE NAV
+   ───────────────────────────────────────────────────────────────── */
+let _ticking = false;
+function onScroll(){
+  if(_ticking) return;
+  _ticking = true;
+  requestAnimationFrame(() => {
+    const h = document.documentElement;
+    const pct = (h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight)) * 100;
+    $("#scroll-progress").style.width = pct + "%";
+
+    // Active nav item
+    let activeId = null;
+    const entries = $$('main.content > #rendered-content > article.entry, main.content h2.section[id]');
+    for(const el of entries){
+      const r = el.getBoundingClientRect();
+      if(r.top <= 120) activeId = el.id;
+      else break;
+    }
+    if(activeId){
+      $$('nav.side a').forEach(a => {
+        a.classList.toggle("active", a.dataset.target === activeId);
+      });
+    }
+    _ticking = false;
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   J/K NAVIGATION
+   ───────────────────────────────────────────────────────────────── */
+function navigateEntry(delta){
+  const ids = $$('main.content > #rendered-content > article.entry').map(e => e.id);
+  const here = location.hash.slice(1);
+  let idx = ids.indexOf(here);
+  if(idx < 0){
+    // Find the topmost in view
+    for(let i=0;i<ids.length;i++){
+      const el = document.getElementById(ids[i]);
+      const r = el.getBoundingClientRect();
+      if(r.top > -20){ idx = i; break; }
+    }
+    if(idx < 0) idx = 0;
+  } else {
+    idx = idx + delta;
+  }
+  idx = Math.max(0, Math.min(ids.length - 1, idx));
+  location.hash = "#" + ids[idx];
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   THEME (N2)
+   ───────────────────────────────────────────────────────────────── */
+function applyTheme(t){
+  // Avoid animating the very first paint (the body already has the
+  // persisted theme; no transition needed). We only animate when the
+  // theme is actively being swapped via this function.
+  const sameAsCurrent = (document.body.dataset.theme === t);
+  const persist = () => {
+    document.body.dataset.theme = t;
+    localStorage.setItem("apin-docs-theme", t);
+    STATE.theme = t;
+  };
+  if(sameAsCurrent){ persist(); return; }
+
+  // Path A: View Transition API (Chrome 111+, Edge, Safari 18+).
+  // The browser snapshots the page before + after the swap and
+  // crossfades both snapshots as one image; every pixel transitions
+  // simultaneously so nothing looks "blocky".
+  if(typeof document.startViewTransition === "function"){
+    document.startViewTransition(persist);
+    return;
+  }
+
+  // Path B: CSS transition fallback (Firefox, older Safari). Adding
+  // the .theme-transitioning class enables a 420 ms colour transition
+  // on EVERY descendant for the duration of the swap; then we remove
+  // it so hover/focus interactions don't pay the cost.
+  document.body.classList.add("theme-transitioning");
+  // double rAF so the transition class is in place before we change
+  // the attribute that triggers the colour switch
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    persist();
+    setTimeout(() => {
+      document.body.classList.remove("theme-transitioning");
+    }, 460);
+  }));
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   POSTMAN EXPORT (N6)
+   ───────────────────────────────────────────────────────────────── */
+function downloadPostmanCollection(){
+  const collection = {
+    info: {
+      name: "APIN API",
+      schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+      _postman_id: "apin-" + Date.now()
+    },
+    item: ENDPOINTS.map(ep => {
+      const url = {
+        raw: BASE + ep.path,
+        host: [BASE.replace(/^https?:\/\//,"")],
+        path: ep.path.split("/").filter(Boolean)
+      };
+      const headers = [{ key: "X-API-Version", value: "1.0" }];
+      if(ep.auth === "bearer" || ep.auth === "bearer-optional"){
+        headers.push({ key: "Authorization", value: "Bearer {{APIN_TOKEN}}" });
+      }
+      const body = ep.bodyStyle === "json"
+        ? { mode: "raw", raw: "{}" , options: { raw: { language: "json" } } }
+        : null;
+      return {
+        name: `${ep.method} ${ep.path}`,
+        request: { method: ep.method, header: headers, url, body, description: ep.summary }
+      };
+    })
+  };
+  const blob = new Blob([JSON.stringify(collection, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "APIN.postman_collection.json";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   STARTUP
+   ───────────────────────────────────────────────────────────────── */
+function start(){
+  // Apply persisted theme
+  applyTheme(STATE.theme);
+
+  // Render structure
+  renderNav();
+  const content = $("#rendered-content");
+  const groupedEndpoints = {};
+  for(const g of GROUP_ORDER) groupedEndpoints[g] = [];
+  for(const ep of ENDPOINTS) groupedEndpoints[ep.group].push(ep);
+  let html = "";
+  let i = 0;
+  for(const g of ["REFERENCE","INFERENCE","DRONE PERCEPTION","KEY MANAGEMENT","FEEDBACK"]){
+    if(groupedEndpoints[g].length === 0) continue;
+    html += `<h2 class="section serif" id="group-${g.toLowerCase().replace(/\s+/g,'-')}">${g.replace("_"," ")} <a class="perma" href="#group-${g.toLowerCase().replace(/\s+/g,'-')}">#</a></h2>`;
+    for(const ep of groupedEndpoints[g]){
+      html += renderEntry(ep, i);
+      i++;
+    }
+  }
+  html += renderGuides();
+  html += renderAppendix();
+  content.innerHTML = html;
+  $("#endpoint-count").textContent = ENDPOINTS.length;
+
+  // Stagger entry fades above the fold
+  const visibleEntries = $$('article.entry').slice(0, 5);
+  visibleEntries.forEach((el, idx) => {
+    el.style.animationDelay = (60 * idx) + "ms";
+  });
+
+  // Wire all dynamic behavior
+  wireSchemaTrees();
+  wireCopyButtons();
+  wireLangTabs();
+  wireFileDrops();
+  wireTryButtons();
+  wirePermalinks();
+  setupEntryObserver();   // dynamic "On this page" scoped to current entry
+  renderRecentCalls();
+
+  // Wikipedia-style tooltips: post-render pass over every entry +
+  // guide that wraps known jargon in <span class="term"> with a
+  // tooltip card. Skipped for the appendix (the glossary terms are
+  // the definitions themselves; double-wrapping would be silly).
+  document.querySelectorAll('article.entry').forEach(el => {
+    if(!el.id.startsWith("appendix-")) wrapGlossaryTermsIn(el);
+  });
+
+  // Flip tooltip below the term when there isn't room above it.
+  // Runs on every hover/focus so dynamic content (response panel,
+  // newly rendered TOC) is covered automatically.
+  const flipTooltipIfNeeded = (termEl) => {
+    const card = termEl.querySelector(".tooltip-card");
+    if(!card) return;
+    const termRect = termEl.getBoundingClientRect();
+    // We can't measure the card while it's display:none. Force
+    // a temp measure by toggling visibility (not display).
+    const wasShown = card.style.visibility;
+    card.style.visibility = "hidden";
+    card.style.opacity = "0";
+    const oldDisplay = card.style.display;
+    card.style.display = "block";
+    const cardH = card.offsetHeight || 80;
+    card.style.display = oldDisplay;
+    card.style.visibility = wasShown;
+    card.style.opacity = "";
+    // 12 px gap for the arrow + a margin from the masthead
+    const room = termRect.top - cardH - 16;
+    termEl.classList.toggle("tooltip-below", room < 78);
+  };
+  document.addEventListener("mouseover", e => {
+    const t = e.target.closest(".term");
+    if(t) flipTooltipIfNeeded(t);
+  });
+  document.addEventListener("focusin", e => {
+    if(e.target.classList && e.target.classList.contains("term")){
+      flipTooltipIfNeeded(e.target);
+    }
+  });
+
+  // Status dots: first probe + interval
+  pollStatusDots();
+  setInterval(pollStatusDots, 30000);
+
+  // Scroll progress
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  // Header buttons
+  $("#search-trigger").addEventListener("click", openPalette);
+  $("#theme-toggle").addEventListener("click", () => {
+    applyTheme(STATE.theme === "light" ? "night-field" : "light");
+  });
+  $("#postman-badge").addEventListener("click", downloadPostmanCollection);
+  $("#print-badge").addEventListener("click", () => window.print());
+
+  // Palette
+  $("#palette-input").addEventListener("input", e => renderPaletteResults(e.target.value));
+  $("#palette-backdrop").addEventListener("click", e => {
+    if(e.target.id === "palette-backdrop") closePalette();
+  });
+  $$('.palette-list').forEach(list => {
+    list.addEventListener("click", e => {
+      const item = e.target.closest(".palette-item");
+      if(item){ paletteIndex = $$(".palette-item").indexOf(item); paletteSelect(); }
+    });
+  });
+
+  // Keyboard
+  document.addEventListener("keydown", e => {
+    const inField = ["INPUT","TEXTAREA","SELECT"].includes(e.target.tagName)
+                 || e.target.isContentEditable;
+    const paletteOpen = $("#palette-backdrop").classList.contains("open");
+    const shortcutsOpen = $("#shortcuts-backdrop").classList.contains("open");
+
+    // ⌘K / Ctrl+K
+    if((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k"){
+      e.preventDefault(); openPalette(); return;
+    }
+    if(e.key === "Escape"){
+      if(paletteOpen){ closePalette(); return; }
+      if(shortcutsOpen){ $("#shortcuts-backdrop").classList.remove("open"); return; }
+    }
+    if(paletteOpen){
+      if(e.key === "ArrowDown"){ e.preventDefault(); paletteMove(+1); }
+      if(e.key === "ArrowUp"){   e.preventDefault(); paletteMove(-1); }
+      if(e.key === "Enter"){     e.preventDefault(); paletteSelect(); }
+      return;
+    }
+    if(inField) return;
+
+    if(e.key === "?"){ e.preventDefault();
+      $("#shortcuts-backdrop").classList.toggle("open"); return; }
+    if(e.key === "/"){ e.preventDefault(); openPalette(); return; }
+    if(e.key === "j"){ e.preventDefault(); navigateEntry(+1); return; }
+    if(e.key === "k"){ e.preventDefault(); navigateEntry(-1); return; }
+    if(e.key === "t"){ e.preventDefault();
+      applyTheme(STATE.theme === "light" ? "night-field" : "light"); return; }
+  });
+  $("#shortcuts-backdrop").addEventListener("click", e => {
+    if(e.target.id === "shortcuts-backdrop") $("#shortcuts-backdrop").classList.remove("open");
+  });
+
+  // If we landed on an anchor, scroll to it after render
+  if(location.hash){
+    setTimeout(() => {
+      const t = document.getElementById(location.hash.slice(1));
+      if(t) t.scrollIntoView({behavior:"smooth", block:"start"});
+    }, 60);
+  }
+}
+
+if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+else start();
+</script>
+</body>
+</html>

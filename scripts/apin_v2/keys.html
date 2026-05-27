@@ -1,0 +1,1050 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- WI-P4-CSRF: server substitutes the placeholder in the meta tag below
+     at render time with the current session's csrf_token. JS reads it via
+     document.querySelector('meta[name="csrf-token"]').content.
+     [FX-P4-1: the literal placeholder string is INTENTIONALLY not repeated
+     in this comment — the server-side bytes.replace is unbounded and
+     would have duplicated the token into this comment too.] -->
+<meta name="csrf-token" content="__APIN_CSRF_TOKEN__">
+<title>API keys · APIN Console</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Phase 6.C.3 — self-host fonts (FX-I follow-up).
+   Run `python tools/fetch_fonts.py` to populate scripts/apin_v2/fonts/
+   with the woff2 files; the /fonts/<filename> route (apin_server.py)
+   serves them at long-cache + immutable. These @font-face rules are
+   declared AFTER the Google Fonts <link> above, so when local woff2
+   files are present the browser prefers them; when absent the route
+   returns 404 and the browser falls through to the Google CDN rules
+   loaded by the link tag (or to the local OS install if any).
+
+   Current fetch_fonts.py captures static-weight blocks only; that
+   covers Inter and JetBrains Mono. Fraunces is a variable font with
+   `font-weight: 300 700;` ranges in the Google CSS that the regex
+   does not match — Fraunces stays on the Google CDN until a
+   fetch_fonts.py v2. Once ALL three families self-host successfully,
+   tighten _ACCOUNT_PAGE_CSP in apin_server.py to drop the
+   `https://fonts.googleapis.com` allowlist from style-src and the
+   `https://fonts.gstatic.com` allowlist from font-src. */
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/fonts/inter-w400.woff2') format('woff2'),local('Inter');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/fonts/inter-w500.woff2') format('woff2'),local('Inter Medium');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;
+  src:url('/fonts/inter-w600.woff2') format('woff2'),local('Inter SemiBold');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;
+  src:url('/fonts/inter-w700.woff2') format('woff2'),local('Inter Bold');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w400.woff2') format('woff2'),local('JetBrains Mono');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w500.woff2') format('woff2'),local('JetBrains Mono Medium');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:600;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w600.woff2') format('woff2'),local('JetBrains Mono SemiBold');}
+:root{
+  --paper:#fbf9f3; --paper-deep:#e9e2d1; --paper-edge:#c7bca9;
+  --ink:#1a1612; --ink-soft:#5a5246;
+  --accent-green:#2f6f3e; --accent-ochre:#b87d1e; --accent-crimson:#b01820;
+  --accent-blue:#2d6a96;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#f4efe6;color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  min-height:100vh;
+}
+[hidden]{display:none !important}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0}
+a{color:var(--accent-green);text-decoration:none}
+a:hover{text-decoration:underline}
+
+.page{max-width:960px;margin:0 auto;padding:28px 24px 60px}
+
+/* ── header ──────────────────────────────────────────── */
+.masthead{
+  display:flex;align-items:baseline;justify-content:space-between;
+  margin-bottom:6px;gap:24px;
+}
+.masthead .crumbs{
+  font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);
+}
+.masthead .crumbs a{color:var(--accent-green);font-style:normal}
+.masthead .acct{
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;
+  color:var(--ink-soft);letter-spacing:0.02em;
+}
+h1{
+  font-family:'Fraunces',serif;font-weight:500;font-size:34px;
+  letter-spacing:-0.015em;font-variation-settings:'SOFT' 30,'WONK' 0;
+  margin-bottom:2px;
+}
+.subtitle{
+  font-family:'Fraunces',serif;font-style:italic;font-size:15px;
+  color:var(--ink-soft);margin-bottom:18px;
+}
+
+/* ── ribbon counter ──────────────────────────────────── */
+.ribbon{
+  display:flex;align-items:center;gap:20px;
+  font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);margin-bottom:20px;
+  padding:6px 0;
+  border-top:1px dashed var(--paper-edge);
+  border-bottom:1px dashed var(--paper-edge);
+}
+.ribbon .count{
+  color:var(--ink);font-weight:500;font-style:normal;
+  font-family:'Inter',sans-serif;
+}
+.ribbon .sep{color:var(--paper-edge)}
+
+/* ── action bar ──────────────────────────────────────── */
+.action-bar{
+  display:flex;align-items:center;gap:10px;
+  flex-wrap:wrap;margin-bottom:18px;
+}
+.btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:8px 16px;border-radius:8px;
+  font-family:'Inter',sans-serif;font-weight:500;font-size:13.5px;
+  border:1.5px solid var(--paper-edge);
+  background:var(--paper);
+  transition:transform .12s, border-color .12s, background .12s;
+}
+.btn:hover{transform:translateY(-1px);border-color:var(--ink-soft)}
+.btn:active{transform:translateY(0)}
+.btn-primary{
+  background:var(--ink);color:var(--paper);border-color:var(--ink);
+}
+.btn-primary:hover{background:#000}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--ink-soft)}
+.btn-ghost:hover{color:var(--ink);background:var(--paper)}
+.icon{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:14px;line-height:1}
+
+select.filter, input.search{
+  font:inherit;padding:7px 12px;border-radius:8px;
+  border:1.5px solid var(--paper-edge);background:var(--paper);
+  font-size:13.5px;
+}
+input.search{flex:1;min-width:140px}
+input.search::placeholder{color:var(--ink-soft);font-style:italic}
+
+/* ── card grid ───────────────────────────────────────── */
+#cards{display:flex;flex-direction:column;gap:14px}
+
+.card{
+  background:var(--paper);
+  border:1px solid var(--paper-edge);
+  border-radius:10px;
+  padding:18px 22px;
+  position:relative;
+  box-shadow:0 1px 2px rgba(26,22,18,0.05);
+  transition:transform .15s, box-shadow .15s;
+  cursor:default;
+}
+.card:hover{
+  transform:translateY(-1px);
+  box-shadow:0 3px 8px rgba(26,22,18,0.08);
+}
+.card.card-active{cursor:pointer}
+.card.card-active:hover{border-color:var(--ink-soft)}
+
+/* tape decoration */
+.card::before{
+  content:'';position:absolute;top:-7px;right:32px;
+  width:42px;height:14px;
+  background:repeating-linear-gradient(45deg,#e8d9b8 0 5px,#e0cea3 5px 10px);
+  opacity:0.85;border-radius:1px;transform:rotate(-2deg);
+  pointer-events:none;
+}
+
+.card-head{
+  display:flex;align-items:baseline;gap:10px;margin-bottom:6px;
+}
+.card-name{
+  font-family:'Fraunces',serif;font-weight:500;font-size:18px;
+  letter-spacing:-0.005em;color:var(--ink);
+  font-variation-settings:'SOFT' 30;
+}
+.status-chip{
+  margin-left:auto;
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;
+  letter-spacing:0.04em;text-transform:uppercase;
+  padding:3px 10px;border-radius:99px;
+  border:1px solid var(--paper-edge);background:#fff;
+}
+.status-dot{
+  display:inline-block;width:8px;height:8px;border-radius:50%;
+  background:var(--paper-edge);
+}
+.s-active   .status-dot{background:var(--accent-green)}
+.s-active   .status-chip{color:var(--accent-green);border-color:#a8c9af}
+.s-rotating .status-dot{background:var(--accent-ochre)}
+.s-rotating .status-chip{color:var(--accent-ochre);border-color:#d8b67a}
+.s-disabled .status-dot{background:var(--ink-soft)}
+.s-disabled .status-chip{color:var(--ink-soft)}
+.s-expired  .status-dot{background:var(--accent-crimson)}
+.s-expired  .status-chip{color:var(--accent-crimson);border-color:#d99a9d}
+.s-compromised .status-dot{background:var(--accent-crimson)}
+.s-compromised .status-chip{color:var(--accent-crimson);border-color:#d99a9d}
+.s-test     .status-dot{background:var(--accent-blue)}
+.s-test     .status-chip{color:var(--accent-blue);border-color:#a8c4d8}
+
+.card .env-pill{
+  font-family:'JetBrains Mono',monospace;font-size:10px;
+  padding:2px 7px;border-radius:4px;
+  background:var(--paper-deep);color:var(--ink-soft);
+  letter-spacing:0.05em;text-transform:uppercase;
+}
+.card .env-pill.env-test{background:#dde7f0;color:#2d6a96}
+
+.token-mask{
+  font-family:'JetBrains Mono',monospace;font-size:13px;
+  color:var(--ink-soft);padding:2px 0;
+  letter-spacing:0.02em;
+}
+.token-mask .mask{color:var(--paper-edge);letter-spacing:0.1em}
+.token-mask .last4{color:var(--ink);font-weight:500}
+
+.meta-row{
+  display:flex;flex-wrap:wrap;gap:14px;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;
+  color:var(--ink-soft);margin-top:6px;letter-spacing:0.01em;
+}
+.meta-row .pip{color:var(--paper-edge);margin:0 2px}
+
+.scopes-row{
+  display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;
+}
+.scope-tag{
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  padding:2px 7px;border-radius:4px;
+  background:#eee5cf;color:#766248;
+  letter-spacing:0.02em;
+}
+
+/* ── empty / loading / error ─────────────────────────── */
+.placeholder{
+  background:var(--paper);
+  border:2px dashed var(--paper-edge);
+  border-radius:10px;
+  padding:48px 32px;
+  text-align:center;
+}
+.placeholder .emoji{font-size:42px;display:block;margin-bottom:14px;opacity:0.7}
+/* Phase 8.G · hand-drawn icon variant used by keys.js placeholders. */
+.placeholder .hd-icon{display:inline-flex;align-items:center;justify-content:center;
+  width:64px;height:64px;border-radius:16px;background:var(--paper-deep,#e9e2d1);
+  color:var(--ink-soft,#5a5246);margin:0 auto 16px}
+.placeholder .hd-icon svg{width:32px;height:32px}
+.error-card .hd-icon-warning{display:inline-flex;align-items:center;justify-content:center;
+  width:36px;height:36px;border-radius:9px;background:#fae7c8;color:#b87d1e;
+  margin-right:10px;flex-shrink:0}
+.error-card .hd-icon-warning svg{width:20px;height:20px}
+.btn .btn-icon{width:14px;height:14px;margin-right:6px;vertical-align:-2px}
+.placeholder h2{
+  font-family:'Fraunces',serif;font-style:italic;font-weight:400;
+  font-size:22px;color:var(--ink);margin-bottom:10px;
+}
+.placeholder p{color:var(--ink-soft);max-width:380px;margin:0 auto 18px}
+.placeholder .actions{margin-top:18px}
+
+.skeleton-card{
+  background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:10px;padding:18px 22px;
+}
+.skel-line{
+  height:12px;background:linear-gradient(90deg,#e8e0cf 0%,#f4ecda 50%,#e8e0cf 100%);
+  background-size:200% 100%;
+  animation:shimmer 1.4s ease-in-out infinite;
+  border-radius:4px;margin-bottom:8px;
+}
+.skel-line.w-30{width:30%}
+.skel-line.w-50{width:50%}
+.skel-line.w-70{width:70%}
+@keyframes shimmer{
+  0%{background-position:100% 0}
+  100%{background-position:-100% 0}
+}
+
+.error-card{
+  background:#fdf1ea;border:1px solid #d9b292;
+  border-radius:10px;padding:18px 22px;
+  display:flex;align-items:center;gap:14px;
+}
+.error-card .icon{font-size:20px;color:var(--accent-ochre)}
+
+/* ── pagination ──────────────────────────────────────── */
+.pager{
+  margin-top:22px;text-align:center;
+  font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);
+}
+.pager .controls{margin-top:8px;display:flex;justify-content:center;gap:10px}
+
+/* ── footer ──────────────────────────────────────────── */
+.foot{
+  margin-top:60px;padding-top:14px;
+  border-top:1px dashed var(--paper-edge);
+  font-family:'Fraunces',serif;font-style:italic;font-size:12px;
+  color:var(--ink-soft);text-align:center;
+}
+
+/* ── session-expired modal (FX-E) ─────────────────────── */
+.modal-backdrop{
+  position:fixed;inset:0;
+  background:rgba(26,22,18,0.55);
+  display:flex;align-items:center;justify-content:center;
+  z-index:9999;padding:24px;
+}
+.modal-card{
+  background:var(--paper);
+  border:1px solid var(--paper-edge);
+  border-radius:12px;
+  padding:32px 30px 26px;
+  max-width:420px;width:100%;
+  box-shadow:0 8px 28px rgba(26,22,18,0.25);
+  text-align:center;
+}
+.modal-card .emoji{
+  font-size:36px;display:block;margin-bottom:10px;
+}
+/* Phase 8.G · hand-drawn SVG variant of .emoji for modal headers.
+   `.modal-icon` is a circle wrapper around a 28×28 SVG, paper-cream bg.
+   Variants: `.danger` for delete/warning, `.locked` for sudo/expiry. */
+.modal-card .modal-icon{
+  width:56px;height:56px;border-radius:14px;
+  background:var(--paper-bg,#e9e2d1);color:var(--ink-soft,#5a5246);
+  display:inline-flex;align-items:center;justify-content:center;
+  margin:0 auto 12px;
+}
+.modal-card .modal-icon svg{width:28px;height:28px}
+.modal-card .modal-icon.danger{background:#f6cfd2;color:#b01820}
+.modal-card .modal-icon.locked{background:#fae7c8;color:#b87d1e}
+.modal-card .modal-icon.success{background:#d8ecd8;color:#2f6f3e}
+.modal-card h2{
+  font-family:'Fraunces',serif;font-style:italic;font-weight:400;
+  font-size:22px;color:var(--ink);margin-bottom:10px;
+}
+.modal-card p{
+  color:var(--ink-soft);margin-bottom:20px;font-size:14px;
+}
+.modal-card .btn{display:inline-flex;justify-content:center;min-width:140px}
+
+/* ── Phase 3.4: wizard + one-time-view modal styles ──── */
+.modal-card-wide{
+  max-width:560px;text-align:left;
+}
+.modal-subtitle{
+  font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);margin-bottom:18px;text-align:center;
+}
+.wizard-form{display:flex;flex-direction:column;gap:14px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field-label{
+  font-family:'Inter',sans-serif;font-size:12.5px;font-weight:600;
+  color:var(--ink);letter-spacing:0.02em;
+}
+.field-label .req{color:var(--accent-crimson);font-weight:400;margin-left:2px}
+.field-label .opt{
+  color:var(--ink-soft);font-weight:400;font-style:italic;
+  font-size:11.5px;margin-left:4px;
+}
+.field-hint{
+  font-family:'Fraunces',serif;font-style:italic;font-size:12px;
+  color:var(--ink-soft);
+}
+/* Phase 8.G fix · explicit Inter on text inputs — was `font:inherit`,
+   which pulled italic-Fraunces from the modal card and made placeholders
+   render in serif italic. Inter + non-italic + the right size restores
+   the "normal form input" appearance. Same for the date input's value. */
+.wizard-form input[type="text"],
+.wizard-form input[type="number"],
+.wizard-form input[type="date"],
+.wizard-form input[type="password"],
+.wizard-form textarea{
+  font-family:'Inter',system-ui,sans-serif;
+  font-style:normal;
+  font-weight:400;
+  font-size:13.5px;
+  color:var(--ink);
+  padding:8px 12px;
+  border-radius:8px;
+  border:1.5px solid var(--paper-edge);
+  background:#fff;
+  width:100%;
+  transition:border-color .12s, box-shadow .12s;
+}
+.wizard-form textarea{min-height:60px;resize:vertical}
+.wizard-form input:focus,
+.wizard-form textarea:focus{
+  outline:none;border-color:var(--ink-soft);
+  box-shadow:0 0 0 3px rgba(47,111,62,0.10);
+}
+/* Placeholders match the field-hint vocabulary (italic Fraunces, muted
+   ink) but are noticeably lighter so the empty / filled distinction
+   reads at a glance. */
+.wizard-form input::placeholder,
+.wizard-form textarea::placeholder{
+  font-family:'Inter',system-ui,sans-serif;
+  font-style:normal;font-weight:400;
+  color:#a59885;
+  opacity:1;
+}
+/* Native date-picker calendar indicator — tone it down so it doesn't
+   visually shout against the paper aesthetic. */
+.wizard-form input[type="date"]::-webkit-calendar-picker-indicator{
+  cursor:pointer;opacity:0.5;filter:saturate(0);
+  transition:opacity .12s;
+}
+.wizard-form input[type="date"]:hover::-webkit-calendar-picker-indicator{
+  opacity:0.9;
+}
+
+/* ── Hand-drawn-style radios + checkboxes (Phase 8.G) ──────────────
+   The defaults are too operating-system-y for the paper aesthetic.
+   Strategy: `appearance: none` to suppress the native control, then
+   draw our own square / circle in paper-cream with paper-edge border.
+   `:checked` fills with accent-green and renders a checkmark / dot.
+   The check uses a tiny inline SVG (URL-encoded) so we don't need a
+   second DOM node. */
+.wizard-form input[type="checkbox"],
+.wizard-form input[type="radio"]{
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
+  width:16px;height:16px;
+  border:1.5px solid var(--paper-edge);
+  background:#fff;
+  cursor:pointer;
+  flex-shrink:0;
+  margin:0;
+  position:relative;
+  display:inline-block;
+  transition:border-color .12s, background .12s, box-shadow .12s;
+}
+.wizard-form input[type="checkbox"]{border-radius:4px}
+.wizard-form input[type="radio"]   {border-radius:50%}
+.wizard-form input[type="checkbox"]:hover,
+.wizard-form input[type="radio"]:hover{border-color:var(--ink-soft)}
+.wizard-form input[type="checkbox"]:focus-visible,
+.wizard-form input[type="radio"]:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 3px rgba(47,111,62,0.18);
+  border-color:var(--accent-green);
+}
+.wizard-form input[type="checkbox"]:checked,
+.wizard-form input[type="radio"]:checked{
+  background:var(--accent-green);
+  border-color:var(--accent-green);
+}
+/* Checkmark — i-check polyline rendered as URL-encoded SVG, in
+   paper-cream so it pops against the green fill. Stroke-width is 3
+   here (vs the sprite's 1.5) because the icon is 12 px and a thicker
+   stroke holds up better at that size. */
+.wizard-form input[type="checkbox"]:checked::after{
+  content:"";position:absolute;inset:0;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fbf9f3' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:center;background-size:11px 11px;
+}
+/* Radio dot — solid circle in paper-cream */
+.wizard-form input[type="radio"]:checked::after{
+  content:"";position:absolute;
+  top:50%;left:50%;transform:translate(-50%,-50%);
+  width:6px;height:6px;border-radius:50%;
+  background:#fbf9f3;
+}
+
+.radio-row{display:flex;gap:18px;font-size:13.5px;align-items:center;margin-top:2px}
+.radio-row label{cursor:pointer;display:inline-flex;gap:8px;align-items:center;
+  font-family:'Inter',system-ui,sans-serif}
+
+.scope-checks{
+  display:grid;grid-template-columns:1fr 1fr;
+  gap:6px 14px;font-size:13px;font-family:'JetBrains Mono',monospace;
+  margin-top:4px;
+}
+.scope-checks label{cursor:pointer;display:inline-flex;gap:8px;align-items:center;
+  padding:3px 0;transition:color .12s}
+.scope-checks label:hover{color:var(--accent-green)}
+
+details.field summary{
+  cursor:pointer;list-style:none;padding:6px 0;
+  border-top:1px dashed var(--paper-edge);
+  margin-top:4px;
+}
+details.field summary::before{content:'▸ '}
+details.field[open] summary::before{content:'▾ '}
+.advanced-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;margin-top:8px;
+}
+.field-wide{grid-column:1 / -1}
+
+.modal-actions{
+  display:flex;justify-content:flex-end;gap:10px;
+  margin-top:8px;align-items:center;flex-wrap:wrap;
+}
+.modal-actions .btn{min-width:auto;padding:8px 18px}
+
+.error-box{
+  background:#fdf1ea;border:1px solid #d9b292;
+  border-radius:8px;padding:8px 12px;
+  font-size:13px;color:var(--accent-crimson);
+  font-family:'Inter',sans-serif;
+}
+
+#sudo-password{
+  width:100%;font-size:14px;margin-bottom:12px;
+  padding:10px 14px;border-radius:8px;
+  border:1.5px solid var(--paper-edge);
+}
+
+/* ── One-time-view modal ─────────────────────────────── */
+.onetime-warning{
+  background:#fffbe6;border:1px solid #e9d889;
+  border-radius:8px;padding:12px 14px;margin-bottom:16px;
+  font-size:13px;color:var(--ink);
+}
+.onetime-warning strong{color:var(--accent-crimson)}
+
+.token-display{
+  display:flex;gap:10px;align-items:center;margin-bottom:6px;
+  background:#1a1612;border-radius:8px;padding:12px 14px;
+}
+.token-display code{
+  flex:1;font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  color:#e8d9b8;word-break:break-all;
+  background:none;
+}
+.token-display .btn{
+  background:#3a3530;color:var(--paper);border-color:#3a3530;
+  flex-shrink:0;min-width:auto;padding:6px 14px;
+}
+.token-display .btn:hover{background:#4a4540}
+.copy-feedback{
+  font-family:'Fraunces',serif;font-style:italic;font-size:12px;
+  color:var(--accent-green);text-align:right;margin:0 0 8px 0;
+}
+/* WI-P4-DL-SPLIT: download buttons row */
+.dl-row{
+  display:flex;align-items:center;gap:8px;margin-bottom:14px;
+  flex-wrap:wrap;
+}
+.dl-label{
+  font-family:'Fraunces',serif;font-style:italic;font-size:12px;
+  color:var(--ink-soft);
+}
+.btn-sm{
+  padding:5px 12px;font-size:12px;min-width:auto;
+}
+.onetime-meta{
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;
+  color:var(--ink-soft);margin-bottom:14px;letter-spacing:0.01em;
+}
+.onetime-meta .row{display:flex;gap:10px;padding:2px 0}
+.onetime-meta .row .k{min-width:100px;color:var(--paper-edge)}
+.ack-row{
+  font-size:13px;display:inline-flex;gap:6px;
+  align-items:center;cursor:pointer;flex:1;
+}
+
+/* ── Phase 5.4: detail modal ─────────────────────────── */
+.detail-head{
+  display:flex;align-items:center;gap:12px;
+  margin-bottom:14px;border-bottom:1px dashed var(--paper-edge);
+  padding-bottom:12px;
+}
+.detail-head h2{
+  font-family:'Fraunces',serif;font-weight:500;font-size:22px;
+  letter-spacing:-0.005em;margin:0;flex:1;
+}
+.detail-close-x{
+  font-size:22px;line-height:1;padding:2px 10px;border-radius:6px;
+  border:1px solid transparent;color:var(--ink-soft);
+}
+.detail-close-x:hover{border-color:var(--paper-edge);color:var(--ink)}
+
+.detail-token{
+  font-family:'JetBrains Mono',monospace;font-size:13px;
+  background:var(--paper-deep);border-radius:8px;
+  padding:10px 14px;margin-bottom:14px;
+  display:flex;align-items:center;gap:8px;
+  color:var(--ink-soft);
+}
+.detail-token .mask{color:var(--paper-edge);letter-spacing:0.1em}
+.detail-token .last4{color:var(--ink);font-weight:500}
+.detail-env-pill{
+  margin-left:auto;
+  font-family:'JetBrains Mono',monospace;font-size:10px;
+  padding:2px 8px;border-radius:4px;
+  background:#fff;color:var(--ink-soft);
+  letter-spacing:0.05em;text-transform:uppercase;
+}
+.detail-env-pill.env-test{background:#dde7f0;color:#2d6a96}
+
+.detail-grid{
+  display:grid;grid-template-columns:auto 1fr;
+  gap:6px 16px;font-size:13px;margin-bottom:18px;
+}
+.detail-grid dt{
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;
+  color:var(--ink-soft);letter-spacing:0.02em;
+}
+.detail-grid dd{margin:0;color:var(--ink)}
+
+.detail-section{margin-bottom:14px}
+.detail-section h3{
+  font-family:'Inter',sans-serif;font-size:12px;font-weight:600;
+  text-transform:uppercase;letter-spacing:0.05em;
+  color:var(--ink-soft);margin-bottom:6px;
+}
+.detail-section p{font-size:13px;color:var(--ink);margin:0}
+.detail-section .meta-row{
+  font-family:'JetBrains Mono',monospace;font-size:12px;
+  color:var(--ink);gap:8px;
+}
+.detail-section .meta-row .placeholder-text{
+  color:var(--ink-soft);font-style:italic;font-family:'Fraunces',serif;
+}
+
+#detail-rotate-btn{
+  background:var(--accent-ochre);color:#fff;border-color:var(--accent-ochre);
+}
+#detail-rotate-btn:hover{background:#a06b13}
+
+/* Phase 5.4 FX-P5-4: grace-period radio block */
+.grace-row{
+  display:flex;flex-wrap:wrap;gap:14px;font-size:13px;margin-top:2px;
+}
+.grace-row label{cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.grace-row .default-tag{
+  font-family:'Fraunces',serif;font-style:italic;font-size:11px;
+  color:var(--accent-green);margin-left:4px;
+}
+.grace-custom{margin-top:8px;display:flex;gap:10px;align-items:center}
+.grace-custom input{
+  width:120px;padding:6px 10px;border-radius:6px;
+  border:1.5px solid var(--paper-edge);font:inherit;font-size:13px;
+}
+.field-hint{
+  font-family:'Fraunces',serif;font-style:italic;font-size:12px;
+  color:var(--ink-soft);
+}
+
+/* ── mobile ──────────────────────────────────────────── */
+@media (max-width:560px){
+  .page{padding:18px 14px 40px}
+  h1{font-size:26px}
+  .ribbon{flex-wrap:wrap;gap:8px}
+  .card{padding:14px 16px}
+  .card .env-pill{display:none}
+  .meta-row{font-size:10.5px}
+  /* FIX-T5 (PDA-P3.3-3.4-R1 F3): collapse 2-col grids on phones.
+     The wizard had .scope-checks (8 items) and .advanced-grid (4 cells)
+     stuck at 2 columns even at 360 px wide, producing cramped checkboxes
+     and overflow on the right edge. */
+  .scope-checks{grid-template-columns:1fr}
+  .advanced-grid{grid-template-columns:1fr}
+  .modal-card-wide{padding:24px 20px}
+}
+</style>
+</head>
+<body>
+<!-- @ICON_SPRITE@ -->
+<!-- @CONSOLE_NAV@ -->
+<div class="page">
+
+  <div class="masthead">
+    <div class="crumbs"><a href="/dashboard">dashboard</a> · API Console</div>
+    <div class="acct" id="acct-label">signed in</div>
+  </div>
+
+  <h1>API keys</h1>
+  <p class="subtitle">your tokens for calling the APIN inference + Console API</p>
+
+  <div class="ribbon" id="ribbon" hidden>
+    <span><span class="count" id="count-active">0</span> active</span>
+    <span class="sep">·</span>
+    <span><span class="count" id="count-rotating">0</span> rotating</span>
+    <span class="sep">·</span>
+    <span><span class="count" id="count-disabled">0</span> disabled</span>
+    <span class="sep">·</span>
+    <span><span class="count" id="count-other">0</span> other</span>
+  </div>
+
+  <div class="action-bar">
+    <button class="btn btn-primary" id="btn-new">
+      <span class="icon">+</span> new key
+    </button>
+    <select class="filter" id="f-env" aria-label="environment filter">
+      <option value="all">all environments</option>
+      <option value="live">live</option>
+      <option value="test">test</option>
+    </select>
+    <select class="filter" id="f-status" aria-label="status filter">
+      <option value="all">all statuses</option>
+      <option value="active">active</option>
+      <option value="rotating">rotating</option>
+      <option value="disabled">disabled</option>
+      <option value="expired">expired</option>
+      <option value="compromised">compromised</option>
+    </select>
+    <input class="search" id="f-search" type="search" placeholder="search by name…" maxlength="80">
+  </div>
+
+  <div id="cards" role="list" aria-live="polite" aria-busy="true">
+    <!-- skeleton cards while loading -->
+    <div class="skeleton-card"><div class="skel-line w-50"></div><div class="skel-line w-70"></div><div class="skel-line w-30"></div></div>
+    <div class="skeleton-card"><div class="skel-line w-50"></div><div class="skel-line w-70"></div><div class="skel-line w-30"></div></div>
+    <div class="skeleton-card"><div class="skel-line w-50"></div><div class="skel-line w-70"></div><div class="skel-line w-30"></div></div>
+  </div>
+
+  <div class="pager" id="pager" hidden></div>
+
+  <div class="foot">
+    Tokens are shown ONCE on creation. APIN never stores plaintext.
+    <br>Keep them in your password manager or secrets vault.
+  </div>
+
+</div>
+
+<!-- Session-expired modal (FX-E from PDA-P3.1-R1 F01).
+     Shown when /api/account/keys returns invalid_or_missing_token.
+     Replaces the previous broken /dashboard?next=... redirect. -->
+<div class="modal-backdrop" id="session-expired-modal" role="dialog"
+     aria-modal="true" aria-labelledby="session-expired-title" hidden>
+  <div class="modal-card">
+    <span class="modal-icon locked" aria-hidden="true">
+      <svg><use href="#i-lock"/></svg>
+    </span>
+    <h2 id="session-expired-title">your session expired</h2>
+    <p>Sign in again to see your API keys.</p>
+    <a class="btn btn-primary" id="session-expired-signin" href="/dashboard">
+      sign in &rarr;
+    </a>
+  </div>
+</div>
+
+<!-- ── Phase 3.4: Create-key wizard ─────────────────────────────── -->
+<div class="modal-backdrop" id="wizard-modal" role="dialog"
+     aria-modal="true" aria-labelledby="wizard-title" hidden>
+  <div class="modal-card modal-card-wide">
+    <h2 id="wizard-title">mint a new key</h2>
+    <p class="modal-subtitle">tokens are shown once on creation &mdash; save yours immediately</p>
+    <form id="wizard-form" class="wizard-form" novalidate>
+      <label class="field">
+        <span class="field-label">name <span class="req">*</span></span>
+        <input type="text" id="w-name" name="name" maxlength="80"
+               placeholder="my-app prod" required autocomplete="off">
+        <span class="field-hint">1&ndash;80 chars; describe where this key lives</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">environment <span class="req">*</span></span>
+        <div class="radio-row">
+          <label><input type="radio" name="environment" value="live" checked> live</label>
+          <label><input type="radio" name="environment" value="test"> test</label>
+        </div>
+        <span class="field-hint">test keys are rate-limited and never bill</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">scopes <span class="req">*</span></span>
+        <div class="scope-checks" id="w-scopes">
+          <label><input type="checkbox" name="scope" value="predict:write" checked> predict:write</label>
+          <label><input type="checkbox" name="scope" value="predict:read"> predict:read</label>
+          <label><input type="checkbox" name="scope" value="reports:read"> reports:read</label>
+          <label><input type="checkbox" name="scope" value="reports:write"> reports:write</label>
+          <label><input type="checkbox" name="scope" value="models:read"> models:read</label>
+          <label><input type="checkbox" name="scope" value="feedback:write"> feedback:write</label>
+          <label><input type="checkbox" name="scope" value="usage:read"> usage:read</label>
+          <label><input type="checkbox" name="scope" value="account:read"> account:read</label>
+        </div>
+        <span class="field-hint">pick the minimum your app needs (least-privilege)</span>
+      </label>
+
+      <details class="field">
+        <summary class="field-label">advanced options</summary>
+        <div class="advanced-grid">
+          <label class="field">
+            <span class="field-label">expires at <span class="opt">(optional)</span></span>
+            <input type="date" id="w-expires-at" name="expires_at">
+          </label>
+          <label class="field">
+            <span class="field-label">rate limit / min <span class="opt">(optional)</span></span>
+            <input type="number" id="w-rate" name="rate_limit_per_min" min="1" max="10000" placeholder="60">
+          </label>
+          <label class="field">
+            <span class="field-label">quota / day <span class="opt">(optional)</span></span>
+            <input type="number" id="w-quota" name="quota_per_day" min="1" max="1000000" placeholder="10000">
+          </label>
+          <label class="field field-wide">
+            <span class="field-label">note <span class="opt">(optional)</span></span>
+            <textarea id="w-note" name="note" maxlength="500"
+                      placeholder="why this key exists, who owns it, where it runs"></textarea>
+          </label>
+        </div>
+      </details>
+
+      <div id="wizard-error" class="error-box" hidden></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="wizard-cancel">cancel</button>
+        <button type="submit" class="btn btn-primary" id="wizard-submit">
+          <span class="btn-label">mint key</span>
+          <span class="btn-spinner" hidden>&hellip;</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Phase 5.4: Key detail modal + rotate flow ─────────────────── -->
+<div class="modal-backdrop" id="detail-modal" role="dialog"
+     aria-modal="true" aria-labelledby="detail-title" hidden>
+  <div class="modal-card modal-card-wide">
+    <div class="detail-head">
+      <h2 id="detail-title">key</h2>
+      <span id="detail-status-chip" class="status-chip"></span>
+      <button type="button" class="btn-ghost detail-close-x" id="detail-close-x"
+              aria-label="close detail">&times;</button>
+    </div>
+
+    <div class="detail-token">
+      <span id="detail-token-prefix"></span><span class="mask">******</span><span id="detail-token-last4" class="last4"></span>
+      <span class="detail-env-pill" id="detail-env-pill"></span>
+    </div>
+
+    <dl class="detail-grid">
+      <dt>public id</dt>      <dd id="d-public-id"></dd>
+      <dt>created</dt>        <dd id="d-created"></dd>
+      <dt>expires</dt>        <dd id="d-expires"></dd>
+      <dt>last used</dt>      <dd id="d-last-used"></dd>
+      <dt>rate / min</dt>     <dd id="d-rate"></dd>
+      <dt>quota / day</dt>    <dd id="d-quota"></dd>
+    </dl>
+
+    <div class="detail-section">
+      <h3>scopes</h3>
+      <div class="scopes-row" id="d-scopes"></div>
+    </div>
+
+    <div class="detail-section" id="d-iplist-section">
+      <h3>IP allowlist</h3>
+      <div class="meta-row" id="d-iplist"></div>
+    </div>
+
+    <div class="detail-section" id="d-origlist-section">
+      <h3>origin allowlist</h3>
+      <div class="meta-row" id="d-origlist"></div>
+    </div>
+
+    <div class="detail-section" id="d-note-section" hidden>
+      <h3>note</h3>
+      <p id="d-note"></p>
+    </div>
+
+    <!-- FX-P5-4 (VER-P5-R1 5.4a): grace-period radio per spec §15.7.
+         Choose how long the OLD plaintext stays valid AFTER rotation —
+         lets long-running batches finish before their key is revoked. -->
+    <div class="detail-section">
+      <h3>grace period <span class="opt">(during rotation)</span></h3>
+      <div class="grace-row">
+        <label><input type="radio" name="grace" value="3600">    1 hour</label>
+        <label><input type="radio" name="grace" value="172800" checked> 48 hours <span class="default-tag">default</span></label>
+        <label><input type="radio" name="grace" value="604800">  7 days</label>
+        <label><input type="radio" name="grace" value="custom">  custom</label>
+      </div>
+      <div class="grace-custom" id="grace-custom-row" hidden>
+        <input type="number" id="grace-custom-hours" min="0" max="720"
+               step="1" placeholder="hours (0&ndash;720)">
+        <span class="field-hint">old key stays valid for this many hours after rotation</span>
+      </div>
+    </div>
+
+    <div id="detail-error" class="error-box" hidden></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="detail-close">close</button>
+      <button type="button" class="btn" id="detail-delete-btn">
+        <span class="btn-label">delete</span>
+      </button>
+      <button type="button" class="btn" id="detail-edit-btn">
+        <span class="btn-label">edit</span>
+      </button>
+      <button type="button" class="btn" id="detail-rotate-btn">
+        <span class="btn-label">rotate key</span>
+        <span class="btn-spinner" hidden>&hellip;</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Phase 3.4: Sudo step-up modal ─────────────────────────────── -->
+<div class="modal-backdrop" id="sudo-modal" role="dialog"
+     aria-modal="true" aria-labelledby="sudo-title" hidden>
+  <div class="modal-card">
+    <span class="modal-icon locked" aria-hidden="true">
+      <svg><use href="#i-lock"/></svg>
+    </span>
+    <h2 id="sudo-title">confirm your identity</h2>
+    <p>this action requires re-authentication. enter your password to continue.</p>
+    <form id="sudo-form">
+      <input type="password" id="sudo-password" autocomplete="current-password"
+             placeholder="password" required>
+      <div id="sudo-error" class="error-box" hidden></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="sudo-cancel">cancel</button>
+        <button type="submit" class="btn btn-primary" id="sudo-submit">
+          <span class="btn-label">confirm</span>
+          <span class="btn-spinner" hidden>&hellip;</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Phase 6.A: Edit modal ────────────────────────────────────── -->
+<div class="modal-backdrop" id="edit-modal" role="dialog"
+     aria-modal="true" aria-labelledby="edit-title" hidden>
+  <div class="modal-card modal-card-wide">
+    <h2 id="edit-title">edit key</h2>
+    <p class="modal-subtitle">change any subset of fields and click save</p>
+    <form id="edit-form" class="wizard-form" novalidate>
+      <input type="hidden" id="e-public-id" name="public_id">
+      <label class="field">
+        <span class="field-label">name</span>
+        <input type="text" id="e-name" name="name" maxlength="80" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label">scopes</span>
+        <div class="scope-checks" id="e-scopes">
+          <label><input type="checkbox" name="e-scope" value="predict:write"> predict:write</label>
+          <label><input type="checkbox" name="e-scope" value="predict:read"> predict:read</label>
+          <label><input type="checkbox" name="e-scope" value="reports:read"> reports:read</label>
+          <label><input type="checkbox" name="e-scope" value="reports:write"> reports:write</label>
+          <label><input type="checkbox" name="e-scope" value="models:read"> models:read</label>
+          <label><input type="checkbox" name="e-scope" value="feedback:write"> feedback:write</label>
+          <label><input type="checkbox" name="e-scope" value="usage:read"> usage:read</label>
+          <label><input type="checkbox" name="e-scope" value="account:read"> account:read</label>
+        </div>
+      </label>
+      <div class="advanced-grid">
+        <label class="field">
+          <span class="field-label">rate / min</span>
+          <input type="number" id="e-rate" name="rate_limit_per_min" min="1" max="10000">
+        </label>
+        <label class="field">
+          <span class="field-label">quota / day</span>
+          <input type="number" id="e-quota" name="quota_per_day" min="1" max="1000000">
+        </label>
+        <label class="field field-wide">
+          <span class="field-label">note</span>
+          <textarea id="e-note" name="note" maxlength="500"></textarea>
+        </label>
+      </div>
+      <div id="edit-error" class="error-box" hidden></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="edit-cancel">cancel</button>
+        <button type="submit" class="btn btn-primary" id="edit-submit">
+          <span class="btn-label">save changes</span>
+          <span class="btn-spinner" hidden>&hellip;</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Phase 6.A: Delete confirmation modal ─────────────────────── -->
+<div class="modal-backdrop" id="delete-modal" role="dialog"
+     aria-modal="true" aria-labelledby="delete-title" hidden>
+  <div class="modal-card">
+    <span class="modal-icon danger" aria-hidden="true">
+      <svg><use href="#i-warning"/></svg>
+    </span>
+    <h2 id="delete-title">delete this key?</h2>
+    <p>this is permanent. any service still using <code id="del-name-display"></code>
+       will start receiving <code>401</code> errors.</p>
+    <p class="modal-subtitle" style="font-size:12.5px;color:var(--ink-soft);margin-bottom:14px">
+      if the key is still active it will be disabled automatically before
+      delete &mdash; one click, two server calls. you do not need to disable
+      it yourself first.</p>
+    <p class="modal-subtitle">type the key name to confirm</p>
+    <input type="text" id="del-confirm-input" autocomplete="off"
+           placeholder="key name" style="width:100%;font:inherit;padding:8px 12px;border-radius:8px;border:1.5px solid var(--paper-edge);font-size:13.5px;margin-bottom:12px;">
+    <div id="delete-error" class="error-box" hidden></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="delete-cancel">cancel</button>
+      <button type="button" class="btn" id="delete-confirm-btn" disabled
+              style="background:var(--accent-crimson);color:#fff;border-color:var(--accent-crimson);">
+        <span class="btn-label">delete forever</span>
+        <span class="btn-spinner" hidden>&hellip;</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Phase 3.4: One-time view modal (the token reveal) ─────────── -->
+<div class="modal-backdrop" id="onetime-modal" role="dialog"
+     aria-modal="true" aria-labelledby="onetime-title" hidden>
+  <div class="modal-card modal-card-wide">
+    <span class="modal-icon success" aria-hidden="true">
+      <svg><use href="#i-key"/></svg>
+    </span>
+    <h2 id="onetime-title">save this token now</h2>
+    <p class="onetime-warning">
+      <strong>this is the only time it will be shown.</strong>
+      after you dismiss this dialog the plaintext is gone forever.
+      paste it into your password manager or secrets vault immediately.
+    </p>
+
+    <div class="token-display">
+      <!-- WI-P4-CODE-HARDEN (VER-P3.3-3.4-R1 F24): hardening attributes
+           against password-manager auto-capture of the one-time token.
+           A leaked credential vault entry containing a token defeats the
+           one-time-view ceremony's entire security model. -->
+      <code id="onetime-token-value"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            data-1p-ignore="true"
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"></code>
+      <button type="button" class="btn" id="onetime-copy-btn"
+              aria-label="copy token to clipboard">
+        <span class="icon">⧉</span> copy
+      </button>
+    </div>
+    <p class="copy-feedback" id="onetime-copy-feedback" hidden>copied to clipboard</p>
+
+    <!-- WI-P4-DL-SPLIT (VER-P3.3-3.4-R1 F48): download as common formats. -->
+    <div class="dl-row">
+      <span class="dl-label">save as:</span>
+      <button type="button" class="btn btn-sm" id="dl-env-btn">.env</button>
+      <button type="button" class="btn btn-sm" id="dl-txt-btn">.txt</button>
+      <button type="button" class="btn btn-sm" id="dl-json-btn">.json</button>
+    </div>
+
+    <div class="onetime-meta" id="onetime-meta"></div>
+
+    <div class="modal-actions">
+      <label class="ack-row">
+        <input type="checkbox" id="onetime-ack">
+        I've saved my token in a secure place.
+      </label>
+      <button type="button" class="btn btn-primary" id="onetime-done"
+              disabled>done</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/keys.js" defer></script>
+</body>
+</html>

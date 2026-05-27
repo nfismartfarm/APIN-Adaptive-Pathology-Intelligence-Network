@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="__APIN_CSRF_TOKEN__">
+<title>Alerts · APIN Console</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Phase 7 Wave 5 · Alerts · in-app alert inbox.
+   List with severity filters, bulk mark-read / dismiss, expand-on-click
+   detail panel, auto-poll for new alerts, empty state with educational
+   copy ("alerts surface when ..."). */
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/fonts/inter-w400.woff2') format('woff2'),local('Inter');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/fonts/inter-w500.woff2') format('woff2'),local('Inter Medium');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;
+  src:url('/fonts/inter-w600.woff2') format('woff2'),local('Inter SemiBold');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;
+  src:url('/fonts/inter-w700.woff2') format('woff2'),local('Inter Bold');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w400.woff2') format('woff2'),local('JetBrains Mono');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w500.woff2') format('woff2'),local('JetBrains Mono Medium');}
+:root{
+  --paper:#fbf9f3; --paper-deep:#e9e2d1; --paper-edge:#c7bca9;
+  --ink:#1a1612; --ink-soft:#5a5246;
+  --accent-green:#2f6f3e; --accent-ochre:#b87d1e; --accent-crimson:#b01820;
+  --accent-blue:#2d6a96;
+  --sev-info:#2d6a96; --sev-warn:#b87d1e; --sev-critical:#b01820;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:0 4px 12px rgba(0,0,0,0.06);
+  --shadow-lg:0 12px 32px rgba(0,0,0,0.16);
+  --radius:10px; --radius-sm:6px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#f4efe6;color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;min-height:100vh}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;text-align:left}
+a{color:var(--accent-green);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent-blue);outline-offset:2px}
+[hidden]{display:none !important}
+
+.page{max-width:920px;margin:0 auto;padding:24px 24px 60px}
+.crumbs{font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);margin-bottom:6px}
+.crumbs a{color:var(--accent-green);font-style:normal}
+.masthead{display:flex;align-items:flex-end;justify-content:space-between;
+  gap:18px;margin-bottom:20px;flex-wrap:wrap}
+.masthead h1{font-family:'Fraunces',serif;font-weight:500;font-size:36px;
+  letter-spacing:-0.018em;line-height:1.05}
+.masthead .subtitle{font-family:'Fraunces',serif;font-style:italic;
+  font-size:15px;color:var(--ink-soft);margin-top:4px}
+.masthead .bell{display:inline-flex;align-items:center;gap:8px;
+  font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--ink-soft);
+  padding:7px 14px;background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:14px}
+.masthead .bell .bell-icon{font-size:14px;line-height:1}
+.masthead .bell .bell-count{font-weight:600;color:var(--ink)}
+
+/* ── Toolbar ──────────────────────────────────────────── */
+.toolbar{background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  box-shadow:var(--shadow-sm)}
+.toolbar .group{display:flex;align-items:center;gap:6px}
+.toolbar .group-label{font-family:'Fraunces',serif;font-style:italic;
+  font-size:12px;color:var(--ink-soft);margin-right:4px}
+.filter-chip{font:inherit;font-family:'JetBrains Mono',monospace;font-size:11.5px;
+  padding:5px 12px;border-radius:14px;background:var(--paper-deep);
+  border:1.5px solid var(--paper-edge);color:var(--ink-soft);cursor:pointer;
+  transition:background .12s,border-color .12s,color .12s}
+.filter-chip:hover{border-color:var(--ink-soft);color:var(--ink)}
+.filter-chip.on{background:var(--ink);color:var(--paper);
+  border-color:var(--ink)}
+.filter-chip.on.sev-info     {background:var(--sev-info); border-color:var(--sev-info)}
+.filter-chip.on.sev-warn     {background:var(--sev-warn); border-color:var(--sev-warn)}
+.filter-chip.on.sev-critical {background:var(--sev-critical); border-color:var(--sev-critical)}
+
+.toolbar .spacer{flex:1}
+.toolbar .btn{display:inline-flex;align-items:center;gap:6px;
+  padding:6px 14px;border-radius:var(--radius-sm);font-size:12.5px;
+  border:1.5px solid var(--paper-edge);background:var(--paper);
+  transition:border-color .12s,background .12s,transform .12s}
+.toolbar .btn:hover{border-color:var(--ink-soft);transform:translateY(-1px)}
+.toolbar .btn:disabled{opacity:0.4;pointer-events:none;transform:none}
+
+/* ── Alert list ───────────────────────────────────────── */
+.alert-feed{display:flex;flex-direction:column;gap:10px}
+.alert-card{background:var(--paper);border:1px solid var(--paper-edge);
+  border-left:4px solid var(--paper-edge);border-radius:var(--radius);
+  padding:14px 18px;display:grid;grid-template-columns:1fr auto;gap:14px;
+  align-items:start;transition:border-color .12s,box-shadow .12s,
+    background .12s;cursor:pointer;position:relative}
+.alert-card:hover{box-shadow:var(--shadow-md)}
+.alert-card.unread{background:#fefcf6}
+.alert-card.dismissed{opacity:0.55}
+.alert-card.sev-info     {border-left-color:var(--sev-info)}
+.alert-card.sev-warn     {border-left-color:var(--sev-warn)}
+.alert-card.sev-critical {border-left-color:var(--sev-critical)}
+
+/* Phase 8.H fix · row-level checkboxes removed.
+   The bulk-select pattern was confusing for a notification surface; each
+   row now has always-visible per-row action icons instead. .alert-card
+   grid drops from "checkbox main actions" → "main actions". */
+
+.alert-main{min-width:0}
+.alert-title{font-weight:600;font-size:14.5px;color:var(--ink);
+  margin-bottom:3px;display:flex;align-items:center;gap:8px}
+.alert-title .unread-dot{display:inline-block;width:7px;height:7px;
+  border-radius:50%;background:var(--accent-ochre);flex-shrink:0}
+.alert-body{font-size:13px;color:var(--ink-soft);line-height:1.55;
+  overflow:hidden;text-overflow:ellipsis;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical}
+.alert-card.expanded .alert-body{-webkit-line-clamp:unset;
+  display:block;margin-bottom:8px}
+.alert-meta-row{display:flex;align-items:center;gap:10px;margin-top:8px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-soft);
+  flex-wrap:wrap}
+.alert-code{background:var(--paper-deep);padding:1px 7px;border-radius:8px;
+  border:1px solid var(--paper-edge)}
+.alert-sev{padding:1px 8px;border-radius:8px;font-weight:600;
+  text-transform:uppercase;letter-spacing:0.04em;font-size:10px}
+.alert-sev.sev-info     {background:#e0eaf3;color:var(--sev-info)}
+.alert-sev.sev-warn     {background:#fbe3c2;color:var(--sev-warn)}
+.alert-sev.sev-critical {background:#f4cbc8;color:var(--sev-critical)}
+.alert-time{font-style:italic;font-family:'Fraunces',serif}
+.alert-count{font-weight:500;color:var(--ink-soft)}
+.alert-count.bumped{color:var(--accent-ochre)}
+
+/* Phase 8.H fix · action icons always visible (was hover-only, hidden
+   action affordance was the source of the "interacting doesn't mark
+   read" confusion — the action button was effectively invisible). */
+.alert-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.alert-actions .ic-btn{display:inline-flex;align-items:center;
+  justify-content:center;width:32px;height:32px;border-radius:8px;
+  color:var(--ink-soft);border:1px solid var(--paper-edge);
+  background:var(--paper);
+  transition:background .12s,border-color .12s,color .12s}
+.alert-actions .ic-btn svg{width:14px;height:14px}
+.alert-actions .ic-btn:hover{background:var(--paper-deep);
+  border-color:var(--ink-soft);color:var(--ink)}
+.alert-actions .ic-btn.danger:hover{background:#f6cfd2;
+  border-color:#b01820;color:#b01820}
+.alert-actions .ic-btn.success:hover{background:#d8ecd8;
+  border-color:#2f6f3e;color:#2f6f3e}
+
+.alert-details{margin-top:10px;padding:10px 14px;background:var(--paper-deep);
+  border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;
+  font-size:11.5px;color:var(--ink-soft);white-space:pre-wrap;
+  word-break:break-all;max-height:240px;overflow:auto}
+
+/* Empty / loading states */
+.feed-empty{background:var(--paper);border:1px dashed var(--paper-edge);
+  border-radius:var(--radius);padding:50px 30px;text-align:center;
+  font-family:'Fraunces',serif;color:var(--ink-soft)}
+.feed-empty h3{font-weight:500;font-size:22px;color:var(--ink);
+  margin-bottom:8px;font-style:normal}
+.feed-empty p{font-style:italic;font-size:13.5px;line-height:1.7;
+  max-width:440px;margin:0 auto 14px}
+.feed-empty ul{font-style:italic;font-size:13px;list-style:none;
+  display:inline-block;text-align:left;margin-top:6px}
+.feed-empty li{padding:2px 0}
+.feed-empty li::before{content:'· ';color:var(--accent-ochre);
+  font-weight:bold;padding-right:4px;font-style:normal}
+
+.load-more{display:block;width:100%;padding:12px;text-align:center;
+  font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);border:1px dashed var(--paper-edge);
+  border-radius:var(--radius);background:transparent;cursor:pointer;
+  margin-top:14px;transition:border-color .12s,background .12s,color .12s}
+.load-more:hover{border-color:var(--ink-soft);color:var(--ink);
+  background:var(--paper)}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%)
+  translateY(8px);background:var(--ink);color:var(--paper);
+  padding:10px 22px;border-radius:var(--radius-sm);font-size:13px;
+  font-weight:500;opacity:0;transition:opacity .2s,transform .2s;
+  z-index:9999;pointer-events:none;box-shadow:var(--shadow-lg)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.err{background:var(--accent-crimson)}
+.toast.ok{background:var(--accent-green)}
+
+@media (max-width: 640px){
+  .alert-card{grid-template-columns:auto 1fr;gap:10px}
+  .alert-actions{grid-column:1/-1;opacity:1;justify-content:flex-end}
+}
+</style>
+</head>
+<body>
+<!-- @ICON_SPRITE@ -->
+<!-- @CONSOLE_NAV@ -->
+<div class="page">
+  <div class="crumbs">
+    <a href="/dashboard">dashboard</a> · <a href="/account/api/keys">API Console</a> · Alerts
+  </div>
+
+  <div class="masthead">
+    <div>
+      <h1>Alerts</h1>
+      <p class="subtitle">in-app inbox of security and operational events. No email; check here.</p>
+      <p class="subtitle" style="margin-top:6px">
+        <a href="/account/api/settings#sec-alert-prefs" class="apin-link-arrow">
+          Change alert settings &rarr;
+        </a>
+      </p>
+    </div>
+    <span class="bell" id="bell" aria-label="Unread count">
+      <span class="bell-icon">●</span>
+      <span class="bell-count" id="bell-count">0</span>
+      <span>unread</span>
+    </span>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar" role="toolbar" aria-label="Alert filters">
+    <div class="group" role="group" aria-label="Severity filter">
+      <span class="group-label">severity:</span>
+      <button type="button" class="filter-chip on" data-filter="sev" data-val="">all</button>
+      <button type="button" class="filter-chip sev-info" data-filter="sev" data-val="info">info</button>
+      <button type="button" class="filter-chip sev-warn" data-filter="sev" data-val="warn">warn</button>
+      <button type="button" class="filter-chip sev-critical" data-filter="sev" data-val="critical">critical</button>
+    </div>
+    <div class="group" role="group" aria-label="Read state filter">
+      <span class="group-label">show:</span>
+      <button type="button" class="filter-chip on" data-filter="state" data-val="active">active</button>
+      <button type="button" class="filter-chip" data-filter="state" data-val="unread">unread only</button>
+      <button type="button" class="filter-chip" data-filter="state" data-val="all">incl. dismissed</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="group">
+      <!-- Phase 8.H fix · the bulk "select all / mark read / dismiss"
+           pattern was removed. Each row now has always-visible icon
+           actions, and a single "Mark all visible read" stays here for
+           when the user just wants to clear the inbox. -->
+      <button type="button" class="btn" id="mark-all-read-btn">
+        <svg aria-hidden="true" style="width:13px;height:13px;margin-right:4px;vertical-align:-2px">
+          <use href="#i-check"/></svg>
+        Mark all visible read
+      </button>
+    </div>
+  </div>
+
+  <!-- Feed -->
+  <div class="alert-feed" id="alert-feed" aria-live="polite"></div>
+
+  <button type="button" class="load-more" id="load-more-btn" hidden>load more</button>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/static/console_alerts.js"></script>
+</body>
+</html>

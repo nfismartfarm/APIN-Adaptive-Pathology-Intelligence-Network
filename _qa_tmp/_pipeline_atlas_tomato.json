@@ -1,0 +1,180 @@
+{
+  "produced_at": "2026-05-23T14:27:26Z",
+  "source": "scripts/apin_v2/extract_pipeline_atlas_tomato.py",
+  "classes": [
+    {
+      "class_name": "tomato_late_blight",
+      "pathogen_latin": "Phytophthora infestans",
+      "pathogen_type": "OOMYCETE",
+      "diagnostic_hint": "large irregular necrotic patches",
+      "symptoms": "Water-soaked spots on leaves and stems; white fuzzy mycelium on the underside of leaves during humid mornings.",
+      "n_training_total": 3838,
+      "example_file_lab": "sourceA_005a2c1f-4e15-49e4-9e5c-61dc3ecf9708___RS_Late.B 5096.JPG",
+      "example_file_field": "src2m3_scidb_000007.jpg"
+    },
+    {
+      "class_name": "tomato_septoria_leaf_spot",
+      "pathogen_latin": "Septoria lycopersici",
+      "pathogen_type": "FUNGAL",
+      "diagnostic_hint": "small round lesions with grey centres",
+      "symptoms": "Many small circular leaf spots with grey-tan centres and dark borders; lower leaves are hit first and the disease climbs upward.",
+      "n_training_total": 3086,
+      "example_file_lab": "sourceA_002533c1-722b-44e5-9d2e-91f7747b2543___Keller.St_CG 1831.JPG",
+      "example_file_field": "src2m3_scidb_000006.jpg"
+    },
+    {
+      "class_name": "tomato_mosaic_virus",
+      "pathogen_latin": "Tomato mosaic virus (ToMV)",
+      "pathogen_type": "VIRAL",
+      "diagnostic_hint": "yellow-green mottling pattern",
+      "symptoms": "Mottled light and dark green patches on leaves, leaf curl, distortion of new growth; sometimes fruit ripens unevenly.",
+      "n_training_total": 2185,
+      "example_file_lab": "sourceA_00c07a77-15e6-4815-92d4-8d1e1afb7f3c___PSU_CG 2052.JPG",
+      "example_file_field": "src2m3_scidb_000001.jpg"
+    },
+    {
+      "class_name": "tomato_yellow_leaf_curl_virus",
+      "pathogen_latin": "Tomato yellow leaf curl virus (TYLCV)",
+      "pathogen_type": "VIRAL",
+      "diagnostic_hint": "leaf curl + chlorotic yellowing",
+      "symptoms": "Upward leaf curl, yellow leaf margins, severe stunting of young shoots; the main giveaway is the cup-shaped curl pattern.",
+      "n_training_total": 3423,
+      "example_file_lab": "sourceA_0036c89d-7743-4895-9fcf-b8d2c1fc8455___YLCV_NREC 0313.JPG",
+      "example_file_field": "src2m3_scidb_000009.jpg"
+    },
+    {
+      "class_name": "tomato_foliar_spot",
+      "pathogen_latin": "Composite: Xanthomonas spp. (bacterial spot), Alternaria solani (early blight), Passalora fulva (leaf mold), Corynespora cassiicola (target spot)",
+      "pathogen_type": "MIXED",
+      "diagnostic_hint": "small bacterial spots, scattered",
+      "symptoms": "Composite class. The deployed pipeline groups four diseases under this label: bacterial spot (Xanthomonas), early blight (Alternaria), leaf mold (Passalora), and target spot (Corynespora). The common thread is discrete brown-to-grey leaf spots, often with concentric rings, that the model could not reliably separate at the fine-grained level on the available training data.",
+      "n_training_total": 7504,
+      "example_file_lab": "sourceA_00416648-be6e-4bd4-bc8d-82f43f8a7240___GCREC_Bact.Sp 3110.JPG",
+      "example_file_field": "src2m3_scidb_000000.jpg"
+    },
+    {
+      "class_name": "tomato_healthy",
+      "pathogen_latin": "no pathogen",
+      "pathogen_type": "HEALTHY",
+      "diagnostic_hint": "uniform green, no lesions",
+      "symptoms": "Uniform green colour, intact leaf shape, no spots or discolouration.",
+      "n_training_total": 1378,
+      "example_file_lab": "sourceA_04141939-3a8c-47b2-a582-e8371ccc120f___RS_HL 0275.JPG",
+      "example_file_field": "src4_bdfield_h_000000.jpg"
+    }
+  ],
+  "metrics": {
+    "extraction_pending": true,
+    "note": "Per-class precision/recall/F1/ECE and the 6x6 confusion matrix require running the deployed tomato pipeline (V3 + SP-LoRA) on the locked tomato test split. That is a separate extraction step (scripts/apin_v2/extract_tomato_metrics.py, Phase D) which loads the pipeline weights and writes _qa_tmp/_pipeline_atlas_tomato_metrics.json.",
+    "plantdoc_domain_check": {
+      "note": "These per-class numbers come from a PlantDoc cross-domain check, NOT from the production pipeline's locked test split. They illustrate domain-shift behavior but are not the pipeline's headline metrics.",
+      "rows": [
+        {
+          "class": "tomato_mosaic_virus",
+          "f1_ct": 0.979381443298969,
+          "f1_pd": 0.43373493975903615,
+          "p_ct": 0.9595959595959596,
+          "p_pd": 0.4,
+          "r_ct": 1.0,
+          "r_pd": 0.47368421052631576,
+          "sup_ct": 95,
+          "sup_pd": 38,
+          "gap": 0.5456465035399329,
+          "failure": "Mixed"
+        },
+        {
+          "class": "tomato_early_blight",
+          "f1_ct": 0.8695652173913043,
+          "f1_pd": 0.5050505050505051,
+          "p_ct": 0.970873786407767,
+          "p_pd": 0.625,
+          "r_ct": 0.7874015748031497,
+          "r_pd": 0.423728813559322,
+          "sup_ct": 127,
+          "sup_pd": 59,
+          "gap": 0.36451471234079924,
+          "failure": "Mixed"
+        },
+        {
+          "class": "tomato_leaf_mold",
+          "f1_ct": 0.8816326530612245,
+          "f1_pd": 0.5217391304347826,
+          "p_ct": 0.84375,
+          "p_pd": 0.5454545454545454,
+          "r_ct": 0.9230769230769231,
+          "r_pd": 0.5,
+          "sup_ct": 117,
+          "sup_pd": 60,
+          "gap": 0.3598935226264419,
+          "failure": "Mixed"
+        },
+        {
+          "class": "tomato_bacterial_spot",
+          "f1_ct": 0.6813186813186813,
+          "f1_pd": 0.3250883392226148,
+          "p_ct": 0.543859649122807,
+          "p_pd": 0.22009569377990432,
+          "r_ct": 0.9117647058823529,
+          "r_pd": 0.6216216216216216,
+          "sup_ct": 136,
+          "sup_pd": 74,
+          "gap": 0.3562303420960665,
+          "failure": "Low precision (FPs)"
+        },
+        {
+          "class": "tomato_yellow_leaf_curl_virus",
+          "f1_ct": 0.96875,
+          "f1_pd": 0.6923076923076923,
+          "p_ct": 0.9644444444444444,
+          "p_pd": 0.6923076923076923,
+          "r_ct": 0.9730941704035875,
+          "r_pd": 0.6923076923076923,
+          "sup_ct": 223,
+          "sup_pd": 52,
+          "gap": 0.2764423076923077,
+          "failure": "Mixed"
+        },
+        {
+          "class": "tomato_septoria_leaf_spot",
+          "f1_ct": 0.8290909090909091,
+          "f1_pd": 0.6558704453441295,
+          "p_ct": 0.7862068965517242,
+          "p_pd": 0.5664335664335665,
+          "r_ct": 0.8769230769230769,
+          "r_pd": 0.7788461538461539,
+          "sup_ct": 130,
+          "sup_pd": 104,
+          "gap": 0.17322046374677957,
+          "failure": "Mixed"
+        },
+        {
+          "class": "tomato_late_blight",
+          "f1_ct": 0.8807339449541285,
+          "f1_pd": 0.7843137254901961,
+          "p_ct": 0.8674698795180723,
+          "p_pd": 0.7894736842105263,
+          "r_ct": 0.8944099378881988,
+          "r_pd": 0.7792207792207793,
+          "sup_ct": 161,
+          "sup_pd": 77,
+          "gap": 0.09642021946393242,
+          "failure": "Transfers well"
+        }
+      ]
+    }
+  },
+  "deployed_pipeline": {
+    "v3_backbone": "DINOv2-Small + LoRA + FiLM, 10-class trained, used as 6-class",
+    "lora_branch": "DINOv2-Reg-Base + LoRA on CLS, 6-class single-pass, epoch 13",
+    "ensemble": "50/50 probability averaging with asymmetric sharpening (v3 T=0.5, LoRA T=1.0)",
+    "v3_input_size": [
+      224,
+      224
+    ],
+    "lora_input_size": [
+      392,
+      392
+    ],
+    "calibration": "Tier thresholds (phase3_tier_thresholds_*.json) were built from already-T-calibrated probabilities; T is applied ONCE per model."
+  }
+}

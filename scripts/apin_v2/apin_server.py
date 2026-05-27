@@ -290,6 +290,445 @@ def _diag_lookup_all() -> dict:
 
 
 # ════════════════════════════════════════════════════════════════════
+# Stage 2 · telemetry capture helpers
+#
+# These are pure functions consumed by _maybe_record() in the
+# /predict/full override and by other inference paths that want to
+# tag rows with EXIF, geo, and client metadata.
+#
+# All helpers swallow their own exceptions and return None/{} on
+# failure so a malformed image / missing Pillow / weird header value
+# can never break the actual inference response.
+# ════════════════════════════════════════════════════════════════════
+import hashlib as _hashlib
+import os as _os
+from typing import Optional as _Opt
+
+
+# REV-R2-I10 (§22.3 row 6): IP_HASH_SALT is now MANDATORY at import time.
+# If absent, the module fails to load with a clear RuntimeError instead of
+# silently using a hardcoded fallback. This protects the privacy contract:
+# an attacker with source-code access cannot re-hash known IPs to find them
+# in the audit log because the salt is environment-private.
+try:
+    _IP_HASH_SALT = _os.environ["IP_HASH_SALT"]
+except KeyError:
+    raise RuntimeError(
+        "IP_HASH_SALT environment variable is required. Set it to a long, "
+        "random, deployment-private string (e.g. `python -c \"import "
+        "secrets; print(secrets.token_urlsafe(32))\"`). See §11.4 of the "
+        "API Console spec or .env.example."
+    )
+if not _IP_HASH_SALT or len(_IP_HASH_SALT) < 16:
+    raise RuntimeError(
+        "IP_HASH_SALT must be at least 16 characters long (got "
+        f"{len(_IP_HASH_SALT)} chars). A short salt is trivially brute-forced."
+    )
+
+
+def _hash_client_ip(ip: _Opt[str], *, salt: _Opt[str] = None) -> _Opt[str]:
+    """Privacy-preserving IP fingerprint. The salt is read from the mandatory
+    `IP_HASH_SALT` environment variable (validated at module-import time).
+
+    Returns the first 16 hex chars of sha256(salt || ip) — enough entropy
+    to detect abuse / repeat visitors without storing the raw address.
+
+    The `salt` parameter is an optional per-call override (used by tests
+    that want to compare hashes against a fixed value). When omitted,
+    the module-level `_IP_HASH_SALT` constant is used — that value comes
+    from the `IP_HASH_SALT` env var at import time and has no fallback.
+    There is NO hardcoded default; absence of the env var raises
+    RuntimeError at import (REV-R2-I10 + PDA-P0-R1-F08 + R2-F01).
+    """
+    if not ip or not isinstance(ip, str) or ip.strip() in ("", "unknown"):
+        return None
+    try:
+        # REV-R2-I10 (§22.3 row 6): the salt MUST come from the environment.
+        # The previous hardcoded fallback `"apin-v2-ip-salt-2026"` weakened
+        # the privacy contract — anyone reading the source could re-hash
+        # known IPs and look them up in the audit log. The salt is now
+        # mandatory; absence is a deploy-time bug, not a runtime fallback.
+        s = salt or _IP_HASH_SALT
+        h = _hashlib.sha256((s + ":" + ip.strip()).encode("utf-8")).hexdigest()
+        return h[:16]
+    except Exception:
+        return None
+
+
+def _client_ip_rightmost(request) -> str | None:
+    """Rightmost-untrusted client-IP extraction (REV-R5-I08 / REV-R2-I03 / §11.3).
+
+    SECURITY: an attacker can prepend arbitrary values to X-Forwarded-For. The
+    LEFTMOST entry is therefore attacker-controlled and MUST NOT be trusted.
+    Reverse proxies APPEND to the right; only the rightmost N entries written by
+    OUR trusted hops can be relied on. The chosen IP is the one just *before*
+    those trusted hops — i.e. the closest non-proxy entry.
+
+    Algorithm (per spec §11.3 + RFC 7239 guidance):
+        - Read APIN_TRUSTED_PROXY_HOPS env var (default 1 for HF Space edge).
+        - Split XFF on "," and strip each entry.
+        - Take entries[-(hops + 1)] when index is in range; otherwise the
+          leftmost entry of the trimmed list (safer fallback than [0]).
+        - If XFF is empty/missing, fall back to request.client.host.
+
+    Example with `X-Forwarded-For: evil, attacker_proxy, 10.0.0.1` and hops=1:
+        idx = -2 -> "attacker_proxy"   (NOT "evil")
+
+    Returns the chosen IP string or None.
+    """
+    try:
+        hops = int(_os.environ.get("APIN_TRUSTED_PROXY_HOPS", "1"))
+    except Exception:
+        hops = 1
+    if hops < 0:
+        hops = 0
+    try:
+        if request is None or not hasattr(request, "headers"):
+            return None
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            entries = [e.strip() for e in xff.split(",") if e.strip()]
+            if entries:
+                idx = -(hops + 1)
+                if -len(entries) <= idx < 0:
+                    return entries[idx]
+                # REV-R6-I04: when len(entries) <= hops, the ENTIRE chain is
+                # within the configured trusted-hop window, meaning there is
+                # no pre-proxy entry to trust. Falling back to entries[0]
+                # would hand the attacker control in misconfigured deployments
+                # (operator set hops too high). Fall through to request.client
+                # — the direct TCP peer — which is the only trustworthy value
+                # in this state.
+        # XFF absent OR XFF entirely within trusted-hop window:
+        # direct socket peer is the authoritative source.
+        try:
+            if request.client is not None:
+                return request.client.host
+        except Exception:
+            pass
+        return None
+    except Exception:
+        return None
+
+
+def _client_geo_from_headers(headers) -> dict:
+    """Best-effort {country, region, city} extraction from edge-injected
+    request headers. Recognised:
+       - Cloudflare       : CF-IPCountry, CF-Region, CF-IPCity
+       - Vercel           : X-Vercel-IP-Country, X-Vercel-IP-Country-Region,
+                            X-Vercel-IP-City
+       - Fly.io           : Fly-Client-Country, Fly-Client-Region
+       - generic          : X-Country, X-Region, X-City
+    Returns an empty dict when no edge is in front of the server (localhost).
+
+    Stage 2.5 audit fixes:
+      - F-1/F-3: only accept exactly 2 uppercase ASCII alpha chars as country;
+                 alpha-3 codes (USA) and 1-char garbage (U) are dropped, not
+                 silently truncated/passed
+      - F-4   : strip whitespace from region/city and only emit when non-empty
+    """
+    out = {}
+    try:
+        def _h(name):
+            try: return headers.get(name)
+            except Exception: return None
+        country = (_h("CF-IPCountry") or _h("X-Vercel-IP-Country")
+                   or _h("Fly-Client-Country") or _h("X-Country"))
+        region  = (_h("X-Vercel-IP-Country-Region") or _h("CF-Region")
+                   or _h("Fly-Client-Region") or _h("X-Region"))
+        city    = (_h("X-Vercel-IP-City") or _h("CF-IPCity") or _h("X-City"))
+        # [F-1, F-3] Country MUST be exactly 2 alpha chars and not a known
+        # "unknown" sentinel. Anything else is dropped — better to have no
+        # country signal than a wrong one polluting the analytics.
+        if country and isinstance(country, str):
+            c = country.strip().upper()
+            if len(c) == 2 and c.isalpha() and c not in ("XX", "T1"):
+                out["client_country"] = c
+        # [F-4] Region / city — strip and require non-empty content.
+        if region and isinstance(region, str):
+            r = region.strip()
+            if r:
+                out["client_region"] = r[:64]
+        if city and isinstance(city, str):
+            ct = city.strip()
+            if ct:
+                out["client_city"] = ct[:64]
+    except Exception:
+        pass
+    return out
+
+
+def _extract_image_metadata(image_bytes: bytes) -> dict:
+    """Best-effort image metadata via Pillow.
+
+    Returns up to: image_width, image_height, image_mimetype, image_n_bytes,
+                   exif_camera_model, exif_capture_timestamp,
+                   exif_gps_lat, exif_gps_lon.
+
+    The function is deliberately permissive: any EXIF parsing failure just
+    skips that field. We never raise. This is the inference path —
+    photographing latency budget is sacred and we don't trade ~5ms of
+    metadata extraction for a chance to crash the prediction response.
+    """
+    out = {}
+    # [PDA-2 F-7] Defensive isinstance: any non-bytes-like input (numpy
+    # ndarray, str, dict, etc.) must not crash. An ndarray makes
+    # `not image_bytes` raise "ambiguous truth value"; str / dict cause
+    # nonsense image_n_bytes values. Refusing them outright is safer.
+    if not isinstance(image_bytes, (bytes, bytearray, memoryview)):
+        return out
+    if len(image_bytes) == 0:
+        return out
+    try:
+        out["image_n_bytes"] = len(image_bytes)
+        from PIL import Image as _PIL, ExifTags as _ExifTags
+        import io as _io
+        img = _PIL.open(_io.BytesIO(image_bytes))
+        out["image_width"]    = int(img.width)
+        out["image_height"]   = int(img.height)
+        # Pillow format names: JPEG, PNG, WEBP, ... → mime-ish string
+        fmt = (img.format or "").lower()
+        if fmt:
+            out["image_mimetype"] = "image/" + fmt if fmt != "jpeg" else "image/jpeg"
+        # EXIF — JPEG only in practice, but Pillow returns {} for others.
+        exif = None
+        try:
+            exif = img._getexif()  # type: ignore[attr-defined]
+        except Exception:
+            exif = None
+        if exif:
+            # Build name->value map using ExifTags.TAGS
+            tags = {_ExifTags.TAGS.get(k, k): v for k, v in exif.items()}
+            model = tags.get("Model") or tags.get("CameraModelName")
+            if model:
+                try:
+                    out["exif_camera_model"] = str(model).strip()[:120]
+                except Exception:
+                    pass
+            ts = tags.get("DateTimeOriginal") or tags.get("DateTime")
+            if ts:
+                try:
+                    s = str(ts).strip()
+                    # EXIF format is "YYYY:MM:DD HH:MM:SS" — normalise to ISO-ish
+                    if len(s) >= 19 and s[4] == ":" and s[7] == ":":
+                        s = s[:4] + "-" + s[5:7] + "-" + s[8:10] + "T" + s[11:19]
+                    out["exif_capture_timestamp"] = s[:32]
+                except Exception:
+                    pass
+            # GPS — nested IFD under tag 'GPSInfo'
+            gps_raw = tags.get("GPSInfo")
+            if isinstance(gps_raw, dict) and gps_raw:
+                gps = {}
+                for k, v in gps_raw.items():
+                    name = _ExifTags.GPSTAGS.get(k, k) if hasattr(_ExifTags, "GPSTAGS") else k
+                    gps[name] = v
+
+                def _dms_to_deg(dms, ref):
+                    try:
+                        d, m, s = dms
+                        # Pillow IFDRational or tuple-of-ints/tuples
+                        def _f(x):
+                            try: return float(x)
+                            except Exception:
+                                try: return float(x.numerator) / float(x.denominator)
+                                except Exception: return 0.0
+                        deg = _f(d) + _f(m) / 60.0 + _f(s) / 3600.0
+                        if str(ref).upper() in ("S", "W"):
+                            deg = -deg
+                        return round(deg, 6)
+                    except Exception:
+                        return None
+
+                lat = _dms_to_deg(gps.get("GPSLatitude"), gps.get("GPSLatitudeRef"))
+                lon = _dms_to_deg(gps.get("GPSLongitude"), gps.get("GPSLongitudeRef"))
+                # [F-2] Reject (0.0, 0.0) outright. A phone with a broken GPS
+                # chip reports DMS=(0,0,0) for both axes; the result is the
+                # "Null Island" coordinate in the Atlantic Ocean which would
+                # otherwise pollute the geo analytics. The probability of a
+                # legitimate inference being shot inside the 110-metre square
+                # centred on (0,0) is vanishingly small for okra/brassica
+                # farmers anywhere in the world.
+                _null_pair = (lat is not None and abs(lat) < 1e-6 and
+                              lon is not None and abs(lon) < 1e-6)
+                if (not _null_pair
+                        and lat is not None and -90.0 <= lat <= 90.0):
+                    out["exif_gps_lat"] = lat
+                if (not _null_pair
+                        and lon is not None and -180.0 <= lon <= 180.0):
+                    out["exif_gps_lon"] = lon
+    except Exception:
+        # Pillow failure or any nested IFD weirdness — keep whatever
+        # we already extracted (image_n_bytes is always present).
+        pass
+    return out
+
+
+# Deployment fingerprint — lazily computed once per process.
+_DEPLOYMENT_VERSION_CACHE: _Opt[str] = None
+
+
+def _deployment_version() -> _Opt[str]:
+    """Short identifier for the running build. First non-None of:
+       - env DEPLOYMENT_VERSION
+       - env GIT_COMMIT
+       - git rev-parse --short HEAD (cached for the process lifetime)
+    """
+    global _DEPLOYMENT_VERSION_CACHE
+    if _DEPLOYMENT_VERSION_CACHE is not None:
+        return _DEPLOYMENT_VERSION_CACHE or None
+    try:
+        v = _os.environ.get("DEPLOYMENT_VERSION") or _os.environ.get("GIT_COMMIT")
+        if not v:
+            try:
+                import subprocess as _sp
+                r = _sp.run(["git", "rev-parse", "--short", "HEAD"],
+                            capture_output=True, text=True, timeout=2,
+                            cwd=str(PROJECT_ROOT))
+                if r.returncode == 0:
+                    v = r.stdout.strip()
+            except Exception:
+                v = None
+        _DEPLOYMENT_VERSION_CACHE = (v or "")[:32]
+        return _DEPLOYMENT_VERSION_CACHE or None
+    except Exception:
+        _DEPLOYMENT_VERSION_CACHE = ""
+        return None
+
+
+def _build_inference_extras(*, request, image_bytes: bytes,
+                            result: _Opt[dict], total_ms: _Opt[int] = None,
+                            endpoint: str = "/predict/full",
+                            api_version: str = "v2",
+                            request_id: _Opt[str] = None,
+                            cold_start: bool = False) -> dict:
+    """Assemble the `extras` dict for record_prediction / record_guest_prediction.
+
+    All keys are optional. None values are skipped by the DB layer.
+    """
+    import json as _json
+    extras: dict = {}
+
+    # Network / geo
+    try:
+        if request is not None:
+            # REV-R5-I08: use rightmost-untrusted extraction (§11.3). The
+            # previous `xff.split(",")[0]` form trusted the attacker-controlled
+            # leftmost entry.
+            client_ip = _client_ip_rightmost(request)
+            extras["client_ip_hash"] = _hash_client_ip(client_ip)
+            try:
+                ua = request.headers.get("user-agent", "")
+                if ua:
+                    # Coarse family bucket — full UA is PII / fingerprintable.
+                    ual = ua.lower()
+                    if   "android" in ual: extras["user_agent_family"] = "android"
+                    elif "iphone"  in ual or "ipad" in ual: extras["user_agent_family"] = "ios"
+                    elif "windows" in ual: extras["user_agent_family"] = "windows"
+                    elif "mac os"  in ual or "macintosh" in ual: extras["user_agent_family"] = "macos"
+                    elif "linux"   in ual: extras["user_agent_family"] = "linux"
+                    else: extras["user_agent_family"] = "other"
+            except Exception:
+                pass
+            try:
+                extras.update(_client_geo_from_headers(request.headers))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Image metadata + EXIF
+    try:
+        extras.update(_extract_image_metadata(image_bytes))
+    except Exception:
+        pass
+
+    # Inference shape (signal_predictions, gate path, conformal set, ood)
+    try:
+        if isinstance(result, dict):
+            # signal predictions — APIN ensemble exposes these on the
+            # `signals` / `ensemble` keys depending on tier. Be permissive.
+            sig = (result.get("signals") or result.get("signal_predictions")
+                   or result.get("ensemble"))
+            if sig is not None:
+                try:
+                    extras["signal_predictions"] = _json.dumps(sig, default=str)[:8000]
+                except Exception:
+                    pass
+            gate = result.get("gate_decision_path") or result.get("gate")
+            if gate is not None:
+                try:
+                    extras["gate_decision_path"] = (
+                        gate if isinstance(gate, str)
+                        else _json.dumps(gate, default=str)
+                    )[:512]
+                except Exception:
+                    pass
+            cset = (result.get("conformal_set") or result.get("prediction_set")
+                    or result.get("conformal"))
+            if cset is not None:
+                try:
+                    extras["conformal_set"] = _json.dumps(cset, default=str)[:2000]
+                    if isinstance(cset, list):
+                        extras["conformal_set_size"] = len(cset)
+                    elif isinstance(cset, dict) and isinstance(cset.get("set"), list):
+                        extras["conformal_set_size"] = len(cset["set"])
+                except Exception:
+                    pass
+            ood = result.get("ood") or result.get("ood_flag")
+            if ood is not None:
+                try:
+                    if isinstance(ood, bool):
+                        extras["ood_flag"] = 1 if ood else 0
+                    elif isinstance(ood, dict) and "is_ood" in ood:
+                        extras["ood_flag"] = 1 if bool(ood["is_ood"]) else 0
+                except Exception:
+                    pass
+            top3 = result.get("top3") or result.get("predicted_top3") or result.get("topk")
+            if top3 is not None:
+                try:
+                    extras["predicted_top3"] = _json.dumps(top3, default=str)[:1000]
+                except Exception:
+                    pass
+            if result.get("heatmap_b64") or result.get("gradcam_b64"):
+                extras["grad_cam_generated"] = 1
+            if "calibration_warning" in result:
+                try:
+                    cw = result["calibration_warning"]
+                    extras["calibration_warning"] = (
+                        cw if isinstance(cw, str) else _json.dumps(cw, default=str)
+                    )[:512]
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # Latency / build
+    if total_ms is not None:
+        try: extras["total_ms"] = int(total_ms)
+        except Exception: pass
+    try:
+        dv = _deployment_version()
+        if dv:
+            extras["deployment_version"] = dv
+    except Exception:
+        pass
+    try:
+        import torch as _torch
+        extras["gpu_used"] = 1 if _torch.cuda.is_available() else 0
+    except Exception:
+        pass
+    if cold_start:
+        extras["cold_start"] = 1
+
+    extras["endpoint"]    = endpoint
+    extras["api_version"] = api_version
+    if request_id:
+        extras["request_id"] = str(request_id)[:64]
+
+    return extras
+
+
+# ════════════════════════════════════════════════════════════════════
 # Day-4 account-chip overlay — injected into ui_template.html at load time.
 # This is a self-contained <style>+<script> block that adds a floating
 # account chip in the top-right of the dashboard. When authenticated
@@ -676,6 +1115,30 @@ def _add_seo_routes(app):
             return _Resp(status_code=404, content=b"")
         return _Resp(content=logo.read_bytes(), media_type="image/png",
                      headers=_ASSET_HEADERS)
+
+    # Phase 8.H.D · serve the service worker from root so its scope "/"
+    # encompasses /account/api/* without needing the
+    # Service-Worker-Allowed header. Cache busted by ETag.
+    @app.get("/apin_sw.js")
+    async def v2_apin_sw():
+        from fastapi.responses import Response as _Resp
+        import hashlib as _hashlib
+        sw_path = Path(__file__).resolve().parent / "apin_sw.js"
+        try:
+            body = sw_path.read_bytes()
+        except FileNotFoundError:
+            return _Resp(status_code=404, content=b"sw missing")
+        etag = '"' + _hashlib.sha256(body).hexdigest()[:12] + '"'
+        return _Resp(
+            content=body,
+            media_type="application/javascript",
+            headers={
+                "ETag": etag,
+                "Cache-Control": "no-cache",
+                # Allow the SW to claim the entire site as its scope.
+                "Service-Worker-Allowed": "/",
+            },
+        )
 
     @app.get("/robots.txt")
     async def v2_robots():
@@ -1898,6 +2361,7 @@ def _override_predict_full_route(app, tomato_pipeline):
 
             current_user_id = None
             guest_token     = None
+            guest_session_id = None   # numeric row id, populated below
             auth_mode       = "anonymous"   # user | guest | guest_exhausted | anonymous
             if request is not None:
                 try:
@@ -1915,10 +2379,15 @@ def _override_predict_full_route(app, tomato_pipeline):
                         if guest_token:
                             _g = _auth_db.get_guest_session(guest_token)
                             if _g is not None:
+                                guest_session_id = int(_g["id"])
                                 auth_mode = ("guest_exhausted"
                                              if _g["exhausted"] else "guest")
                     except Exception:
                         pass
+
+            # Stage 2: capture wall-clock start so we can record total_ms.
+            import time as _stage2_time
+            _t_start = _stage2_time.perf_counter()
 
             if auth_mode == "anonymous":
                 return JSONResponse(status_code=401, content={
@@ -1933,30 +2402,91 @@ def _override_predict_full_route(app, tomato_pipeline):
             def _maybe_record(result_dict):
                 """Post-inference finalisation:
                   • signed-in users → schedule a background DB write of the
-                    prediction (with image bytes) under their account
-                  • guests          → consume one free check and stamp the
-                    remaining quota onto the response as `_guest`
+                    prediction (with image bytes + Stage 2 telemetry extras)
+                    under their account
+                  • guests          → consume one free check, write the
+                    prediction to guest_predictions (Stage 2 — was discarded
+                    before), and stamp the remaining quota onto the response
+                    as `_guest`
                 Server-side errors (the TOMATO_* error tiers) are NOT
-                counted against a guest's quota — only real results are.
+                counted against a guest's quota and are NOT written to
+                guest_predictions — only real results are.
                 """
                 if not isinstance(result_dict, dict):
                     return result_dict
                 _tier = str(result_dict.get("tier", "")).upper()
                 _is_error = _tier in ("TOMATO_UNAVAILABLE",
                                       "TOMATO_INFERENCE_ERROR")
+
+                # Stage 2: build the shared extras envelope once.
+                # This wraps the EXIF / IP-hash / geo / signal-predictions /
+                # latency / build metadata that both record paths will store.
+                try:
+                    _total_ms = int(
+                        (_stage2_time.perf_counter() - _t_start) * 1000.0
+                    )
+                except Exception:
+                    _total_ms = None
+                try:
+                    _extras = _build_inference_extras(
+                        request=request,
+                        image_bytes=data,
+                        result=result_dict,
+                        total_ms=_total_ms,
+                        endpoint="/predict/full",
+                        api_version="v2",
+                        request_id=request.headers.get("x-request-id")
+                            if request is not None else None,
+                    )
+                except Exception:
+                    _extras = None
+                # Capture the per-row error fields when the response is a tier-error.
+                if _is_error and isinstance(_extras, dict):
+                    err_class = result_dict.get("error")
+                    if err_class:
+                        _extras["error_class"] = str(err_class)[:64]
+                        _extras["error_message"] = str(
+                            result_dict.get("message", "")
+                        )[:512]
+                    _extras["status_code"] = 200  # we still return 200 with tier=error
+
                 if current_user_id is not None and background_tasks is not None:
                     background_tasks.add_task(
                         _auth_db.record_prediction,
                         current_user_id,
                         result_dict,
                         image_bytes=data,
+                        extras=_extras,
                     )
                 elif auth_mode == "guest" and guest_token and not _is_error:
+                    # Atomically consume one free check first — this is the
+                    # quota gate, and a guest_predictions row must not exist
+                    # for a request the quota didn't actually allow.
                     _gc = _auth_db.consume_guest_inference(guest_token)
-                    if _gc is not None:
+                    if _gc is not None and not _gc.get("denied"):
                         result_dict["_guest"] = {
                             "remaining": _gc.get("remaining", 0),
                             "limit": _auth_db.GUEST_INFERENCE_LIMIT,
+                        }
+                        # Stage 2: persist the prediction to guest_predictions.
+                        # Backgrounded so the response is not blocked on disk I/O.
+                        if (guest_session_id is not None
+                                and background_tasks is not None):
+                            background_tasks.add_task(
+                                _auth_db.record_guest_prediction,
+                                guest_session_id,
+                                result_dict,
+                                image_bytes=data,
+                                extras=_extras,
+                            )
+                    elif _gc is not None and _gc.get("denied"):
+                        # Race: another concurrent request consumed the last
+                        # free check between our auth gate and this point.
+                        # The response was generated but we cannot count it.
+                        result_dict["_guest"] = {
+                            "remaining": 0,
+                            "limit": _auth_db.GUEST_INFERENCE_LIMIT,
+                            "denied_at_record": True,
                         }
                 return result_dict
 
@@ -2126,7 +2656,18 @@ def _override_warmup_status_route(app):
 
 
 def _load_tomato_pipeline_safe():
-    """Load TomatoPipeline with exception handling; return None on failure."""
+    """Load TomatoPipeline with exception handling; return None on failure.
+
+    Honors `APIN_SKIP_TOMATO=1` for QA / observability-test runs that don't
+    need real predictions (usage telemetry, dashboard tests, etc.). When
+    skipped, the /predict/full handler will return graceful errors, which
+    is fine — the UsageRecordingMiddleware still records every request.
+    """
+    import os as _os_skip
+    if _os_skip.environ.get("APIN_SKIP_TOMATO") == "1":
+        logger.warning("TomatoPipeline load skipped (APIN_SKIP_TOMATO=1) — "
+                        "predictions will error but auth + telemetry work.")
+        return None
     try:
         import sys
         _ladi_path = str(PROJECT_ROOT / "scripts" / "ladi_net")
@@ -2560,6 +3101,40 @@ def _ensure_heartbeat(app):
     asyncio.create_task(_status_heartbeat_loop(app))
     logger.info("status heartbeat task started (60 s interval)")
 
+    # Phase 8 Wave B: webhook delivery worker. Idempotent — only one start
+    # per process. Skipped silently if APIN_SECRET_KEY is unset (the worker
+    # needs to decrypt webhook secrets to sign payloads). The worker's stats
+    # become available via `app.state.webhook_worker.stats()`.
+    # (FX-P8-RUNTIME: this section runs inside _ensure_heartbeat where the
+    # module-top `import os` is aliased as `_os` to avoid shadowing a local
+    # var. Use _os here for the env lookup.)
+    import os as _os_local
+    if not getattr(app.state, "_webhook_worker_started", False):
+        if _os_local.environ.get("APIN_SECRET_KEY"):
+            try:
+                from scripts.apin_v2.webhook_worker import WebhookWorker
+                app.state.webhook_worker = WebhookWorker.start_in_background()
+                app.state._webhook_worker_started = True
+            except Exception as e:
+                logger.warning("Webhook worker failed to start: %s", e)
+        else:
+            logger.warning(
+                "Webhook delivery worker NOT started — APIN_SECRET_KEY env "
+                "var is unset. Set it (see WI-P8-DELIVERY-WORKER docs) to "
+                "enable webhook deliveries.")
+
+    # Phase 9.A — usage telemetry flusher. Drains the in-memory request
+    # buffer into api_key_request_log / api_key_usage_minute / api_keys
+    # every ~2 s, runs an exact p50/p95/p99 rollup every 60 s. Has no
+    # environment-variable dependency — always start.
+    if not getattr(app.state, "_usage_flusher_started", False):
+        try:
+            from scripts.apin_v2.usage_recorder import UsageFlusher
+            app.state.usage_flusher = UsageFlusher.start_in_background()
+            app.state._usage_flusher_started = True
+        except Exception as e:
+            logger.warning("Usage flusher failed to start: %s", e)
+
 
 def _add_status_routes(app):
     """Register /status + /status/data and arm the heartbeat task."""
@@ -2651,6 +3226,3984 @@ def _override_health_route(app):
                 f"{len(health_html):,} bytes)")
 
 
+# ════════════════════════════════════════════════════════════════════
+# API v1 — contract-conforming machine endpoints (API_CONTRACT.md)
+#
+# Phase 1, batch 1: read-only reference endpoints. Purely additive new
+# routes — they touch nothing existing. Every response uses the §2
+# envelope via the @api_endpoint decorator; errors use ApiError (§3).
+#   GET /version       service + model + runtime identity
+#   GET /diseases      the full okra/brassica disease taxonomy (agronomy)
+#   GET /diseases/{class}   one disease, full detail
+#   GET /model/card    the published, honest model card
+# ════════════════════════════════════════════════════════════════════
+
+def _git_commit_short() -> str:
+    """Best-effort short git commit hash; 'unknown' if unavailable."""
+    try:
+        import subprocess
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                             cwd=str(PROJECT_ROOT), capture_output=True,
+                             text=True, timeout=5)
+        if out.returncode == 0:
+            return out.stdout.strip() or "unknown"
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _load_diagnosis_db() -> dict:
+    """Load diagnosis/diagnosis_lookup.json (the agronomy reference). {} on
+    failure — endpoints degrade honestly rather than crash."""
+    try:
+        import json as _json
+        p = PROJECT_ROOT / "diagnosis" / "diagnosis_lookup.json"
+        with open(p, "r", encoding="utf-8") as f:
+            return _json.load(f)
+    except Exception as e:
+        logger.warning(f"diagnosis_lookup.json unavailable: {e}")
+        return {}
+
+
+def _disease_record(cls: str, diag: dict) -> dict:
+    """One rich disease record from a diagnosis-lookup entry."""
+    e = diag.get(cls, {})
+    crop = "okra" if cls.startswith("okra") else "brassica"
+    return {
+        "class": cls,
+        "crop": crop,
+        "label": e.get("full_name") or cls.replace("_", " ").title(),
+        "is_healthy": cls.endswith("_healthy"),
+        "pathogen_and_cause": e.get("cause"),
+        "symptoms": e.get("symptoms"),
+        "treatment": e.get("treatment"),          # {mild,moderate,severe}
+        "prevention": e.get("prevention"),
+        "urgency": e.get("urgency"),              # {mild,moderate,severe}
+        "urgency_reason": e.get("urgency_reason"),
+        "has_agronomy_detail": bool(e),
+    }
+
+
+def _add_reference_routes(app):
+    """Register the Phase-1 read-only reference endpoints."""
+    from scripts.apin_v2.api_envelope import api_endpoint, ApiError, API_VERSION
+    from scripts.apin.constants import MODEL2_CLASS_ORDER
+    import platform
+
+    git_commit = _git_commit_short()
+    diag_db = _load_diagnosis_db()
+    classes = list(MODEL2_CLASS_ORDER)
+
+    # ── GET /version ───────────────────────────────────────────────────
+    @app.get("/api/version")
+    @api_endpoint("/api/version")
+    async def v1_version():
+        try:
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            device = "unknown"
+        return {
+            "service": "APIN - Adaptive Pathological Intelligence Network",
+            "api_version": API_VERSION,
+            "git_commit": git_commit,
+            "model": {
+                "name": "APIN okra/brassica 3-signal ensemble",
+                "crop_scope": ["okra", "brassica"],
+                "classes": classes,
+                "n_classes": len(classes),
+                "n_signals": 4,
+                "backbone": "DINOv3-ConvNeXt-Small",
+            },
+            "runtime": {
+                "device": device,
+                "python": platform.python_version(),
+            },
+            "contract": "v1.0 (stable)",
+        }
+
+    # ── GET /diseases ──────────────────────────────────────────────────
+    @app.get("/api/diseases")
+    @api_endpoint("/api/diseases")
+    async def v1_diseases():
+        recs = [_disease_record(c, diag_db) for c in classes]
+        meta = {}
+        if not diag_db:
+            meta["warnings"] = [{
+                "code": "agronomy_detail_unavailable",
+                "message": ("diagnosis_lookup.json could not be loaded; "
+                            "disease records are present but agronomy "
+                            "detail is null."),
+            }]
+        return ({
+            "crop_scope": ["okra", "brassica"],
+            "count": len(recs),
+            "diseases": recs,
+            "severity_levels": ["mild", "moderate", "severe"],
+            "note": ("Treatment and urgency are keyed by severity. APIN "
+                     "diagnoses these 9 okra/brassica classes; tomato is a "
+                     "separate pipeline and chilli is not supported."),
+        }, meta)
+
+    # ── GET /diseases/{disease_class} ──────────────────────────────────
+    @app.get("/api/diseases/{disease_class}")
+    @api_endpoint("/api/diseases/{disease_class}")
+    async def v1_disease_detail(disease_class: str):
+        if disease_class not in classes:
+            raise ApiError(
+                "not_found",
+                f"No APIN disease class named '{disease_class}'.",
+                hint="Call GET /api/diseases for the list of valid classes.",
+                field="disease_class")
+        return _disease_record(disease_class, diag_db)
+
+    # ── GET /model/card ────────────────────────────────────────────────
+    @app.get("/api/model/card")
+    @api_endpoint("/api/model/card")
+    async def v1_model_card():
+        return {
+            "name": "APIN - Adaptive Pathological Intelligence Network",
+            "model_version": "model2-convnext (okra/brassica specialist)",
+            "git_commit": git_commit,
+            "task": ("Multi-class leaf-disease classification for okra "
+                     "and brassica from a single leaf photograph."),
+            "classes": classes,
+            "n_classes": len(classes),
+            "architecture": {
+                "type": ("3-signal stacking ensemble with a learned "
+                         "MLP gate"),
+                "signals": [
+                    {"name": "model2", "backbone": "DINOv3-ConvNeXt-Small",
+                     "role": "primary disease classifier"},
+                    {"name": "efficientnet", "backbone": "EfficientNet",
+                     "role": "secondary classifier signal"},
+                    {"name": "dinov2",
+                     "backbone": "DINOv2 ViT (frozen) + linear head",
+                     "role": "representation signal"},
+                    {"name": "psv",
+                     "backbone": "engineered Plant-Signal-Vector features",
+                     "role": "feature-based signal"},
+                ],
+                "fusion": "stacking MLP over per-signal class distributions",
+                "calibration": ("per-class temperature scaling + "
+                                "split-conformal prediction sets"),
+                "ood_detection": ("Mahalanobis-distance detector over "
+                                  "per-class prototypes"),
+                "confidence_tiers": ("tiered output 1A..5 with abstention "
+                                     "on low-confidence / out-of-distribution "
+                                     "inputs"),
+                "explainability": "Grad-CAM++ heatmap on the top signal",
+            },
+            "input": {
+                "format": "single RGB leaf photograph",
+                "preprocessing": ("Gate-Zero quality check -> LAB-CLAHE "
+                                  "-> resize to 224x224"),
+                "min_resolution_px": 100,
+            },
+            "evaluation": {
+                "test_set": ("1,379 held-out okra/brassica images, "
+                             "content-hash verified clean of every "
+                             "training pool"),
+                "details_endpoint": "/api/benchmarks",
+            },
+            "limitations": [
+                ("Diagnoses okra and brassica leaves only. Tomato is "
+                 "handled by a separate pipeline; chilli is not supported."),
+                ("Single-leaf close-up images only - not whole plants, "
+                 "stems, roots, pods, or wide field shots."),
+                ("Trained predominantly on cultivated-dataset imagery; "
+                 "accuracy under unusual field conditions can be lower."),
+                ("An independent benchmark found a competently fine-tuned "
+                 "single model matches this ensemble on raw accuracy; the "
+                 "ensemble's measured advantage is in calibration and "
+                 "uncertainty quantification, not peak accuracy."),
+            ],
+            "intended_use": ("Decision support for farmers and "
+                             "agronomists."),
+            "not_a_substitute_for": ("professional agronomic or "
+                                     "plant-pathology diagnosis"),
+            "contract": "v1.0 (stable)",
+        }
+
+    logger.info("APIN /api/ reference routes registered - /api/version "
+                "/api/diseases /api/diseases/{class} /api/model/card")
+
+
+# ════════════════════════════════════════════════════════════════════════
+# API v1 action routes — Phase 1 batch 2
+# ════════════════════════════════════════════════════════════════════════
+# Adds the contract-conforming machine endpoints that DO work (predict,
+# warmup, benchmark, key management), as opposed to the read-only
+# reference endpoints in _add_reference_routes.
+#
+# Every route here is purely additive: nothing existing is removed or
+# patched. The existing browser-facing /predict/full route is untouched
+# and continues to serve the inference website exactly as before. The
+# new /predict/quick and /predict/batch routes are at fresh paths and
+# carry their own auth scheme (API-key Bearer tokens), so they cannot
+# collide with the cookie-session auth used by the website.
+
+def _load_latest_benchmark() -> tuple[Optional[dict], Optional[str]]:
+    """Find the newest apin_vs_baselines_final_*.json report on disk and
+    return (parsed_dict, filename). Returns (None, None) if no report
+    has been generated yet. Never raises; on parse error returns (None,
+    filename) so the endpoint can explain what went wrong without leaking
+    a Python traceback to the caller."""
+    import glob
+    pattern = str(PROJECT_ROOT / "reports" / "apin_vs_baselines_final_*.json")
+    files   = sorted(glob.glob(pattern))
+    if not files:
+        return None, None
+    latest = files[-1]
+    fname  = Path(latest).name
+    try:
+        with open(latest, encoding="utf-8") as f:
+            return json.load(f), fname
+    except Exception as e:
+        logger.warning("Failed to parse %s: %s", latest, e)
+        return None, fname
+
+
+def _benchmark_summary(report: dict) -> dict:
+    """Compress the (large) finalized comparison into a headline summary
+    the API can return without the per-class breakdown drowning the
+    payload. The full per-class detail is also returned in the parent
+    `comparison` block so analysts can drill in."""
+    apin = report.get("apin_ensemble", {}) or {}
+    v2   = apin.get("v2_gate_diagnosed_subset", {}) or {}
+    bases = report.get("baselines_on_apin_v2_subset_1195", {}) or {}
+
+    best_base_name, best_base_f1 = None, -1.0
+    for name, m in bases.items():
+        f1 = float(m.get("macro_f1", 0.0))
+        if f1 > best_base_f1:
+            best_base_name, best_base_f1 = name, f1
+
+    return {
+        "primary_metric": "macro_f1",
+        "test_set_size":  int(report.get("test_images", 0)),
+        "apin_ensemble": {
+            "n_diagnosed":     int(v2.get("n", 0)),
+            "accuracy":        round(float(v2.get("accuracy", 0.0)), 4),
+            "macro_f1":        round(float(v2.get("macro_f1", 0.0)), 4),
+            "ece":             round(float(v2.get("ece", 0.0)), 4),
+            "gate":            "v2 (resolution-invariant blur)",
+            "strict_accuracy_full_1379": round(float(apin.get(
+                "strict_accuracy_all_1379", {}).get("v2_gate", 0.0)), 4),
+        },
+        "best_external_baseline": {
+            "model":    best_base_name,
+            "macro_f1": round(best_base_f1, 4) if best_base_name else None,
+            "ece":      round(float(bases.get(best_base_name, {}).get(
+                            "ece", 0.0)), 4) if best_base_name else None,
+        } if best_base_name else None,
+        "honest_finding": (
+            "On raw macro-F1 a competently fine-tuned single model "
+            "(EfficientNet-B0) matches the APIN ensemble. APIN's "
+            "measured advantage on this test set is calibration: ECE "
+            "is roughly half that of the best baseline, which means "
+            "the confidence numbers APIN returns are far closer to "
+            "true accuracy than a single softmax model's are."
+        ),
+    }
+
+
+def _add_v1_action_routes(app):
+    """Register the Phase-1 batch-2 action endpoints:
+        GET    /api/benchmarks       (public)
+        POST   /api/warmup           (public, idempotent)
+        POST   /api/predict/quick    (API-key auth)
+        POST   /api/predict/batch    (API-key auth)
+        POST   /api/keys             (session-cookie auth)
+        GET    /api/keys             (session-cookie auth)
+        DELETE /api/keys/{key_id}    (session-cookie auth)
+    """
+    import io
+    from dataclasses import asdict
+    from PIL import Image as _PIL_Image
+    import numpy as np
+    from fastapi import Header
+    from typing import List, Optional as _Opt
+    from scripts.apin_v2.api_envelope import (
+        api_endpoint, ApiError, API_VERSION, paginated)
+    from scripts.apin_v2 import auth_db as _auth_db
+    from scripts.apin_v2.auth_routes import COOKIE_NAME as _SESSION_COOKIE
+
+    # ── helper: parse a multipart UploadFile into an RGB numpy array ──
+    _BATCH_MAX             = 16          # max files per /predict/batch
+    _PER_FILE_MAX_BYTES    = 12_000_000  # per-image cap (~12 MB)
+    # PDA F2: aggregate-size cap so 16 × 12 MB cannot OOM the 512 MB
+    # Space dyno. Empirically the dyno tolerates ~32 MB of in-flight
+    # batch upload while serving inference; tune downward if observed.
+    _BATCH_TOTAL_MAX_BYTES = 32_000_000  # ~32 MB across all files
+
+    def _read_image(data: bytes,
+                    *, max_bytes: int = _PER_FILE_MAX_BYTES) -> np.ndarray:
+        """Decode bytes to RGB uint8 ndarray. Raises ApiError on bad input.
+
+        PDA F8: we deliberately do NOT surface the raw decoder exception
+        string in `details`. Pillow's exceptions can contain filesystem
+        tmpfile paths and internal struct offsets that would violate §8's
+        "no internal detail" rule. The error class name is benign and
+        sufficient to diagnose; the request_id ties it to server logs.
+        """
+        if not data:
+            raise ApiError("invalid_parameter",
+                           "Image file is empty.",
+                           hint="Upload a non-empty JPEG or PNG image.",
+                           field="file")
+        if len(data) > max_bytes:
+            raise ApiError(
+                "payload_too_large",
+                f"Image exceeds the {max_bytes // 1_000_000} MB per-file "
+                f"limit (got {len(data) // 1_000_000} MB).",
+                hint="Re-encode the image at lower quality, or downscale "
+                     "the longest side to ~2048 px.",
+                field="file",
+                details={"per_file_limit_bytes": max_bytes,
+                         "received_bytes": len(data)})
+        try:
+            img = _PIL_Image.open(io.BytesIO(data)).convert("RGB")
+        except Exception:
+            # PDA §8: decoder error class logged, not returned.
+            logger.exception("_read_image: image decode failed")
+            raise ApiError(
+                "unsupported_media_type",
+                "Could not decode the uploaded file as an image.",
+                hint="Send a JPEG, PNG, or WebP image.")
+        return np.array(img, dtype=np.uint8)
+
+    def _convert_np(o):
+        if isinstance(o, np.ndarray): return o.tolist()
+        if isinstance(o, (np.float32, np.float64)): return float(o)
+        if isinstance(o, (np.int32, np.int64)): return int(o)
+        if isinstance(o, dict): return {k: _convert_np(v) for k, v in o.items()}
+        if isinstance(o, list): return [_convert_np(v) for v in o]
+        return o
+
+    def _lean_predict(img_rgb: np.ndarray) -> dict:
+        """Run the full APIN ensemble and project the 29-field APINResult
+        down to the lean machine-API shape. We DON'T re-implement
+        inference — every byte of math is the same as /predict/full. We
+        just drop the heavy explainability fields (Grad-CAM, decision
+        trace, pipeline visualisations) that machine consumers rarely
+        want and that bloat the response by ~150 KB."""
+        from scripts.apin.section8_apin_server import get_apin
+        apin_engine = get_apin()
+        result = apin_engine.predict(img_rgb)
+        try:
+            out = asdict(result)
+        except Exception:
+            out = {k: v for k, v in vars(result).items()
+                   if not k.startswith("_")}
+        out = _convert_np(out)
+
+        # Top-3 from all_class_probabilities, sorted descending.
+        probs = out.get("all_class_probabilities") or {}
+        top3 = [{"class": k, "probability": round(float(v), 4)}
+                for k, v in sorted(probs.items(),
+                                    key=lambda kv: -float(kv[1]))[:3]]
+
+        return {
+            "diagnosis":        out.get("diagnosis"),
+            "confidence":       round(float(out.get("confidence", 0.0)), 4),
+            "tier":             out.get("tier"),
+            "top3":             top3,
+            "out_of_distribution": bool(out.get("is_ood", False)),
+            "mahalanobis_distance": round(float(
+                out.get("mahalanobis_distance", 0.0)), 4),
+            "uncertainty": {
+                "aleatoric": round(float(
+                    out.get("uncertainty_aleatoric", 0.0)), 4),
+                "epistemic": round(float(
+                    out.get("uncertainty_epistemic", 0.0)), 4),
+            },
+            "conformal_prediction_set": list(
+                out.get("conformal_prediction_set") or []),
+            "quality_flags":  out.get("quality_flags") or {},
+            "failed_signals": list(out.get("failed_signals") or []),
+            "processing_time_ms": round(float(
+                out.get("processing_time_ms", 0.0)), 1),
+            "mode": "quick",
+            "explainability_available_at": "/api/predict/full",
+        }
+
+    # ── helper: require an API key ────────────────────────────────────
+    def _require_api_key(authorization: _Opt[str],
+                        x_api_key: _Opt[str]) -> dict:
+        """Resolve a key from either `Authorization: Bearer <token>` or
+        `X-API-Key: <token>`. Raises ApiError on missing/invalid.
+        Returns the auth record from auth_db.find_api_key."""
+        raw = None
+        if authorization and authorization.lower().startswith("bearer "):
+            raw = authorization[7:].strip()
+        elif x_api_key:
+            raw = x_api_key.strip()
+        if not raw:
+            raise ApiError(
+                "auth_required",
+                "This endpoint requires an API key.",
+                hint=("Send Authorization: Bearer <token> or "
+                      "X-API-Key: <token>. Mint a key at POST /api/keys "
+                      "after signing in to the dashboard."))
+        auth = _auth_db.find_api_key(raw)
+        if auth is None:
+            raise ApiError(
+                "auth_invalid",
+                "The provided API key is not valid or has been revoked.",
+                hint="List your active keys with GET /api/keys; mint a new "
+                     "one with POST /api/keys.")
+        return auth
+
+    # ── helper: require a logged-in user (cookie session) ─────────────
+    def _require_session_user(request: Request) -> dict:
+        try:
+            tok = request.cookies.get(_SESSION_COOKIE)
+        except Exception:
+            tok = None
+        if not tok:
+            raise ApiError(
+                "auth_required",
+                "Sign in to manage API keys.",
+                hint="POST /auth/login or open the inference site and "
+                     "sign in, then retry this request from the same "
+                     "browser session.")
+        u = _auth_db.get_session_user(tok)
+        if not u:
+            raise ApiError(
+                "auth_expired",
+                "Your session has expired or been revoked.",
+                hint="Sign in again to refresh your session cookie.")
+        return u
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ GET /benchmarks                                              ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.get("/api/benchmarks")
+    @api_endpoint("/api/benchmarks")
+    async def v1_benchmarks():
+        report, fname = _load_latest_benchmark()
+        if report is None and fname is None:
+            return ({
+                "available": False,
+                "message": ("No benchmark report has been generated yet. "
+                            "Run _qa_tmp/rescore_baselines.py to produce "
+                            "reports/apin_vs_baselines_final_*.json, then "
+                            "retry."),
+            }, {"warnings": [{
+                "code": "benchmark_report_missing",
+                "message": "No apin_vs_baselines_final_*.json found.",
+            }]})
+        if report is None:
+            raise ApiError(
+                "internal_error",
+                f"Latest benchmark report '{fname}' is unreadable.",
+                hint="Server logs hold the parser error; the file may "
+                     "have been truncated by an interrupted writer. "
+                     "Regenerate it with _qa_tmp/rescore_baselines.py.",
+                details={"report_file": fname})
+
+        # PDA F7: if the JSON is structurally valid but a field has
+        # an unexpected type (e.g. macro_f1 is null instead of a float),
+        # _benchmark_summary's float() casts would raise. Catch here so
+        # the caller gets a clean internal_error pointing at the offending
+        # file, not an opaque 500 with no clue what to fix.
+        try:
+            summary = _benchmark_summary(report)
+        except Exception as e:
+            logger.exception(
+                "Benchmark summary failed for %s", fname)
+            raise ApiError(
+                "internal_error",
+                f"Benchmark report '{fname}' parsed but is semantically "
+                "malformed (an expected numeric field is missing or "
+                "has the wrong type).",
+                hint="Regenerate the report with "
+                     "_qa_tmp/rescore_baselines.py; if the failure "
+                     "persists open a support ticket with this "
+                     "request_id.",
+                # PDA §8: report_file is safe (it IS the user-visible
+                # filename); exception class is NOT — logger captured
+                # the class server-side already.
+                details={"report_file": fname})
+
+        return {
+            "available":     True,
+            "report_file":   fname,
+            "generated_at":  report.get("generated_at"),
+            "test_set": {
+                "n":                int(report.get("test_images", 0)),
+                "integrity":        "content-hash verified clean of every "
+                                    "training pool",
+                "locked":           True,
+                "locked_rationale": ("Test split is frozen so every "
+                                     "subsequent model change is measured "
+                                     "on identical images, eliminating "
+                                     "rubric drift."),
+            },
+            "summary":       summary,
+            "comparison": {
+                "apin_ensemble":              report.get("apin_ensemble") or {},
+                "baselines_on_apin_v2_subset":
+                    report.get("baselines_on_apin_v2_subset_1195") or {},
+                "baselines_on_apin_v1_subset":
+                    report.get("baselines_on_apin_v1_subset_719") or {},
+                "baselines_full_1379":        report.get("baselines_full_1379")
+                                                or {},
+            },
+            "methodology": {
+                "metrics":        ["accuracy", "macro_f1", "ece (15-bin)"],
+                "apples_to_apples": ("APIN and every baseline are scored "
+                                     "on the SAME images. APIN's "
+                                     "diagnosed-subset numbers compare "
+                                     "only on the images APIN's quality "
+                                     "gate accepted; the strict_accuracy "
+                                     "number compares on all 1,379 with "
+                                     "abstentions counted as errors."),
+                "gates_compared": ["v1 (Laplacian-variance blur)",
+                                   "v2 (resolution-invariant blur)"],
+            },
+            "interpretation": (
+                "Read the summary's `honest_finding` before quoting any "
+                "single number from this report. Cherry-picking either "
+                "v1-gate macro-F1 OR baseline-on-full-set accuracy in "
+                "isolation will misrepresent what the comparison says."
+            ),
+            "contract": "v1.0 (stable)",
+        }
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ POST /warmup — idempotent trigger                            ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    # PDA F5: lazy loaders are CPU+GPU heavy and were running on the
+    # event loop, blocking everything else during a cold start. They
+    # now run in the default executor, and a process-wide cooldown
+    # prevents a tight POST /warmup loop from thrashing the loaders.
+    import time as _time
+    _warmup_state = {"last_run_ts": 0.0,
+                     "cooldown_s":  10.0,
+                     "lock":        asyncio.Lock()}
+
+    def _do_warmup_blocking() -> list[dict]:
+        """Runs in an executor thread; never touches the event loop."""
+        from scripts.apin.section8_apin_server import get_apin
+        out: list[dict] = []
+        a = get_apin()
+        for label, fn in (
+            ("model2",       getattr(a, "_lazy_load_model2",       None)),
+            ("efficientnet", getattr(a, "_lazy_load_efficientnet", None)),
+            ("dinov2",       getattr(a, "_lazy_load_dinov2",       None)),
+        ):
+            if fn is None:
+                out.append({"signal": label, "status": "missing_loader"})
+                continue
+            try:
+                fn()
+                out.append({"signal": label, "status": "ready"})
+            except Exception as e:
+                # Internal log only; nothing sensitive leaks to the API
+                # response (we set status="load_failed" without an
+                # exception name on the wire).
+                logger.warning("warmup: %s lazy-load failed: %r", label, e)
+                out.append({"signal": label, "status": "load_failed"})
+        return out
+
+    @app.post("/api/warmup")
+    @api_endpoint("/api/warmup", success_status=202)
+    async def v1_warmup():
+        """Trigger lazy-loading of every APIN signal. Idempotent and
+        executor-backed: the heavy load runs in a worker thread so the
+        event loop continues to serve `/health`, `/status`, etc. while
+        models warm up.
+
+        A short cooldown rate-limits concurrent callers: if the previous
+        call was less than _warmup_state['cooldown_s'] seconds ago and
+        another call is already in flight, the new caller is fast-pathed
+        with `coalesced: True` instead of triggering a second load.
+        Authoritative readiness still comes from GET /warmup/status."""
+        loop = asyncio.get_running_loop()
+        # Coalesce: if a warmup is already running, just wait for it to
+        # finish (the lock serialises) rather than queueing more loads.
+        async with _warmup_state["lock"]:
+            now = _time.monotonic()
+            since_last = now - _warmup_state["last_run_ts"]
+            if since_last < _warmup_state["cooldown_s"]:
+                return {
+                    "accepted": True,
+                    "coalesced": True,
+                    "signals":   [],
+                    "cooldown_seconds": _warmup_state["cooldown_s"],
+                    "seconds_since_last_run": round(since_last, 2),
+                    "check_status_at": "GET /warmup/status",
+                    "note": ("Cooldown is active: a warmup ran "
+                             "recently. Calling /warmup/status will "
+                             "give you the authoritative ready/not-ready "
+                             "state."),
+                }
+            try:
+                actions = await loop.run_in_executor(
+                    None, _do_warmup_blocking)
+            except Exception:
+                # PDA §8: exception class logged, not returned.
+                logger.exception("warmup: APIN engine construction failed")
+                raise ApiError(
+                    "service_unavailable",
+                    "APIN engine could not be constructed.",
+                    hint="Check server logs; the inference pipeline may be "
+                         "missing model weights on disk.")
+            _warmup_state["last_run_ts"] = _time.monotonic()
+
+        return {
+            "accepted":  True,
+            "coalesced": False,
+            "signals":   actions,
+            "check_status_at": "GET /warmup/status",
+            "note": ("Warmup is idempotent. /warmup/status is the "
+                     "authoritative readiness probe; this endpoint "
+                     "only kicks off any not-yet-warm signal."),
+        }
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ POST /predict/quick — single image, lean payload             ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.post("/api/predict/quick")
+    @api_endpoint("/api/predict/quick")
+    async def v1_predict_quick(
+        file: UploadFile = File(...),
+        # NB: use `str | None`, NOT `Optional[str]` and NOT the local
+        # `_Opt[str]` alias. This module sits under
+        # `from __future__ import annotations`, so pydantic re-evaluates
+        # the annotation against module globals — where any local typing
+        # alias is invisible (PydanticUserError: not fully defined). The
+        # builtin union form resolves cleanly.
+        authorization: str | None = Header(default=None),
+        x_api_key:     str | None = Header(default=None,
+                                            alias="X-API-Key"),
+    ):
+        auth = _require_api_key(authorization, x_api_key)
+        try:
+            data = await file.read()
+        except Exception as e:
+            raise ApiError("invalid_parameter",
+                           "Could not read the uploaded file.",
+                           details={"error": str(e)[:160]})
+        img = _read_image(data)
+        loop = asyncio.get_running_loop()
+        # APIN inference is CPU+GPU bound; offload from the event loop.
+        result = await loop.run_in_executor(None, lambda: _lean_predict(img))
+        result["authenticated_as"] = {
+            "key_id":   auth["key_id"],
+            "key_name": auth["name"],
+        }
+        return result
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ POST /predict/batch — up to 16 images per call               ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.post("/api/predict/batch")
+    @api_endpoint("/api/predict/batch")
+    async def v1_predict_batch(
+        # `list[UploadFile]`, NOT `List[UploadFile]` — same reason as the
+        # `str | None` headers above: `from __future__ import annotations`
+        # stringifies the annotation and pydantic evaluates it against the
+        # module globals, where `typing.List` is not imported. The PEP-585
+        # builtin generic resolves cleanly without any import.
+        files: list[UploadFile] = File(...),
+        # NB: use `str | None`, NOT `Optional[str]` and NOT the local
+        # `_Opt[str]` alias. This module sits under
+        # `from __future__ import annotations`, so pydantic re-evaluates
+        # the annotation against module globals — where any local typing
+        # alias is invisible (PydanticUserError: not fully defined). The
+        # builtin union form resolves cleanly.
+        authorization: str | None = Header(default=None),
+        x_api_key:     str | None = Header(default=None,
+                                            alias="X-API-Key"),
+    ):
+        auth = _require_api_key(authorization, x_api_key)
+        if not files:
+            raise ApiError("missing_parameter",
+                           "Send at least one image in `files`.",
+                           field="files")
+        if len(files) > _BATCH_MAX:
+            raise ApiError(
+                "payload_too_large",
+                f"Batch is limited to {_BATCH_MAX} images per request; "
+                f"got {len(files)}.",
+                hint=f"Split your job into batches of <= {_BATCH_MAX} "
+                     "and call /api/predict/batch repeatedly.",
+                field="files",
+                details={"limit": _BATCH_MAX, "received": len(files)})
+
+        loop = asyncio.get_running_loop()
+        items = []
+        n_ok = n_err = 0
+        # PDA F2: track cumulative bytes across the batch; reject when the
+        # next file would push us past _BATCH_TOTAL_MAX_BYTES. We reject
+        # rather than truncate so the caller knows their batch did not run
+        # in full — silent truncation is worse than a clean failure.
+        total_bytes = 0
+        for i, f in enumerate(files):
+            entry = {"index": i, "filename": f.filename}
+            try:
+                data = await f.read()
+                total_bytes += len(data)
+                if total_bytes > _BATCH_TOTAL_MAX_BYTES:
+                    raise ApiError(
+                        "payload_too_large",
+                        ("Total batch upload exceeds the "
+                         f"{_BATCH_TOTAL_MAX_BYTES // 1_000_000} MB "
+                         "aggregate limit."),
+                        hint=("Split the batch into smaller chunks (try "
+                              f"<= {_BATCH_TOTAL_MAX_BYTES // 1_000_000} "
+                              "MB total per request)."),
+                        field="files",
+                        details={"aggregate_limit_bytes":
+                                    _BATCH_TOTAL_MAX_BYTES,
+                                 "received_so_far_bytes": total_bytes,
+                                 "stopped_at_index": i})
+                img  = _read_image(data)
+                r    = await loop.run_in_executor(
+                    None, lambda im=img: _lean_predict(im))
+                entry.update({"ok": True, "result": r})
+                n_ok += 1
+            except ApiError as e:
+                entry.update({"ok": False,
+                              "error": {"code": e.code, "message": e.message,
+                                        "hint": e.hint}})
+                n_err += 1
+                # If we hit the aggregate cap, stop processing further
+                # files — they would all fail for the same reason.
+                if e.code == "payload_too_large":
+                    items.append(entry)
+                    break
+            except Exception as e:
+                # PDA F4: do NOT surface the python exception class to the
+                # caller (§8 forbids internal detail). Log it under the
+                # request_id; the caller gets a stable error contract.
+                logger.exception(
+                    "predict/batch inference failed on index %d", i)
+                entry.update({"ok": False,
+                              "error": {"code": "inference_failed",
+                                        "message": ("Inference failed for "
+                                                    "this image."),
+                                        "hint": "Retry; if it persists, "
+                                                "open a support ticket "
+                                                "with the request_id."}})
+                n_err += 1
+
+        # Single-page (no paging) since the batch is hard-capped at 16.
+        return paginated(
+            items, page=1, page_size=len(items), total=len(items),
+            ok_count=n_ok, error_count=n_err,
+            authenticated_as={"key_id": auth["key_id"],
+                              "key_name": auth["name"]},
+        )
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ POST /keys — mint a new API key                              ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.post("/api/keys")
+    @api_endpoint("/api/keys", success_status=201)
+    async def v1_keys_create(request: Request):
+        u = _require_session_user(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        name = (body or {}).get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ApiError(
+                "missing_parameter",
+                "Provide a human-readable name for the key.",
+                hint='Send JSON like {"name": "drone-fleet-prod"}.',
+                field="name")
+        try:
+            k = _auth_db.create_api_key(u["id"], name.strip())
+        except ValueError as e:
+            raise ApiError("invalid_parameter", str(e), field="name")
+
+        return ({
+            "id":           k["id"],
+            "name":         k["name"],
+            "token":        k["token"],
+            "token_prefix": k["token_prefix"],
+            "created_at":   k["created_at"],
+            "owner": {
+                "user_id":      u["id"],
+                "display_name": u.get("display_name"),
+            },
+            "usage_examples": {
+                "curl_bearer": (
+                    f"curl -H 'Authorization: Bearer {k['token']}' "
+                    "-F 'file=@leaf.jpg' "
+                    "https://dxv-404-apin.hf.space/api/predict/quick"
+                ),
+                "curl_x_api_key": (
+                    f"curl -H 'X-API-Key: {k['token']}' "
+                    "-F 'file=@leaf.jpg' "
+                    "https://dxv-404-apin.hf.space/api/predict/quick"
+                ),
+            },
+            "warning": ("Store this `token` now. It is shown ONCE and "
+                        "is not recoverable. The dashboard shows only "
+                        "the prefix from now on."),
+        }, {"warnings": [{
+            "code": "token_one_time_display",
+            "message": "Raw token is shown ONCE on creation.",
+        }]})
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ GET /keys — list the caller's active API keys                ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.get("/api/keys")
+    @api_endpoint("/api/keys")
+    async def v1_keys_list(request: Request):
+        u = _require_session_user(request)
+        rows = _auth_db.list_api_keys(u["id"], include_revoked=False)
+        # PDA F6: list endpoints must use the §6 paginated shape so SDKs
+        # that generalise across our list endpoints don't need a special
+        # case for /keys. `owner` and `note` ride along via paginated()'s
+        # **extra and appear in `data` next to `items` and `pagination`.
+        return paginated(
+            rows,
+            page=1,
+            page_size=len(rows) if rows else 1,
+            total=len(rows),
+            owner={"user_id":      u["id"],
+                   "display_name": u.get("display_name")},
+            note=("Raw tokens are only ever shown on POST /api/keys. If "
+                  "you've lost a token, revoke this key and mint a "
+                  "new one."),
+        )
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ DELETE /keys/{key_id} — revoke a key                         ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.delete("/api/keys/{key_id}")
+    @api_endpoint("/api/keys/{key_id}")
+    async def v1_keys_revoke(key_id: int, request: Request):
+        u = _require_session_user(request)
+        ok = _auth_db.revoke_api_key(u["id"], int(key_id))
+        if not ok:
+            raise ApiError(
+                "not_found",
+                f"No active key with id {key_id} found on your account.",
+                hint="GET /api/keys to see your active keys.",
+                field="key_id")
+        from datetime import datetime as _now_dt, timezone as _now_tz
+        return {
+            "id":         int(key_id),
+            "revoked":    True,
+            "revoked_at": _now_dt.now(_now_tz.utc).isoformat(
+                timespec="milliseconds").replace("+00:00", "Z"),
+            "note": ("Existing requests using this key will continue to "
+                     "complete; new requests authenticate as failed "
+                     "immediately."),
+        }
+
+    logger.info("APIN /api/ action routes registered - /api/benchmarks "
+                "/api/warmup /api/predict/quick /api/predict/batch "
+                "/api/keys (3)")
+
+
+def _add_v1_mirror_routes(app):
+    """Register the Phase-1 batch-3 mirror endpoints under /api/...
+
+    Every endpoint here is the §2/§3 envelope-wrapped twin of an
+    EXISTING legacy endpoint. The legacy endpoints are NOT touched, so
+    the inference website (which reads unwrapped fields directly off
+    /predict/full and /apin/info) keeps working byte-for-byte.
+
+    Machine consumers should prefer the /api/... paths — they get a
+    stable shape, a request_id they can quote in support tickets, and
+    error envelopes they can branch on programmatically.
+
+        GET    /api/info       (envelope-wrap of /apin/info)
+        GET    /api/feedback/stats  (envelope-wrap of /feedback/stats)
+        GET    /api/retrain/history (envelope-wrap of /feedback/retrain/history)
+        POST   /api/feedback        (envelope-wrap of /feedback; Bearer optional)
+        POST   /api/predict/full    (rich-payload inference, Bearer required)
+    """
+    import io
+    from dataclasses import asdict
+    from PIL import Image as _PIL_Image
+    import numpy as np
+    from fastapi import Body, Header
+    from scripts.apin_v2.api_envelope import api_endpoint, ApiError
+    from scripts.apin_v2 import auth_db as _auth_db
+
+    # ── inlined helpers (closure-local in section8, not importable) ──
+    # The legacy /feedback, /feedback/stats, and /feedback/retrain/history
+    # use validators + path constants that live inside make_app() in
+    # scripts/apin/section8_apin_server.py — closure scope, not module
+    # scope. We can NOT touch section8 (write-locked). So we re-derive
+    # the small handful of constants/functions we need from authoritative
+    # sources:
+    #   _VALID_CLASSES         ← scripts.apin.constants.MODEL2_CLASS_ORDER
+    #   RETRAIN_LOG, _MIN_S    ← APIN_DIR / "retrain_history.jsonl" + 6h
+    #   _validate_feedback     ← byte-identical copy of section8 line 410
+    #   _recency_weight        ← byte-identical copy of section8 line 437
+    # If section8 ever changes its validation logic, this copy will drift
+    # — the test suite asserts the same input → same outcome on both
+    # endpoints to catch the drift loudly.
+    from scripts.apin.constants import MODEL2_CLASS_ORDER as _CANON_CLASSES
+    from scripts.apin.section8_apin_server import (
+        FEEDBACK_LOG, APIN_DIR)
+    _VALID_CLASSES_V1 = set(_CANON_CLASSES)
+    _RETRAIN_LOG_V1   = APIN_DIR / "retrain_history.jsonl"
+    _RETRAIN_MIN_S_V1 = 6 * 3600  # 6 hours; matches section8 line 489
+    _FEEDBACK_RECENCY_BUCKETS_V1 = [
+        (7,     5.0),   # 0-7 days  : 5x
+        (30,    3.0),   # 8-30 days : 3x
+        (90,    1.5),   # 31-90 days: 1.5x
+        (10**9, 1.0),   # older     : 1x
+    ]
+
+    def _validate_feedback_v1(payload: dict) -> tuple:
+        """Byte-identical to section8's _validate_feedback (line 410)."""
+        if not isinstance(payload, dict):
+            return False, "payload must be a JSON object"
+        if "is_correct" not in payload:
+            return False, "missing required field: is_correct (bool)"
+        if not isinstance(payload["is_correct"], bool):
+            return False, "is_correct must be boolean"
+        if not payload["is_correct"]:
+            cc = payload.get("correct_class")
+            if not cc:
+                return False, ("correct_class required when "
+                               "is_correct=false")
+            if cc not in _VALID_CLASSES_V1:
+                return False, (
+                    f"correct_class '{cc}' not in canonical class set "
+                    f"(must be one of: {sorted(_VALID_CLASSES_V1)})")
+            predicted = payload.get("predicted_class")
+            if predicted == cc:
+                return False, (
+                    "predicted_class matches correct_class but "
+                    "is_correct=false — ambiguous feedback, rejected")
+        return True, ""
+
+    def _recency_weight_v1(timestamp_iso: str) -> float:
+        """Byte-identical to section8's _recency_weight (line 437)."""
+        from datetime import datetime as _rw_dt, timezone as _rw_tz
+        try:
+            t = _rw_dt.fromisoformat(
+                timestamp_iso.replace("Z", "+00:00"))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=_rw_tz.utc)
+            now = _rw_dt.now(_rw_tz.utc)
+            days = max(0.0, (now - t).total_seconds() / 86400.0)
+        except Exception:
+            return 1.0
+        for cutoff, w in _FEEDBACK_RECENCY_BUCKETS_V1:
+            if days <= cutoff:
+                return w
+        return 1.0
+
+    # Reuse the same Bearer-auth gate as the batch-2 endpoints. We
+    # duplicate the closure here rather than reach into _add_v1_action_routes
+    # so the two registrars stay decoupled.
+    def _require_api_key(authorization: str | None,
+                          x_api_key:     str | None) -> dict:
+        raw = None
+        if authorization and authorization.lower().startswith("bearer "):
+            raw = authorization[7:].strip()
+        elif x_api_key:
+            raw = x_api_key.strip()
+        if not raw:
+            raise ApiError(
+                "auth_required",
+                "This endpoint requires an API key.",
+                hint=("Send Authorization: Bearer <token> or "
+                      "X-API-Key: <token>. Mint a key at POST /api/keys."))
+        auth = _auth_db.find_api_key(raw)
+        if auth is None:
+            raise ApiError(
+                "auth_invalid",
+                "The provided API key is not valid or has been revoked.",
+                hint="List your active keys with GET /api/keys; mint a new "
+                     "one with POST /api/keys.")
+        return auth
+
+    def _convert_np(o):
+        if isinstance(o, np.ndarray):              return o.tolist()
+        if isinstance(o, (np.float32, np.float64)): return float(o)
+        if isinstance(o, (np.int32, np.int64)):     return int(o)
+        if isinstance(o, dict):
+            return {k: _convert_np(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [_convert_np(v) for v in o]
+        return o
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ GET /api/info                                            ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.get("/api/info")
+    @api_endpoint("/api/info")
+    async def v1_apin_info():
+        try:
+            from scripts.apin.section8_apin_server import get_apin
+            a = get_apin()
+            return {
+                "n_signals":              int(a.n_signals),
+                "use_psv":                bool(a.use_psv),
+                "class_order":            list(a.class_order),
+                # NB: stacking_mlp_gate_mean is a LIST of per-class
+                # means (one entry per class), not a single scalar. We
+                # mirror the legacy /apin/info shape exactly so machine
+                # consumers that already parse the legacy can lift to
+                # v1 without changing their type assumptions.
+                "stacking_mlp_gate_mean": _convert_np(
+                    a.stacking_mlp_gate_mean),
+                # PDA: consistent _convert_np for every numpy attribute.
+                # Direct .tolist() works today but raises AttributeError
+                # if the attribute ever arrives as a plain Python list
+                # (which is exactly the bug class that the v1.3 cold-start
+                # test caught on stacking_mlp_gate_mean).
+                "reliability_matrix":     _convert_np(a.reliability_matrix),
+                "cold_start_active":      bool(a.cold_start_active),
+                "per_class_temperatures": _convert_np(a.per_class_temps),
+                "conformal_thresholds":   _convert_np(a.conformal_thresholds),
+                "what_these_mean": {
+                    "n_signals":              "How many independent signals fuse into the diagnosis (4 in steady state).",
+                    "stacking_mlp_gate_mean": "Per-class average gate weights across the validation set; closer to 1.0 = the gate is confident in fusing all signals for that class.",
+                    "reliability_matrix":     "Per-signal per-class reliability scores used as priors by the stacking gate.",
+                    "cold_start_active":      "True until the validation buffer fills; while True, tiers downgrade conservatively.",
+                    "per_class_temperatures": "Temperature-scaling values applied to each class's logits to calibrate confidence.",
+                    "conformal_thresholds":   "Per-class quantiles used to build the conformal prediction set at the contracted miscoverage rate.",
+                },
+                "legacy_endpoint":  "/apin/info",
+                "contract":         "v1.0 (stable)",
+            }
+        except Exception:
+            # PDA §8: do NOT surface exception class name to caller.
+            # logger.exception() already captures it server-side under
+            # the same request_id (api_envelope decorator binds it).
+            logger.exception("/api/info: model introspection failed")
+            raise ApiError(
+                "service_unavailable",
+                "Model introspection is unavailable; APIN engine may "
+                "still be cold.",
+                hint="Call POST /api/warmup, then retry GET /api/info "
+                     "once /warmup/status reports all_ready=true.")
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ GET /api/feedback/stats                                       ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.get("/api/feedback/stats")
+    @api_endpoint("/api/feedback/stats")
+    async def v1_feedback_stats():
+        # Read the same FEEDBACK_LOG with the same recency-weighting
+        # rules section8 uses; the helpers are inlined above because
+        # they live in section8's closure scope, not its module scope.
+        if not FEEDBACK_LOG.exists():
+            return {
+                "total":             0,
+                "correct":           0,
+                "wrong":             0,
+                "by_class":          {},
+                "weighted_by_class": {},
+                "ready_for_retrain": False,
+                "retrain_gate_reason":
+                    "no feedback recorded yet",
+                "retrain_gate_thresholds": {
+                    "min_wrong_total":         10,
+                    "min_classes_with_3_each": 3,
+                },
+                "log_path":         str(FEEDBACK_LOG),
+                "legacy_endpoint":  "/feedback/stats",
+            }
+        total = correct = wrong = 0
+        by_class: dict = {}
+        weighted_by_class: dict = {}
+        with open(FEEDBACK_LOG) as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                total += 1
+                if r.get("is_correct"):
+                    correct += 1
+                    continue
+                wrong += 1
+                cc = r.get("correct_class", "unknown")
+                by_class[cc] = by_class.get(cc, 0) + 1
+                w = _recency_weight_v1(r.get("timestamp", ""))
+                weighted_by_class[cc] = round(
+                    weighted_by_class.get(cc, 0.0) + w, 4)
+        classes_with_min = sum(1 for v in by_class.values() if v >= 3)
+        ready = (wrong >= 10) and (classes_with_min >= 3)
+        if ready:
+            reason = "thresholds met"
+        else:
+            reason = (f"need >= 10 wrong (got {wrong}) AND >= 3 classes "
+                      f"with >= 3 corrections (got {classes_with_min})")
+        return {
+            "total":              total,
+            "correct":            correct,
+            "wrong":              wrong,
+            "accuracy":           round(correct / total, 4) if total else None,
+            "by_class":           by_class,
+            "weighted_by_class":  weighted_by_class,
+            "ready_for_retrain":  ready,
+            "retrain_gate_reason": reason,
+            "retrain_gate_thresholds": {
+                "min_wrong_total":         10,
+                "min_classes_with_3_each": 3,
+            },
+            "legacy_endpoint":   "/feedback/stats",
+        }
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ GET /api/retrain/history                                      ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.get("/api/retrain/history")
+    @api_endpoint("/api/retrain/history")
+    async def v1_retrain_history():
+        if not _RETRAIN_LOG_V1.exists():
+            return {
+                "events":             [],
+                "n_events_returned":  0,
+                "n_events_total":     0,
+                "last_complete":      None,
+                "rate_limit_seconds": _RETRAIN_MIN_S_V1,
+                "legacy_endpoint":    "/feedback/retrain/history",
+            }
+        events = []
+        last_complete = None
+        with open(_RETRAIN_LOG_V1, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                    events.append(e)
+                    if e.get("status") == "complete":
+                        last_complete = e.get("timestamp")
+                except Exception:
+                    continue
+        return {
+            "events":             events[-20:],
+            "n_events_returned":  min(20, len(events)),
+            "n_events_total":     len(events),
+            "last_complete":      last_complete,
+            "rate_limit_seconds": _RETRAIN_MIN_S_V1,
+            "legacy_endpoint":    "/feedback/retrain/history",
+        }
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ POST /api/feedback                                            ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.post("/api/feedback", status_code=201)
+    @api_endpoint("/api/feedback", success_status=201)
+    async def v1_feedback(
+        payload: dict = Body(...),
+        authorization: str | None = Header(default=None),
+        x_api_key:     str | None = Header(default=None,
+                                            alias="X-API-Key"),
+    ):
+        """Submit a correction or confirmation against a past prediction.
+
+        Bearer auth is OPTIONAL on this endpoint: anonymous feedback is
+        accepted (mirrors the legacy /feedback behaviour so the public
+        farmer feedback button keeps working), but feedback with a valid
+        Bearer token is tagged with the user_id and shows up in their
+        retraining-influence dashboard.
+        """
+        from datetime import datetime as _fb_dt
+        if not isinstance(payload, dict):
+            raise ApiError(
+                "validation_failed",
+                "Feedback body must be a JSON object.",
+                hint='Send a JSON body like {"is_correct": false, '
+                     '"predicted_class": "okra_yvmv", '
+                     '"correct_class": "okra_healthy"}.')
+        ok, reason = _validate_feedback_v1(payload)
+        if not ok:
+            raise ApiError(
+                "validation_failed",
+                f"Feedback rejected: {reason}",
+                hint="See API_CONTRACT.md or GET /api/diseases for the list "
+                     "of valid class names.",
+                details={"reason": reason})
+
+        # Optional auth: tag the record but never demand it.
+        user_id = None
+        if authorization or x_api_key:
+            try:
+                auth = _require_api_key(authorization, x_api_key)
+                user_id = auth["user_id"]
+            except ApiError:
+                # An explicitly-bad key is a 401 — we don't silently
+                # drop it to anonymous.
+                raise
+
+        record = {
+            "timestamp":   _fb_dt.utcnow().isoformat() + "Z",
+            "via":         "/api/feedback",
+            "user_id":     user_id,
+            **payload,
+        }
+        # Atomic append (fits in one write call; OS-level atomic at
+        # the filesystem block size).
+        with open(FEEDBACK_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+        return {
+            "status":     "recorded",
+            "validated":  True,
+            "tagged_to":  ({"user_id": user_id} if user_id else None),
+            "stats_endpoint": "/api/feedback/stats",
+        }
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ POST /api/predict/full                                        ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    # The machine-grade rich-payload inference endpoint. Bearer auth
+    # (machine consumers, not browser cookies). Routes only okra/brassica
+    # diagnoses through APIN; for tomato or chilli leaves it returns a
+    # clean ROUTER_REJECTED tier — the cookie-auth /predict/full still
+    # routes those into TomatoPipeline for the website.
+    # The contract chose this scope intentionally: machine consumers
+    # most commonly want the okra/brassica decision logic. A separate
+    # /api/predict/tomato can be added later under the perception
+    # (drone) phase.
+
+    def _v1_full_predict(img_rgb: np.ndarray) -> dict:
+        from scripts.apin.section8_apin_server import get_apin
+        apin = get_apin()
+        result = apin.predict(img_rgb)
+        try:
+            out = asdict(result)
+        except Exception:
+            out = {k: v for k, v in vars(result).items()
+                   if not k.startswith("_")}
+        out = _convert_np(out)
+        # Build the top-3 the same way /predict/quick does so machine
+        # consumers don't have to re-sort the probability dict.
+        probs = out.get("all_class_probabilities") or {}
+        top3 = [{"class": k, "probability": round(float(v), 4)}
+                for k, v in sorted(probs.items(),
+                                    key=lambda kv: -float(kv[1]))[:3]]
+        out["top3"]                 = top3
+        out["mode"]                 = "full"
+        out["api_scope"]             = "okra,brassica"
+        out["api_tomato_note"] = (
+            "Tomato leaves are NOT routed through this endpoint. Use "
+            "the cookie-authenticated /predict/full from the website "
+            "for tomato; /api/predict/tomato is on the roadmap.")
+        return out
+
+    @app.post("/api/predict/full")
+    @api_endpoint("/api/predict/full")
+    async def v1_predict_full(
+        file: UploadFile = File(...),
+        authorization: str | None = Header(default=None),
+        x_api_key:     str | None = Header(default=None,
+                                            alias="X-API-Key"),
+    ):
+        auth = _require_api_key(authorization, x_api_key)
+        try:
+            data = await file.read()
+        except Exception:
+            # PDA §8: exception class logged server-side, not returned.
+            logger.exception("/api/predict/full: upload read failed")
+            raise ApiError(
+                "invalid_parameter",
+                "Could not read the uploaded file.",
+                hint="Retry the upload; if it persists, the multipart "
+                     "stream may be truncated.")
+        if not data:
+            raise ApiError(
+                "invalid_parameter",
+                "Image file is empty.",
+                hint="Upload a non-empty JPEG, PNG, or WebP image.",
+                field="file")
+        if len(data) > 12_000_000:
+            raise ApiError(
+                "payload_too_large",
+                f"Image exceeds the 12 MB per-file limit "
+                f"(got {len(data) // 1_000_000} MB).",
+                hint="Downscale the longest side to ~2048 px and retry.",
+                field="file")
+        try:
+            pil = _PIL_Image.open(io.BytesIO(data)).convert("RGB")
+            img = np.array(pil, dtype=np.uint8)
+        except Exception:
+            # PDA §8: decoder error class logged server-side only.
+            logger.exception("/api/predict/full: image decode failed")
+            raise ApiError(
+                "unsupported_media_type",
+                "Could not decode the uploaded file as an image.",
+                hint="Send a JPEG, PNG, or WebP image.")
+
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None, lambda: _v1_full_predict(img))
+        result["authenticated_as"] = {
+            "key_id":   auth["key_id"],
+            "key_name": auth["name"],
+        }
+        return result
+
+    logger.info("APIN /api/ mirror routes registered - /api/info "
+                "/api/feedback /api/feedback/stats /api/retrain/history "
+                "/api/predict/full")
+
+
+def _add_docs_route(app):
+    """Register GET /docs serving the API monograph (Phase 3).
+
+    The page is a single self-contained HTML file at
+    scripts/apin_v2/docs.html. It calls the live /api/* endpoints
+    same-origin via its playground. Public, no auth required.
+
+    FastAPI auto-registers /docs as Swagger UI. We REMOVE that
+    default route first and then register ours, so the human-facing
+    monograph wins. The raw OpenAPI 3.1 schema remains at
+    /openapi.json (linked from the monograph header).
+    """
+    from starlette.routing import Route
+    removed = 0
+    for i in range(len(app.router.routes) - 1, -1, -1):
+        r = app.router.routes[i]
+        if isinstance(r, Route) and r.path == "/docs":
+            app.router.routes.pop(i)
+            removed += 1
+
+    # PDA: match other HTML pages' no-cache policy so dev iterations
+    # are visible immediately and so users always get the latest
+    # contract documentation.
+    _DOCS_HEADERS = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+    }
+
+    @app.get("/docs", response_class=HTMLResponse)
+    async def docs_page():
+        return HTMLResponse(_load_html("docs.html"), headers=_DOCS_HEADERS)
+    logger.info("APIN /docs page registered (Phase 3 API monograph; "
+                "removed %d default Swagger route(s))", removed)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# /api/ perception routes — Phase 2 batch 1
+# ════════════════════════════════════════════════════════════════════════
+# Drone-grade endpoints for fleet integrations. Every scan is a GPS-tagged
+# inference; responses are RFC 7946 GeoJSON so any GIS tool (QGIS, Mapbox,
+# Google Earth, drone mission planners) can render them directly. Scans
+# persist to the user's account; the same user can list, retrieve, and
+# soft-delete past scans for right-to-erasure compliance.
+#
+# Scope of batch 1: single-frame /api/scan, batch /api/scan/batch, list
+# GET /api/scans, retrieve GET /api/scans/{uid}, soft-delete DELETE.
+# A future batch will add flight sessions, hotspot clustering, mosaic
+# tiling, and webhook callbacks. The DB schema already carries a
+# nullable flight_id column so the flights table can be added without
+# a data migration.
+
+# Geo validation — drone telemetry can be sloppy. We accept the IETF
+# IS-19115/WGS84 ranges and reject NaN/Inf which JSON allows but isn't
+# a valid coordinate.
+def _validate_geo(payload: dict) -> dict:
+    """Returns the cleaned geo dict, or raises ApiError on bad input.
+
+    Required: latitude (float, [-90, 90]), longitude (float, [-180, 180]).
+    Optional: altitude_m (float), heading_deg (float, [0, 360)),
+              accuracy_m (float, >= 0).
+    Trailing whitespace and stray None values are tolerated.
+    """
+    import math
+    from scripts.apin_v2.api_envelope import ApiError
+
+    def _f(name, val, *, required, lo=None, hi=None,
+           hi_exclusive=False, non_negative=False):
+        if val is None or val == "":
+            if required:
+                raise ApiError("missing_parameter",
+                               f"Field '{name}' is required.",
+                               field=name)
+            return None
+        try:
+            x = float(val)
+        except (TypeError, ValueError):
+            raise ApiError("invalid_parameter",
+                           f"Field '{name}' must be a number.",
+                           field=name)
+        if math.isnan(x) or math.isinf(x):
+            raise ApiError("invalid_parameter",
+                           f"Field '{name}' must be a finite number.",
+                           field=name)
+        if non_negative and x < 0:
+            raise ApiError("invalid_parameter",
+                           f"Field '{name}' must be >= 0.",
+                           field=name)
+        if lo is not None and x < lo:
+            raise ApiError(
+                "invalid_parameter",
+                f"Field '{name}' = {x} is below the minimum "
+                f"({lo}).",
+                field=name)
+        if hi is not None:
+            if hi_exclusive:
+                if x >= hi:
+                    raise ApiError(
+                        "invalid_parameter",
+                        f"Field '{name}' = {x} must be strictly less "
+                        f"than {hi}.",
+                        field=name)
+            elif x > hi:
+                raise ApiError(
+                    "invalid_parameter",
+                    f"Field '{name}' = {x} is above the maximum "
+                    f"({hi}).",
+                    field=name)
+        return x
+
+    return {
+        "latitude":    _f("latitude",    payload.get("latitude"),
+                          required=True, lo=-90.0, hi=90.0),
+        "longitude":   _f("longitude",   payload.get("longitude"),
+                          required=True, lo=-180.0, hi=180.0),
+        "altitude_m":  _f("altitude_m",  payload.get("altitude_m"),
+                          required=False),
+        # PDA Phase-2: previously this silently wrapped 0..360 (e.g. -10
+        # -> 350). For an industry-grade drone API that is data
+        # corruption: a drone SDK reporting heading=-90 should fail
+        # loud, not silently store 270. Enforce [0, 360) strictly.
+        "heading_deg": _f("heading_deg", payload.get("heading_deg"),
+                          required=False, lo=0.0, hi=360.0,
+                          hi_exclusive=True),
+        "accuracy_m":  _f("accuracy_m",  payload.get("accuracy_m"),
+                          required=False, non_negative=True),
+    }
+
+
+def _parse_iso_captured_at(s: object) -> str:
+    """Validate an ISO-8601 timestamp. Returns the canonical form
+    (UTC, millisecond precision, `Z` suffix). Raises ApiError on bad
+    input. We accept both naive and offset-aware strings; naive ones
+    are interpreted as UTC (consistent with the contract §8 rule that
+    all server timestamps are UTC)."""
+    from datetime import datetime, timezone
+    from scripts.apin_v2.api_envelope import ApiError
+    if s is None or s == "":
+        # captured_at is optional — drones occasionally drop GPS time;
+        # we substitute the server's now() if missing. We document
+        # this in the response under `geo_meta.captured_at_source`.
+        return ""
+    if not isinstance(s, str):
+        raise ApiError(
+            "invalid_parameter",
+            "Field 'captured_at' must be an ISO-8601 timestamp string.",
+            field="captured_at")
+    try:
+        t = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        raise ApiError(
+            "invalid_parameter",
+            "Field 'captured_at' is not a valid ISO-8601 timestamp.",
+            hint='Send a string like "2026-05-23T12:34:56Z" or '
+                 '"2026-05-23T12:34:56+05:30".',
+            field="captured_at")
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return (t.astimezone(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"))
+
+
+def _scan_to_geojson_feature(scan: dict,
+                             diagnosis_db: Optional[dict] = None) -> dict:
+    """Convert a scan dict (from auth_db._scan_row_to_dict) into an
+    RFC 7946 GeoJSON Feature. Coordinates are [longitude, latitude].
+
+    Properties carry the diagnosis + treatment urgency + a one-line
+    recommended action so a fleet operator's map UI can colour pins by
+    urgency without a second API call. The full APINResult lives at
+    GET /api/scans/{uid}?include=result for callers who want it.
+    """
+    geo = scan.get("geo") or {}
+    lat = geo.get("latitude"); lon = geo.get("longitude")
+    diag_class = scan.get("diagnosis")
+    diag_info = (diagnosis_db or {}).get(diag_class) or {}
+    severity = scan.get("severity") or "unknown"
+    # Pick a one-line recommendation matching the severity bucket.
+    treatment = diag_info.get("treatment") or {}
+    recommended = None
+    if isinstance(treatment, dict):
+        for sev_key in (severity, "moderate", "mild", "severe"):
+            recs = treatment.get(sev_key)
+            if recs:
+                if isinstance(recs, list) and recs:
+                    recommended = str(recs[0])
+                elif isinstance(recs, str):
+                    recommended = recs
+                break
+    urgency_map = diag_info.get("urgency") or {}
+    urgency = (urgency_map.get(severity) or
+               urgency_map.get("moderate") or
+               diag_info.get("default_urgency"))
+
+    return {
+        "type": "Feature",
+        "geometry": {
+            "type": "Point",
+            "coordinates": [lon, lat],     # GeoJSON: [lon, lat]
+        },
+        "properties": {
+            "scan_uid":          scan.get("scan_uid"),
+            "flight_id":         scan.get("flight_id"),
+            "diagnosis":         diag_class,
+            "confidence":        scan.get("confidence"),
+            "tier":              scan.get("tier"),
+            "severity":          severity,
+            "is_ood":            scan.get("is_ood"),
+            "captured_at":       scan.get("captured_at"),
+            "altitude_m":        geo.get("altitude_m"),
+            "heading_deg":       geo.get("heading_deg"),
+            "accuracy_m":        geo.get("accuracy_m"),
+            "urgency":           urgency,
+            "recommended_action": recommended,
+            "image_sha256":      (scan.get("image") or {}).get("sha256"),
+        },
+    }
+
+
+# ── Shared Console top-nav (Phase 8.F) ──────────────────────────────────
+# Pre-Phase-8.F, each Console page had only `dashboard · API Console ·
+# PAGE` crumbs at the top — useful for "where am I" but useless for
+# cross-page navigation. This shared <nav> block ships in every Console
+# page via the `<!-- @CONSOLE_NAV@ -->` placeholder, substituted at
+# startup (one cost, never per-request). The active link is computed
+# client-side from window.location.pathname so the same bytes work for
+# every page. Styling lives inline (no extra /static/*.css fetch).
+_CONSOLE_NAV_BYTES = (
+    b'<nav class="apin-console-nav" aria-label="API Console">\n'
+    b'  <a class="acn-logo" href="/account/api/dashboard">'
+    b'<span class="acn-logo-mark">A</span><span class="acn-logo-word">APIN console</span></a>\n'
+    b'  <a href="/account/api/dashboard" data-acn="/account/api/dashboard">Dashboard</a>\n'
+    b'  <a href="/account/api/keys" data-acn="/account/api/keys">Keys</a>\n'
+    b'  <a href="/account/api/webhooks" data-acn="/account/api/webhooks">Webhooks</a>\n'
+    # Phase 8.H · Alerts nav link gets an unread-count badge child. The
+    # badge is .hidden by default and revealed by apin_nav_badge.js when
+    # the count is > 0. Uses the shared odometer for the digit animation.
+    b'  <a href="/account/api/alerts" data-acn="/account/api/alerts" class="acn-with-badge">'
+    b'Alerts'
+    b'<span class="apin-nav-badge" id="apin-nav-badge" hidden aria-label="unread alerts">'
+    b'<span class="apin-nav-badge-count apin-odometer" id="apin-nav-badge-count"></span>'
+    b'</span>'
+    b'</a>\n'
+    # Phase 9.E · Usage observability — account-wide charts + drill drawer.
+    b'  <a href="/account/api/usage" data-acn="/account/api/usage">Usage</a>\n'
+    b'  <a href="/account/api/sandbox" data-acn="/account/api/sandbox">Sandbox</a>\n'
+    b'  <a href="/account/api/settings" data-acn="/account/api/settings">Settings</a>\n'
+    b'  <a href="/account/api/quickstart" data-acn="/account/api/quickstart">Quickstart</a>\n'
+    b'  <span class="acn-spacer"></span>\n'
+    # Phase 8.G · account chip + dropdown holder. Renders client-side
+    # once /api/auth/me lands. JS lives in /static/console_account_chip.js.
+    b'  <div class="apin-account-chip-wrap" id="apin-account-chip-holder">\n'
+    b'    <button type="button" class="apin-chip" id="apin-chip-button"\n'
+    b'            aria-haspopup="true" aria-expanded="false" aria-label="Account menu">\n'
+    b'      <span class="apin-chip-avatar" id="apin-chip-avatar"></span>\n'
+    b'      <span class="apin-chip-name" id="apin-chip-name">&hellip;</span>\n'
+    b'      <svg class="apin-chip-caret" aria-hidden="true"><use href="#i-chevron-right"/></svg>\n'
+    b'    </button>\n'
+    b'    <div class="apin-chip-dropdown" id="apin-chip-dropdown" role="menu" hidden></div>\n'
+    b'  </div>\n'
+    b'</nav>\n'
+    b'<style>\n'
+    b'.apin-console-nav{position:sticky;top:0;z-index:100;display:flex;'
+    b'align-items:center;gap:2px;padding:10px 22px;background:rgba(251,249,243,0.96);'
+    b'border-bottom:1px solid #c7bca9;backdrop-filter:blur(6px);'
+    b'font-family:\'Inter\',system-ui,sans-serif;font-size:13px;flex-wrap:wrap}\n'
+    b'.apin-console-nav a{color:#5a5246;padding:6px 12px;border-radius:6px;'
+    b'text-decoration:none;font-weight:500;transition:background .12s,color .12s}\n'
+    b'.apin-console-nav a:hover{color:#1a1612;background:#e9e2d1}\n'
+    b'.apin-console-nav a.acn-active{background:#1a1612;color:#fbf9f3}\n'
+    b'.apin-console-nav .acn-logo{display:inline-flex;align-items:center;gap:8px;'
+    b'margin-right:14px;padding:6px 10px 6px 6px;font-family:\'Fraunces\',serif;'
+    b'font-weight:500;font-size:14px;color:#1a1612}\n'
+    b'.apin-console-nav .acn-logo:hover{background:transparent}\n'
+    b'.apin-console-nav .acn-logo-mark{display:inline-flex;align-items:center;'
+    b'justify-content:center;width:24px;height:24px;border-radius:50%;'
+    b'background:#2f6f3e;color:#fbf9f3;font-family:\'Inter\',sans-serif;'
+    b'font-weight:600;font-size:12px}\n'
+    b'.apin-console-nav .acn-spacer{flex:1}\n'
+    b'.apin-console-nav .acn-docs,.apin-console-nav .acn-out{'
+    b'font-family:\'JetBrains Mono\',monospace;font-size:11.5px;color:#5a5246}\n'
+    b'.apin-console-nav .acn-docs:hover,.apin-console-nav .acn-out:hover{color:#1a1612}\n'
+    b'@media (max-width:780px){.apin-console-nav{font-size:12px;padding:8px 14px}'
+    b'.apin-console-nav .acn-logo-word{display:none}}\n'
+    # ── Account chip + dropdown (Phase 8.G) ─────────────────────────
+    b'.apin-account-chip-wrap{position:relative;display:inline-flex;align-items:center}\n'
+    b'.apin-chip{display:inline-flex;align-items:center;gap:8px;padding:5px 10px 5px 5px;'
+    b'border:1px solid transparent;border-radius:999px;background:transparent;'
+    b'color:#1a1612;font:inherit;cursor:pointer;'
+    b'transition:background .12s,border-color .12s}\n'
+    b'.apin-chip:hover{background:#fbf9f3;border-color:#c7bca9}\n'
+    b'.apin-chip[aria-expanded="true"]{background:#fbf9f3;border-color:#a59885}\n'
+    b'.apin-chip-avatar{width:28px;height:28px;border-radius:50%;'
+    b'background:#e9e2d1;display:inline-flex;align-items:center;justify-content:center;'
+    b'overflow:hidden;flex-shrink:0}\n'
+    b'.apin-chip-avatar svg{width:100%;height:100%;display:block}\n'
+    b'.apin-chip-initial{font-family:\'Fraunces\',serif;font-weight:500;'
+    b'font-size:14px;color:#2f6f3e}\n'
+    b'.apin-chip-name{font-family:\'Inter\',system-ui,sans-serif;font-weight:500;'
+    b'font-size:13px;max-width:120px;overflow:hidden;text-overflow:ellipsis;'
+    b'white-space:nowrap}\n'
+    b'.apin-chip-caret{width:12px;height:12px;color:#5a5246;'
+    b'transform:rotate(90deg);transition:transform .15s}\n'
+    b'.apin-chip[aria-expanded="true"] .apin-chip-caret{transform:rotate(270deg)}\n'
+    b'.apin-chip-signed-out{display:inline-flex;align-items:center;gap:6px;'
+    b'padding:6px 12px;border:1px solid #c7bca9;border-radius:999px;'
+    b'color:#5a5246;font-size:13px;text-decoration:none;background:transparent}\n'
+    b'.apin-chip-signed-out:hover{background:#fbf9f3;color:#1a1612}\n'
+    # Dropdown panel
+    b'.apin-chip-dropdown{position:absolute;top:calc(100% + 8px);right:0;'
+    b'width:300px;background:#fbf9f3;border:1px solid #c7bca9;border-radius:12px;'
+    b'box-shadow:0 12px 32px rgba(0,0,0,0.15);z-index:120;overflow:hidden;'
+    b'font-family:\'Inter\',system-ui,sans-serif}\n'
+    b'.apin-chip-dropdown[hidden]{display:none}\n'
+    # Drifting-leaves identity strip
+    b'.acd-strip{height:84px;background:linear-gradient(135deg,#e9e2d1,#d9d0bd);'
+    b'border-bottom:1px solid #c7bca9}\n'
+    b'.acd-identity{padding:10px 16px 12px;border-bottom:1px solid #e9e2d1;'
+    b'background:#fbf9f3}\n'
+    b'.acd-name{font-family:\'Fraunces\',serif;font-weight:500;font-size:16px;'
+    b'color:#1a1612;letter-spacing:-0.005em;margin-bottom:2px}\n'
+    b'.acd-email{font-size:12px;color:#5a5246;font-family:\'JetBrains Mono\',monospace;'
+    b'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n'
+    b'.acd-menu{list-style:none;padding:6px 0;margin:0}\n'
+    b'.acd-sep{height:1px;background:#e9e2d1;margin:6px 0}\n'
+    b'.acd-item{display:flex;align-items:center;gap:10px;padding:8px 16px;'
+    b'width:100%;color:#1a1612;text-decoration:none;font-size:13px;'
+    b'background:transparent;border:0;font-family:inherit;cursor:pointer}\n'
+    b'.acd-item:hover{background:#e9e2d1;text-decoration:none}\n'
+    b'.acd-item-here{background:#f4efe6}\n'
+    b'.acd-item-danger{color:#b01820}\n'
+    b'.acd-item-danger:hover{background:#f6cfd2;color:#b01820}\n'
+    b'.acd-icon{width:18px;height:18px;color:#5a5246;flex-shrink:0;'
+    b'display:inline-flex;align-items:center;justify-content:center}\n'
+    b'.acd-item-here .acd-icon,.acd-item-danger .acd-icon{color:inherit}\n'
+    b'.acd-icon svg{width:16px;height:16px}\n'
+    b'.acd-label{flex:1}\n'
+    b'.acd-pill{font-size:10px;font-family:\'JetBrains Mono\',monospace;'
+    b'background:#2f6f3e;color:#fbf9f3;padding:2px 6px;border-radius:8px;'
+    b'text-transform:uppercase;letter-spacing:0.05em}\n'
+    # Session block in dropdown
+    b'.acd-session{padding:10px 16px;background:#f4efe6;'
+    b'border-top:1px solid #e9e2d1;border-bottom:1px solid #e9e2d1}\n'
+    b'.acd-session-label{font-size:11px;color:#5a5246;text-transform:uppercase;'
+    b'letter-spacing:0.05em;margin-bottom:2px;font-family:\'JetBrains Mono\',monospace}\n'
+    b'.acd-session-time{font-family:\'Fraunces\',serif;font-weight:500;font-size:18px;'
+    b'color:#1a1612;margin-bottom:8px}\n'
+    b'.acd-extend-btn{display:inline-flex;align-items:center;gap:6px;'
+    b'padding:5px 10px;background:transparent;border:1px solid #c7bca9;'
+    b'border-radius:6px;color:#1a1612;font-family:inherit;font-size:12px;'
+    b'cursor:pointer}\n'
+    b'.acd-extend-btn:hover{background:#fbf9f3;border-color:#5a5246}\n'
+    b'.acd-extend-btn svg{width:12px;height:12px}\n'
+    # Session modal (warning + ended)
+    b'.apin-modal-backdrop{position:fixed;inset:0;background:rgba(26,22,18,0.55);'
+    b'display:flex;align-items:center;justify-content:center;z-index:1000;'
+    b'animation:apin-fade-in .15s ease-out}\n'
+    b'@keyframes apin-fade-in{from{opacity:0}to{opacity:1}}\n'
+    b'.apin-modal-card{background:#fbf9f3;border-radius:14px;padding:28px 32px;'
+    b'max-width:420px;width:90%;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,0.25);'
+    b'font-family:\'Inter\',system-ui,sans-serif}\n'
+    b'.apin-modal-icon{display:inline-flex;align-items:center;justify-content:center;'
+    b'width:56px;height:56px;border-radius:14px;background:#fae7c8;color:#b87d1e;'
+    b'margin-bottom:14px}\n'
+    b'.apin-modal-icon svg{width:28px;height:28px}\n'
+    b'.apin-modal-card h2{font-family:\'Fraunces\',serif;font-weight:500;font-size:22px;'
+    b'color:#1a1612;margin:0 0 10px;letter-spacing:-0.005em}\n'
+    b'.apin-modal-card p{color:#5a5246;font-size:14px;line-height:1.5;'
+    b'margin:0 0 20px}\n'
+    b'.apin-modal-actions{display:flex;gap:10px;justify-content:center}\n'
+    b'.apin-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;'
+    b'padding:8px 18px;border-radius:8px;font-family:inherit;font-size:13px;'
+    b'font-weight:500;cursor:pointer;text-decoration:none;border:1px solid transparent;'
+    b'transition:background .15s,border-color .15s}\n'
+    b'.apin-btn-primary{background:#1a1612;color:#fbf9f3;border-color:#1a1612}\n'
+    b'.apin-btn-primary:hover{background:#2a2520;color:#fbf9f3}\n'
+    b'.apin-btn-secondary{background:transparent;color:#1a1612;border-color:#c7bca9}\n'
+    b'.apin-btn-secondary:hover{background:#fbf9f3;border-color:#5a5246}\n'
+    b'@media (max-width:780px){.apin-chip-name{max-width:80px;font-size:12px}\n'
+    b'.apin-chip-dropdown{width:280px;right:-8px}}\n'
+    # ── Toast system (Phase 8.H) — paper card stack, bottom-right ───
+    b'.apin-toast-container{position:fixed;bottom:24px;right:24px;z-index:1100;'
+    b'display:flex;flex-direction:column-reverse;gap:10px;'
+    b'max-width:380px;pointer-events:none}\n'
+    b'.apin-toast-container > *{pointer-events:auto}\n'
+    b'.apin-toast{display:grid;grid-template-columns:auto 1fr auto;gap:10px;'
+    b'background:#fbf9f3;border:1px solid #c7bca9;border-radius:12px;'
+    b'padding:14px 14px 14px 12px;box-shadow:0 12px 28px rgba(0,0,0,0.18);'
+    b'font-family:\'Inter\',system-ui,sans-serif;'
+    b'transform:translateX(0);opacity:1;'
+    b'transition:transform .35s cubic-bezier(0.22,1,0.36,1),'
+    b'opacity .25s ease,box-shadow .25s ease}\n'
+    b'.apin-toast.apin-toast-entering{transform:translateX(calc(100% + 32px));opacity:0}\n'
+    b'.apin-toast.apin-toast-leaving{transform:translateX(calc(100% + 32px));opacity:0;'
+    b'box-shadow:none}\n'
+    b'.apin-toast.apin-toast-collapsing{transform:translateX(0) scale(0.9);opacity:0}\n'
+    b'.apin-toast-icon{width:32px;height:32px;border-radius:9px;'
+    b'background:#e9e2d1;color:#5a5246;'
+    b'display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}\n'
+    b'.apin-toast-icon svg{width:18px;height:18px}\n'
+    b'.apin-toast-info .apin-toast-icon{background:#d4e4ef;color:#2d6a96}\n'
+    b'.apin-toast-warn .apin-toast-icon{background:#fae7c8;color:#b87d1e}\n'
+    b'.apin-toast-critical .apin-toast-icon{background:#f6cfd2;color:#b01820}\n'
+    b'.apin-toast-critical{border-color:#e8b0b4}\n'
+    b'.apin-toast-warn{border-color:#d6c39a}\n'
+    b'.apin-toast-body{min-width:0}\n'
+    b'.apin-toast-title{font-family:\'Fraunces\',serif;font-weight:500;'
+    b'font-size:15px;letter-spacing:-0.005em;color:#1a1612;line-height:1.25;'
+    b'margin-bottom:3px}\n'
+    b'.apin-toast-text{font-size:13px;color:#5a5246;line-height:1.45;'
+    b'word-break:break-word}\n'
+    b'.apin-toast-actions{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}\n'
+    b'.apin-toast-action{display:inline-flex;align-items:center;gap:4px;'
+    b'font-family:\'Inter\',system-ui,sans-serif;font-weight:500;font-size:12px;'
+    b'text-decoration:none;padding:5px 10px;border-radius:6px;'
+    b'border:1px solid transparent;cursor:pointer;background:transparent;'
+    b'transition:background .12s,border-color .12s,color .12s}\n'
+    b'.apin-toast-action svg{width:12px;height:12px}\n'
+    b'.apin-toast-action-info{color:#2d6a96;border-color:#bcd2e1}\n'
+    b'.apin-toast-action-info:hover{background:#d4e4ef;text-decoration:none}\n'
+    b'.apin-toast-action-warn{color:#b87d1e;border-color:#d6c39a}\n'
+    b'.apin-toast-action-warn:hover{background:#fae7c8;text-decoration:none}\n'
+    b'.apin-toast-action-critical{color:#b01820;border-color:#e8b0b4}\n'
+    b'.apin-toast-action-critical:hover{background:#f6cfd2;text-decoration:none}\n'
+    b'.apin-toast-action-button{font:inherit;font-weight:500;font-size:12px;'
+    b'padding:5px 10px;line-height:1.2}\n'
+    b'.apin-toast-close{background:transparent;border:0;color:#5a5246;'
+    b'cursor:pointer;padding:2px;border-radius:4px;align-self:flex-start;'
+    b'flex-shrink:0;width:22px;height:22px;display:inline-flex;'
+    b'align-items:center;justify-content:center;'
+    b'transition:background .12s,color .12s}\n'
+    b'.apin-toast-close svg{width:14px;height:14px}\n'
+    b'.apin-toast-close:hover{background:#e9e2d1;color:#1a1612}\n'
+    # ── Pill (collapsed-stack) ────────────────────────────────────
+    b'.apin-toast-pill{display:inline-flex;align-items:center;gap:10px;'
+    b'background:#1a1612;color:#fbf9f3;border:1px solid #1a1612;'
+    b'border-radius:999px;padding:8px 8px 8px 14px;'
+    b'box-shadow:0 12px 28px rgba(0,0,0,0.25);'
+    b'cursor:pointer;font:inherit;'
+    b'font-family:\'Inter\',system-ui,sans-serif;font-size:13px;font-weight:500;'
+    b'transform:translateX(0);opacity:1;'
+    b'transition:transform .35s cubic-bezier(0.22,1,0.36,1),'
+    b'opacity .25s ease,box-shadow .25s ease}\n'
+    b'.apin-toast-pill-entering{transform:translateX(calc(100% + 32px));opacity:0}\n'
+    b'.apin-toast-pill-leaving{transform:translateX(calc(100% + 32px));opacity:0}\n'
+    b'.apin-toast-pill-bump{animation:apin-pill-bump .42s cubic-bezier(0.22,1,0.36,1)}\n'
+    b'@keyframes apin-pill-bump{0%{transform:scale(1)}40%{transform:scale(1.07)}'
+    b'100%{transform:scale(1)}}\n'
+    b'.apin-toast-pill-icon{width:24px;height:24px;border-radius:50%;'
+    b'background:#fbf9f3;color:#1a1612;'
+    b'display:inline-flex;align-items:center;justify-content:center}\n'
+    b'.apin-toast-pill-icon svg{width:14px;height:14px}\n'
+    b'.apin-toast-pill-count{font-family:\'Fraunces\',serif;font-weight:500;'
+    b'font-size:16px;display:inline-flex;align-items:center;'
+    b'min-width:1ch;color:#fbf9f3}\n'
+    b'.apin-toast-pill-label{color:#fbf9f3;opacity:0.85}\n'
+    b'.apin-toast-pill-close{display:inline-flex;align-items:center;'
+    b'justify-content:center;width:22px;height:22px;border-radius:50%;'
+    b'background:rgba(255,255,255,0.08);color:#fbf9f3;cursor:pointer;'
+    b'margin-left:4px;transition:background .12s}\n'
+    b'.apin-toast-pill-close:hover{background:rgba(255,255,255,0.18)}\n'
+    b'.apin-toast-pill-close svg{width:12px;height:12px}\n'
+    # ── Nav badge (Phase 8.H.C — unread count on the Alerts link) ─
+    b'.apin-console-nav a.acn-with-badge{display:inline-flex;align-items:center;'
+    b'gap:6px}\n'
+    b'.apin-nav-badge{display:inline-flex;align-items:center;justify-content:center;'
+    b'min-width:18px;height:18px;padding:0 5px;border-radius:9px;'
+    b'background:#b01820;color:#fbf9f3;font-family:\'JetBrains Mono\',monospace;'
+    b'font-size:10.5px;font-weight:600;line-height:1;letter-spacing:0;'
+    b'transform-origin:center;'
+    b'transition:transform .2s ease,background .15s ease}\n'
+    b'.apin-nav-badge[hidden]{display:none !important}\n'
+    b'.apin-console-nav a.acn-active .apin-nav-badge{background:#fbf9f3;color:#1a1612}\n'
+    # Pulse on increment — half-second swell so the user notices a new alert
+    # even if their cursor isn\'t near the nav.
+    b'.apin-nav-badge-pulse{animation:apin-nav-badge-bump .5s cubic-bezier(0.22,1,0.36,1)}\n'
+    b'@keyframes apin-nav-badge-bump{'
+    b'0%{transform:scale(1)}30%{transform:scale(1.35)}'
+    b'70%{transform:scale(0.92)}100%{transform:scale(1)}}\n'
+    # Make the odometer inside the badge stay compact + cream-coloured.
+    b'.apin-nav-badge .apin-odometer{font-family:\'JetBrains Mono\',monospace;'
+    b'font-size:10.5px;font-weight:600;color:inherit}\n'
+    b'.apin-nav-badge .apin-odometer-digit{width:.55em}\n'
+    # ── Odometer styles (shared with the badge in 6.C) ────────────
+    b'.apin-odometer{display:inline-flex;align-items:center;line-height:1;'
+    b'font-feature-settings:"tnum" 1,"lnum" 1}\n'
+    b'.apin-odometer-digit{display:inline-block;width:.6em;height:1em;'
+    b'overflow:hidden;position:relative;vertical-align:baseline}\n'
+    b'.apin-odometer-digit-col{display:inline-block;width:100%;'
+    b'will-change:transform}\n'
+    b'.apin-odometer-digit-col > span{display:block;height:1em;line-height:1;'
+    b'text-align:center}\n'
+    b'.apin-odometer-static{display:inline-block;line-height:1}\n'
+    b'.apin-odometer-digit.is-spinning .apin-odometer-digit-col{'
+    b'filter:blur(0.5px)}\n'
+    # ── Responsive — make the toast stack hug the bottom on phones ─
+    b'@media (max-width:560px){.apin-toast-container{left:12px;right:12px;'
+    b'bottom:12px;max-width:none}}\n'
+    b'</style>\n'
+    # Active-link highlighting JS lives in /static/console_nav.js — strict
+    # `script-src 'self'` blocks the previous inline <script> block.
+    b'<script src="/static/console_nav.js"></script>\n'
+    # Phase 8.G · chip + session machinery. pressed_leaf.js first so the
+    # avatar generator is on window before the chip JS runs.
+    b'<script src="/static/pressed_leaf.js"></script>\n'
+    b'<script src="/static/console_account_chip.js"></script>\n'
+    # Phase 8.H · global toast system. odometer.js first so the pill count
+    # animation can use it. apin_toast.js initialises on DOMContentLoaded.
+    b'<script src="/static/odometer.js"></script>\n'
+    b'<script src="/static/apin_toast.js"></script>\n'
+    # Phase 8.H.C · nav badge for unread alerts.
+    b'<script src="/static/apin_nav_badge.js"></script>\n'
+    # Phase 9.N.1 · shared animation library. Loads before any chart code
+    # so APIN.fx.* is on window for every page. (Icons come from the
+    # already-injected console_icons.svg — same hand-drawn set.)
+    b'<script src="/static/apin_fx.js"></script>\n'
+)
+_CONSOLE_NAV_PLACEHOLDER = b"<!-- @CONSOLE_NAV@ -->"
+
+
+def _inject_console_nav(body_bytes: bytes) -> bytes:
+    """Substitute the nav placeholder in a cached page body. Returns the
+    original bytes unchanged if the placeholder is absent (defensive: if
+    a page hasn't been migrated yet, it still serves)."""
+    if _CONSOLE_NAV_PLACEHOLDER in body_bytes:
+        return body_bytes.replace(_CONSOLE_NAV_PLACEHOLDER, _CONSOLE_NAV_BYTES)
+    return body_bytes
+
+
+# ── Shared icon sprite injection (Phase 8.G) ────────────────────────────
+# Console pages don't include ui_template.html so <use href="#i-*"/>
+# wouldn't resolve. We inline-inject the 62-symbol sprite into each Console
+# page via the <!-- @ICON_SPRITE@ --> placeholder. Inlining (vs an external
+# /static/icons.svg) is necessary because external sprites have a long-
+# standing browser bug where `currentColor` doesn't inherit across documents
+# — and our icons are drawn with stroke=currentColor specifically so they
+# can pick up paper-ink theming.
+#
+# Source: scripts/apin_v2/console_icons.svg (regenerated by
+# _build_icon_sprite.py from ui_template.html's symbol block).
+_CONSOLE_ICON_SPRITE_PATH = Path(__file__).resolve().parent / "console_icons.svg"
+try:
+    _CONSOLE_ICON_SPRITE_BYTES = _CONSOLE_ICON_SPRITE_PATH.read_bytes()
+except FileNotFoundError:
+    # Defensive: if the sprite hasn't been built yet, fall back to empty.
+    # Pages still serve; icons just don't render.
+    _CONSOLE_ICON_SPRITE_BYTES = b""
+    logger.warning(
+        "Console icon sprite missing at %s. Run "
+        "`python scripts/apin_v2/_build_icon_sprite.py` to regenerate.",
+        _CONSOLE_ICON_SPRITE_PATH,
+    )
+_CONSOLE_ICON_SPRITE_PLACEHOLDER = b"<!-- @ICON_SPRITE@ -->"
+
+
+def _inject_icon_sprite(body_bytes: bytes) -> bytes:
+    """Substitute the icon-sprite placeholder. Same defensive shape as
+    `_inject_console_nav`: returns body unchanged if placeholder is absent."""
+    if _CONSOLE_ICON_SPRITE_PLACEHOLDER in body_bytes:
+        return body_bytes.replace(
+            _CONSOLE_ICON_SPRITE_PLACEHOLDER, _CONSOLE_ICON_SPRITE_BYTES)
+    return body_bytes
+
+
+def _inject_console_chrome(body_bytes: bytes) -> bytes:
+    """Convenience wrapper · run BOTH nav + sprite injectors on a page.
+
+    Adopted in Phase 8.G — the 7 Console pages now get both bits of chrome.
+    Cheap call: each helper is a no-op if its placeholder is absent."""
+    body_bytes = _inject_console_nav(body_bytes)
+    body_bytes = _inject_icon_sprite(body_bytes)
+    return body_bytes
+
+
+def _add_account_console_routes(app):
+    """Mount the API Console — Stage 7 / Phase 3.2 (R1-fixed).
+
+    SPEC-CONFORMANCE QUICK REFERENCE (read this first):
+
+      Implemented (5 of 7 slots): GZip(1) · TokenRedaction(3) ·
+      TokenFormat(4) · Session(6) · Sudo(7).
+      NOT implemented: AuditRecentMiddleware(5).
+      Factory-mounted (slot drift): CORSMiddleware(2) ends up INNERMOST
+      because the factory mounts it before this helper runs.
+      See DEC-P32-MW-1 and DEC-P32-FIX-* in
+      `_qa_tmp/api_console_spec/decisions.md` for the deviation log.
+
+    What this helper wires into the apin_v2 app:
+
+    1. The Phase 2.3 + 3.2 security middleware stack, registered in
+       REVERSE slot order per spec §9.1. Starlette `add_middleware()`
+       prepends to `app.user_middleware`, so LAST-added = OUTERMOST at
+       runtime:
+
+         add_middleware(SudoMiddleware)              # slot 7  innermost
+         add_middleware(SessionMiddleware)           # slot 6
+         add_middleware(TokenFormatMiddleware)       # slot 4
+         add_middleware(TokenRedactionMiddleware)    # slot 3
+         add_middleware(GZipMiddleware)              # slot 1  outermost
+
+       Final runtime order outermost→innermost:
+         GZip > TokenRedaction > TokenFormat > Session > Sudo > CORS > handler
+
+       Slot dependencies:
+         - SudoMiddleware reads `scope.state.session.session_id` (set
+           by SessionMiddleware on slot 6) to bind sudo to the
+           originating session. Without SessionMiddleware, Sudo
+           fail-CLOSES on `session_id is None` (Phase 2 R1 F02 fix).
+           PDA-P3.2-R1-F01 caught the missing-Session case in R1 and
+           this commit installs SessionMiddleware to close it.
+         - TokenRedactionMiddleware must be INNER of GZip — otherwise
+           it scans gzipped bytes and misses plaintext leaks. PDA-P3.2-
+           R1-F02 caught the inverted ordering in R1 (when GZip was
+           mounted in main() before this helper ran).
+
+       Slot gaps:
+         - AuditRecentMiddleware (slot 5) — not implemented. Audit
+           logging is per-handler via `audit_log()`. Tracked in spec
+           §22.3 IMPL-PHASE.
+         - CORSMiddleware (slot 2) — mounted by the factory before
+           this helper, so ends up INNERMOST. Harmless for the Phase 3
+           same-origin Console scope; cross-origin developer API
+           calls would lose CORS headers on 401/403 responses. Phase 4
+           work item: clear and re-stack, or move CORS-add into this
+           helper.
+
+    2. The FULL keys router (`routes_keys.router`) — 2 GET + 4 mutation
+       routes. SD-2's Phase 3.1 read-only filter is RETIRED: now that
+       SessionMiddleware + SudoMiddleware are mounted, mutations are
+       reachable AND properly sudo-gated per spec §7.1.
+
+    3. `GET /account/api/keys` HTML page serving `keys.html` with the
+       FX-A CSP, FX-B 4-directive Cache-Control, and FX-H startup cache.
+
+    4. `GET /account/api` → 307 → `GET /account/api/dashboard` → 307 →
+       `GET /account/api/keys`. Dashboard remains a STUB per DEC-P31-SD-1.
+
+    5. `GET /static/keys.js` — externalised page JS (FX-A) with ETag
+       revalidation, same hand-rolled pattern as `/static/telemetry.js`.
+
+    Full audit trail: `_qa_tmp/api_console_spec/decisions.md`
+    (DEC-P31-SD-1, SD-2, FX-A through FX-I, DEC-P32-MW-1,
+    DEC-P32-FIX-F01 through F06).
+    """
+    from scripts.apin_v2.account import routes_keys as _rk
+    from scripts.apin_v2.account.middlewares import (
+        TokenFormatMiddleware,
+        TokenRedactionMiddleware,
+        SessionMiddleware,
+        SudoMiddleware,
+    )
+    from fastapi.middleware.gzip import GZipMiddleware
+
+    # ── Middleware stack (spec §9.1 REVERSE registration order) ─────
+    # Starlette prepends, so register innermost FIRST, outermost LAST.
+    # SessionMiddleware MUST be registered before SudoMiddleware so the
+    # session_id is populated before Sudo's binding check. GZip MUST be
+    # registered LAST so it runs OUTERMOST and never strips redaction's
+    # ability to see plaintext.
+    #
+    # Verify ordering via _qa_tmp/test_stage7_phase3_2_middleware_order.py
+    # (spec §22.2 — created in Phase 3.2 R1 fix per VER-P3.2-R1 C5).
+    # Phase 5.2 (CORS-SLOT): re-mount CORS at spec slot 2.
+    #
+    # The factory `make_app()` mounts CORSMiddleware first, so by the
+    # time this helper runs, `app.user_middleware == [CORS]`. The
+    # straightforward `add_middleware` chain below would leave CORS
+    # INNERMOST (Starlette prepends, factory was first → ends up at
+    # the tail). DEC-P32-MW-1 documented the drift as harmless for
+    # same-origin Console traffic; it's a real problem for third-party
+    # cross-origin developer code (401/403 from inner middlewares
+    # arrives without CORS headers → browser shows "blocked by CORS"
+    # instead of the actual error code).
+    #
+    # Fix: extract the factory's CORS (preserving its config), then
+    # filter it out of user_middleware. Re-add it at the right slot
+    # below — between TokenRedaction (slot 3, inner) and GZip (slot 1,
+    # outer). Final stack: GZip > CORS > TokenRedaction > TokenFormat
+    # > Session > Sudo > handler (canonical spec §9.1 order).
+    from fastapi.middleware.cors import CORSMiddleware as _CORS
+    _factory_cors_kwargs = None
+    # FX-P5-3 (PDA-P5-R1 F04): scan ALL CORS middlewares (don't break
+    # after first). If multiple are mounted, the FIRST is preserved as
+    # the canonical config — subsequent ones get logged as a warning so
+    # an operator can investigate accidental double-mounts. The filter
+    # below still removes ALL of them, which is correct: we re-add ONE
+    # at slot 2.
+    _cors_found = 0
+    for _mw in list(app.user_middleware):
+        if getattr(_mw, "cls", None) is _CORS:
+            _cors_found += 1
+            if _factory_cors_kwargs is None:
+                _factory_cors_kwargs = dict(getattr(_mw, "kwargs", {}) or {})
+    if _cors_found > 1:
+        logger.warning(
+            "API Console mount: factory pre-mounted %d CORSMiddleware "
+            "instances. Preserving config of the FIRST; subsequent "
+            "configs are discarded. Verify the factory isn't mounting "
+            "CORS twice — see PDA-P5-R1 F04 / DEC-P5-R1-FIXES.",
+            _cors_found,
+        )
+    if _factory_cors_kwargs is None:
+        # Factory's CORS was not mounted (defensive — shouldn't happen
+        # in production, but in tests that build a bare FastAPI app, we
+        # still want the right ordering). Use the same config the factory
+        # would have used (allow_origins=["*"], allow_credentials=True,
+        # allow_methods=["*"], allow_headers=["*"]).
+        _factory_cors_kwargs = {
+            "allow_origins": ["*"],
+            "allow_credentials": True,
+            "allow_methods": ["*"],
+            "allow_headers": ["*"],
+        }
+    # Filter the factory's CORS out so we don't end up with two CORS
+    # middlewares (the original innermost + our new slot-2 one).
+    app.user_middleware = [
+        _mw for _mw in app.user_middleware
+        if getattr(_mw, "cls", None) is not _CORS
+    ]
+
+    # Now register in REVERSE spec-slot order. Starlette prepends, so the
+    # LAST-added ends up OUTERMOST at runtime.
+    #
+    # Phase 9.F · UsageRecordingMiddleware sits INNERMOST (registered
+    # FIRST). That position lets it observe:
+    #   - the FINAL response status the client actually receives
+    #     (post-redaction, post-CORS, post-token-format rewrites)
+    #   - the real wire bytes_out (sum of body chunks)
+    # and ensures any auth-rejected request from an API key still gets
+    # recorded with its true 401/403 status code rather than swallowed.
+    from scripts.apin_v2.account.middlewares import UsageRecordingMiddleware
+    app.add_middleware(UsageRecordingMiddleware)             # slot 8  innermost  (Phase 9.F)
+    app.add_middleware(SudoMiddleware)                       # slot 7
+    app.add_middleware(SessionMiddleware)                    # slot 6
+    app.add_middleware(TokenFormatMiddleware)                # slot 4
+    app.add_middleware(TokenRedactionMiddleware)             # slot 3
+    app.add_middleware(_CORS, **_factory_cors_kwargs)        # slot 2  (re-positioned from innermost — Phase 5.2)
+    app.add_middleware(GZipMiddleware, minimum_size=1024)    # slot 1  outermost  (registered LAST)
+    logger.info(
+        "API Console middleware stack (Phase 5.2 R1-fixed + 9.F): "
+        "GZip (1) > CORS (2) > TokenRedaction (3) > TokenFormat (4) > "
+        "Session (6) > Sudo (7) > UsageRecording (8, innermost) > handler"
+    )
+
+    # ── Routers (Phase 3.2 keys + Phase 3.3 sudo) ──────────────────
+    app.include_router(_rk.router)
+    _route_count = sum(
+        1 for r in _rk.router.routes
+        if hasattr(r, "methods") and r.methods
+    )
+    logger.info(
+        "API Console keys router mounted (Phase 3.2): all %d routes from "
+        "routes_keys.router (2 GET + 4 mutation). Mutations gated by "
+        "Sudo+Session middleware per spec §7.1.",
+        _route_count,
+    )
+
+    # Phase 5.3 (FX-I): self-hosted font serving route.
+    #
+    # The Console pages currently link to fonts.googleapis.com (which
+    # serves a CSS file that references fonts.gstatic.com for the woff2
+    # binaries). To self-host: run `python tools/fetch_fonts.py` to
+    # populate `scripts/apin_v2/fonts/*.woff2`, then the route below
+    # serves them at `/fonts/<filename>`.
+    #
+    # When the fonts directory is empty (no fetch script run yet), this
+    # route returns 404 and the page continues working via the Google
+    # Fonts CDN fallback. When populated, the @font-face local rules
+    # (Phase 5+ work item — keys.html addition) take precedence and the
+    # CDN is bypassed. At that point the CSP `style-src`/`font-src` can
+    # be tightened to drop the fonts.googleapis.com / fonts.gstatic.com
+    # entries.
+    from pathlib import Path as _PFonts
+    import re as _re_fonts
+    _FONTS_DIR = _PFonts(__file__).resolve().parent / "fonts"
+    # Whitelist allowed filenames to prevent path traversal. Only woff2.
+    _FONTS_FILENAME_RE = _re_fonts.compile(r"^[A-Za-z0-9._-]+\.woff2$")
+
+    @app.get("/fonts/{filename}")
+    async def v2_serve_font(filename: str):
+        from fastapi.responses import Response, FileResponse
+        if not _FONTS_FILENAME_RE.match(filename):
+            return Response(status_code=400, content=b"invalid filename")
+        path = _FONTS_DIR / filename
+        if not path.is_file():
+            # Not yet self-hosted — let the Google Fonts CDN fallback
+            # handle it. 404 is fine because the @font-face rules will
+            # also reference the CDN as a secondary src.
+            return Response(status_code=404, content=b"font not present "
+                            b"locally; run tools/fetch_fonts.py")
+        # woff2 is the only format we serve; immutable content (binary
+        # data, never edited). Long cache + immutable.
+        return FileResponse(
+            str(path),
+            media_type="font/woff2",
+            headers={
+                "Cache-Control": "public, max-age=31536000, immutable",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    # Phase 3.3 sudo endpoints (POST/GET /api/account/sudo + POST /revoke).
+    # These are EXEMPT from SudoMiddleware (spec §9.2 / middlewares.py
+    # `_SUDO_EXEMPT_PATHS` includes `/api/account/sudo` prefix) — the
+    # chicken-and-egg avoidance: you mint sudo via these endpoints.
+    from scripts.apin_v2.account import routes_sudo as _rs
+    app.include_router(_rs.router)
+
+    # Phase 6.B.1: account settings GET + PATCH (PATCH gated by sudo).
+    from scripts.apin_v2.account import routes_settings as _rset
+    app.include_router(_rset.router)
+
+    # Phase 7 Wave 1: Webhook + Alert routers.
+    # Webhooks: 8 routes (CRUD + rotate-secret + test-ping + deliveries).
+    # Alerts:   6 routes (list + unread-count + get + read + dismiss + restore).
+    # Webhook mutations gated by SudoMiddleware (slot 7); alert mutations do
+    # NOT require sudo per spec §9.2 (read-state housekeeping only). All
+    # mutating verbs additionally enforce CSRF at the route layer.
+    from scripts.apin_v2.account import routes_webhooks as _rwh
+    from scripts.apin_v2.account import routes_alerts as _ral
+    app.include_router(_rwh.router)
+    app.include_router(_ral.router)
+    logger.info(
+        "API Console webhook + alert routers mounted (Phase 7 Wave 1): "
+        "%d webhook routes + %d alert routes. Webhook secret encryption "
+        "requires APIN_SECRET_KEY env var; webhook endpoints return 503 "
+        "service_unavailable when unset.",
+        len(_rwh.router.routes), len(_ral.router.routes),
+    )
+
+    # Phase 9.B — usage observability router.
+    # Five GET endpoints under /api/account/usage/* (summary, timeseries,
+    # top, requests, minute-detail). Session-cookie auth only — Bearer/
+    # X-API-Key rejected by TokenFormatMiddleware (slot 4).
+    from scripts.apin_v2.account import routes_usage as _ru
+    app.include_router(_ru.router)
+    logger.info(
+        "API Console usage router mounted (Phase 9.B): %d usage routes.",
+        len(_ru.router.routes),
+    )
+
+    # Phase 6.B.1 + B.2: Console settings + quickstart HTML pages.
+    # Settings page needs CSRF substitution (same pattern as keys.html);
+    # quickstart is read-only static content, no CSRF token needed.
+    _console_settings_body_str = _load_html("console_settings.html")
+    _console_settings_body_bytes = (
+        _console_settings_body_str.encode("utf-8")
+        if isinstance(_console_settings_body_str, str)
+        else _console_settings_body_str
+    )
+    _console_settings_body_bytes = _inject_console_chrome(_console_settings_body_bytes)
+    _console_quickstart_body_str = _load_html("console_quickstart.html")
+    _console_quickstart_body_bytes = (
+        _console_quickstart_body_str.encode("utf-8")
+        if isinstance(_console_quickstart_body_str, str)
+        else _console_quickstart_body_str
+    )
+    _console_quickstart_body_bytes = _inject_console_chrome(_console_quickstart_body_bytes)
+
+    # FX-P7-F05: hoist the CSRF placeholder constant ABOVE the first route
+    # handler that closes over it. The previous definition was 100 lines
+    # below at the bottom of this function, which worked only thanks to
+    # Python's lazy free-variable lookup but was fragile to refactors.
+    _CSRF_PLACEHOLDER_BYTES = b"__APIN_CSRF_TOKEN__"
+
+    @app.get("/account/api/settings", response_class=HTMLResponse)
+    async def account_settings_page(request: Request):
+        from scripts.apin_v2 import auth_db as _adb
+        csrf_value = b""
+        raw_session = request.cookies.get("apin_v2_session")
+        if raw_session:
+            try:
+                row = _adb.lookup_session_by_token(raw_session)
+                if row and row.get("csrf_token"):
+                    csrf_value = row["csrf_token"].encode("ascii")
+            except Exception:
+                pass
+        body = _console_settings_body_bytes.replace(
+            _CSRF_PLACEHOLDER_BYTES, csrf_value)
+        return HTMLResponse(body, headers=_ACCOUNT_PAGE_HEADERS)
+
+    @app.get("/account/api/quickstart", response_class=HTMLResponse)
+    async def account_quickstart_page():
+        # No CSRF substitution — quickstart page makes no API calls.
+        return HTMLResponse(_console_quickstart_body_bytes,
+                            headers=_ACCOUNT_PAGE_HEADERS)
+
+    # ── Phase 7 Waves 4 + 5: Sandbox + Alerts + Webhooks pages ─────────────
+    # All three pages get CSRF substitution (they each fire mutating fetches).
+    _console_sandbox_body_str = _load_html("console_sandbox.html")
+    _console_sandbox_body_bytes = (
+        _console_sandbox_body_str.encode("utf-8")
+        if isinstance(_console_sandbox_body_str, str)
+        else _console_sandbox_body_str
+    )
+    _console_sandbox_body_bytes = _inject_console_chrome(_console_sandbox_body_bytes)
+    _console_alerts_body_str = _load_html("console_alerts.html")
+    _console_alerts_body_bytes = (
+        _console_alerts_body_str.encode("utf-8")
+        if isinstance(_console_alerts_body_str, str)
+        else _console_alerts_body_str
+    )
+    _console_alerts_body_bytes = _inject_console_chrome(_console_alerts_body_bytes)
+    _console_webhooks_body_str = _load_html("console_webhooks.html")
+    _console_webhooks_body_bytes = (
+        _console_webhooks_body_str.encode("utf-8")
+        if isinstance(_console_webhooks_body_str, str)
+        else _console_webhooks_body_str
+    )
+    _console_webhooks_body_bytes = _inject_console_chrome(_console_webhooks_body_bytes)
+
+    def _serve_csrf_page(request: Request, body_bytes: bytes) -> HTMLResponse:
+        """Shared helper: substitute the CSRF placeholder with the caller's
+        live csrf_token from their session row, then serve with the standard
+        account-page security headers."""
+        from scripts.apin_v2 import auth_db as _adb
+        csrf_value = b""
+        raw_session = request.cookies.get("apin_v2_session")
+        if raw_session:
+            try:
+                row = _adb.lookup_session_by_token(raw_session)
+                if row and row.get("csrf_token"):
+                    csrf_value = row["csrf_token"].encode("ascii")
+            except Exception:
+                pass
+        return HTMLResponse(
+            body_bytes.replace(_CSRF_PLACEHOLDER_BYTES, csrf_value),
+            headers=_ACCOUNT_PAGE_HEADERS,
+        )
+
+    @app.get("/account/api/sandbox", response_class=HTMLResponse)
+    async def account_sandbox_page(request: Request):
+        return _serve_csrf_page(request, _console_sandbox_body_bytes)
+
+    @app.get("/account/api/alerts", response_class=HTMLResponse)
+    async def account_alerts_page(request: Request):
+        return _serve_csrf_page(request, _console_alerts_body_bytes)
+
+    @app.get("/account/api/webhooks", response_class=HTMLResponse)
+    async def account_webhooks_page(request: Request):
+        return _serve_csrf_page(request, _console_webhooks_body_bytes)
+
+    # Phase 8 Wave D: key detail full PAGE. Replaces the modal-only flow.
+    _console_key_detail_str = _load_html("console_key_detail.html")
+    _console_key_detail_bytes = (
+        _console_key_detail_str.encode("utf-8")
+        if isinstance(_console_key_detail_str, str)
+        else _console_key_detail_str
+    )
+    _console_key_detail_bytes = _inject_console_chrome(_console_key_detail_bytes)
+    _PID_PLACEHOLDER = b"__KEY_PUBLIC_ID__"
+
+    @app.get("/account/api/keys/{public_id}", response_class=HTMLResponse)
+    async def account_key_detail_page(public_id: str, request: Request):
+        # Validate the public_id format (defence-in-depth — also serves
+        # to keep the placeholder substitution honest).
+        if not (1 <= len(public_id) <= 80) or not all(
+                c.isalnum() or c in '_-' for c in public_id):
+            return HTMLResponse(b"invalid public_id", status_code=400,
+                                 headers=_ACCOUNT_PAGE_HEADERS)
+        from scripts.apin_v2 import auth_db as _adb
+        csrf_value = b""
+        raw_session = request.cookies.get("apin_v2_session")
+        if raw_session:
+            try:
+                row = _adb.lookup_session_by_token(raw_session)
+                if row and row.get("csrf_token"):
+                    csrf_value = row["csrf_token"].encode("ascii")
+            except Exception:
+                pass
+        body = _console_key_detail_bytes.replace(
+            _CSRF_PLACEHOLDER_BYTES, csrf_value
+        ).replace(_PID_PLACEHOLDER, public_id.encode("ascii"))
+        return HTMLResponse(body, headers=_ACCOUNT_PAGE_HEADERS)
+
+    # Phase 9.E · Usage observability page.
+    # Account-wide charts (KPI strip + time-series + status donut + latency
+    # histogram + top-N panels + recent requests + CSV export + drill drawer).
+    # Backed by /api/account/usage/* (Phase 9.B).
+    _console_usage_body_bytes = _load_html("console_usage.html")
+    if isinstance(_console_usage_body_bytes, str):
+        _console_usage_body_bytes = _console_usage_body_bytes.encode("utf-8")
+    _console_usage_body_bytes = _inject_console_chrome(_console_usage_body_bytes)
+
+    @app.get("/account/api/usage", response_class=HTMLResponse)
+    async def account_usage_page(request: Request):
+        return _serve_csrf_page(request, _console_usage_body_bytes)
+
+    logger.info(
+        "API Console pages mounted (Phase 7 Waves 4+5 + Phase 8 Wave D + "
+        "Phase 9.E): /account/api/sandbox, /alerts, /webhooks, /usage, "
+        "/keys/{public_id}"
+    )
+
+    _sudo_count = sum(
+        1 for r in _rs.router.routes
+        if hasattr(r, "methods") and r.methods
+    )
+    logger.info(
+        "API Console sudo router mounted (Phase 3.3): all %d routes from "
+        "routes_sudo.router (POST /sudo, POST /sudo/revoke, GET /sudo).",
+        _sudo_count,
+    )
+
+    # HTML page for the keys list
+    #
+    # Security headers per spec §18.1 with two pragmatic deviations
+    # documented in DEC-P31-FX-A:
+    #   - script-src 'self' (stricter than spec's nonce variant; we have
+    #     zero inline scripts after the keys.js extraction)
+    #   - style-src 'self' 'unsafe-inline' fonts.googleapis.com (allows
+    #     the existing inline <style> block + the Google Fonts CSS link;
+    #     extracting CSS was out-of-scope for Phase 3.1)
+    #   - font-src 'self' fonts.gstatic.com (allows Google Fonts woff2;
+    #     self-hosting deferred to Phase 4 per DEC-P31-FX-I)
+    #
+    # Phase 6.C.3 update: @font-face local rules added to keys.html,
+    # console_settings.html, console_quickstart.html (referencing
+    # /fonts/<name>.woff2). When `python tools/fetch_fonts.py` has been
+    # run and all 3 families self-host successfully, the
+    # `https://fonts.googleapis.com` entry from style-src and
+    # `https://fonts.gstatic.com` from font-src can be dropped. Until
+    # Fraunces is reliably self-hosted (needs fetch_fonts.py v2 for
+    # variable-font support), the allowlist must stay.
+    # FX-P8-A1 (closes QA-1 properly): all 5 Phase 7 Console pages now
+    # source their JS via <script src="/static/console_<name>.js">, matching
+    # the keys.html pattern. The previous Phase 7 'unsafe-inline' band-aid
+    # is REMOVED here — strict `script-src 'self'` restored. style-src
+    # keeps 'unsafe-inline' because the pages still ship inline <style>
+    # blocks (separate item — out of Phase 8 scope, deferred to Phase 9+
+    # along with self-host Fraunces).
+    _ACCOUNT_PAGE_CSP = (
+        "default-src 'none'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+    _ACCOUNT_PAGE_HEADERS = {
+        # FX-B: max-age=0 added — spec R3-I17 4-directive canonical form.
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "X-Content-Type-Options": "nosniff",
+        # Console pages should NEVER be embedded in iframes (clickjacking
+        # defence — the create wizard reveals one-time plaintext tokens).
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        # FX-A: CSP defined above. frame-ancestors 'none' duplicates the
+        # X-Frame-Options DENY guarantee for modern browsers.
+        "Content-Security-Policy": _ACCOUNT_PAGE_CSP,
+    }
+
+    # FX-H: cache keys.html bytes at startup. Same pattern the inference
+    # site uses for reports.html / loupe.html / etc. Reads disk once per
+    # process boot rather than per request.
+    _keys_html_body_str = _load_html("keys.html")
+    _keys_html_body_bytes = (
+        _keys_html_body_str.encode("utf-8")
+        if isinstance(_keys_html_body_str, str)
+        else _keys_html_body_str
+    )
+    _keys_html_body_bytes = _inject_console_chrome(_keys_html_body_bytes)
+    # FX-P7-F05: _CSRF_PLACEHOLDER_BYTES is now defined at the top of this
+    # function (above the first route handler that needs it). The previous
+    # definition here was redundant and the previous definition order made
+    # the earlier route handlers' closure-binding fragile.
+
+    @app.get("/account/api/keys", response_class=HTMLResponse)
+    async def account_keys_page(request: Request):
+        # WI-P4-CSRF: substitute the per-session CSRF token into the
+        # cached HTML body. The placeholder __APIN_CSRF_TOKEN__ appears
+        # exactly once (in the <meta name="csrf-token"> tag at the top
+        # of keys.html). On miss (no session, expired session, DB error),
+        # we emit an empty token — the JS will then send empty
+        # X-Console-Csrf, the server-side `_require_csrf` will reject
+        # with invalid_or_missing_token, and the wizard surfaces the
+        # session-expired modal flow.
+        from scripts.apin_v2 import auth_db as _adb
+        csrf_value = b""
+        raw_session = request.cookies.get("apin_v2_session")
+        if raw_session:
+            try:
+                row = _adb.lookup_session_by_token(raw_session)
+                if row and row.get("csrf_token"):
+                    csrf_value = row["csrf_token"].encode("ascii")
+            except Exception:
+                # Defensive: DB failure falls through to empty token.
+                pass
+        body = _keys_html_body_bytes.replace(
+            _CSRF_PLACEHOLDER_BYTES, csrf_value)
+        return HTMLResponse(body, headers=_ACCOUNT_PAGE_HEADERS)
+
+    # FX-A: serve the extracted JS. Same hand-rolled pattern used for
+    # /static/telemetry.js (see line ~5984 of this file): read+cache on
+    # first hit (with mtime-based invalidation in dev), ETag header for
+    # cheap revalidation, application/javascript media type. No mounted
+    # StaticFiles directory — only the whitelisted filenames are reachable.
+    #
+    # FX-P8-A1: factored out for reuse by the 5 Phase 7 console_*.js files.
+    # Filename is validated against a strict whitelist to prevent path
+    # traversal. Per-file cache is keyed by name.
+    from pathlib import Path as _Path
+    _STATIC_JS_DIR = _Path(__file__).resolve().parent
+    _STATIC_JS_ALLOWLIST = {
+        "keys.js",
+        "console_settings.js",
+        "console_quickstart.js",
+        "console_sandbox.js",
+        "console_alerts.js",
+        "console_webhooks.js",
+        "console_key_detail.js",   # Phase 8 Wave D
+        "console_nav.js",          # Phase 8 Wave F — shared top-nav activator
+        "console_dashboard.js",    # Phase 8 Wave F — dashboard widgets
+        "pressed_leaf.js",         # Phase 8 Wave G — shared avatar generator
+        "console_account_chip.js", # Phase 8 Wave G — account chip + dropdown
+        "odometer.js",             # Phase 8 Wave H — shared digit-odometer
+        "apin_toast.js",           # Phase 8 Wave H — global toast system
+        "apin_nav_badge.js",       # Phase 8 Wave H — nav unread-count badge
+        "console_alert_prefs.js",  # Phase 8 Wave H.D — prefs UI + push prompt
+        "apin_sw.js",              # Phase 8 Wave H.D — service worker for push
+        "apin_charts.js",          # Phase 9.D — paper-ink chart library
+        "console_usage.js",        # Phase 9.E — account-wide Usage page
+        "apin_fx.js",              # Phase 9.N.1 — shared animation library
+        "apin_lightbox.js",        # Phase 9.N.3 — FLIP-grow lightbox shell
+        "apin_live_stream.js",     # Phase 9.N.7 — SSE live-stream client
+        "apin_live_pulse.js",      # Phase 9.N.7 — live req/sec chart + commentary
+        "apin_syntax.js",          # Phase 9.N.7 — homegrown code highlighter
+        "apin_scrubber.js",        # Phase 9.N.11 — time scrubber slider
+    }
+    _STATIC_JS_CACHE: dict[str, dict] = {}
+
+    @app.get("/static/{filename}")
+    async def v2_static_js(filename: str, request: Request):
+        from fastapi.responses import Response
+        import hashlib
+        if filename not in _STATIC_JS_ALLOWLIST:
+            return Response(status_code=404,
+                            content=f"{filename}: not on allowlist".encode())
+        path = _STATIC_JS_DIR / filename
+        cache = _STATIC_JS_CACHE.setdefault(
+            filename, {"mtime": 0.0, "body": None, "etag": None})
+        try:
+            mt = path.stat().st_mtime
+            if (cache["mtime"] != mt) or (cache["body"] is None):
+                cache["body"]  = path.read_bytes()
+                cache["mtime"] = mt
+                cache["etag"]  = (
+                    '"' + hashlib.sha256(cache["body"]).hexdigest()[:12] + '"'
+                )
+            inm = request.headers.get("if-none-match")
+            if inm and inm == cache["etag"]:
+                return Response(status_code=304, headers={
+                    "ETag": cache["etag"],
+                    "Cache-Control": "public, max-age=0, must-revalidate",
+                })
+            return Response(
+                content=cache["body"],
+                media_type="application/javascript",
+                headers={
+                    "Cache-Control": "public, max-age=0, must-revalidate",
+                    "ETag": cache["etag"],
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+        except FileNotFoundError:
+            return Response(status_code=404, content=f"{filename} not found".encode())
+
+    # ── SD-1: /account/api -> /account/api/dashboard (spec §15.2) ──
+    # Spec §15.2 row 1 mandates that /account/api lands on
+    # /account/api/dashboard. The dashboard page itself is a Phase 3.4
+    # deliverable; until then we provide a stub that 307s onward to the
+    # keys list (natural landing for users with existing keys).
+    # Phase 8.F · Dashboard is now a real page. The stub redirect that
+    # previously dumped the user at /keys has been replaced with a Console
+    # landing page that pulls /api/auth/me + /api/account/keys + the alerts
+    # unread count + the audit recent feed.
+    @app.get("/account/api")
+    async def account_root():
+        return RedirectResponse(url="/account/api/dashboard", status_code=307)
+
+    # Phase 8.F · Dashboard HTML page — cached body bytes with CSRF + nav
+    # injection (matches the pattern used by the other 7 Console pages).
+    _console_dashboard_body_str = _load_html("console_dashboard.html")
+    _console_dashboard_body_bytes = (
+        _console_dashboard_body_str.encode("utf-8")
+        if isinstance(_console_dashboard_body_str, str)
+        else _console_dashboard_body_str
+    )
+    _console_dashboard_body_bytes = _inject_console_chrome(
+        _console_dashboard_body_bytes)
+
+    @app.get("/account/api/dashboard", response_class=HTMLResponse)
+    async def account_dashboard_page(request: Request):
+        return _serve_csrf_page(request, _console_dashboard_body_bytes)
+
+    # Phase 8.F · /api/account/audit/recent — across all keys for the
+    # current user. Reuses auth_db.list_audit_log() without a key_id filter.
+    # Returns a §3-shaped envelope manually (don't double-wrap via
+    # @api_endpoint here — this is a Console-internal helper, not a public
+    # surface).
+    @app.get("/api/account/audit/recent")
+    async def account_audit_recent(request: Request, limit: int = 10):
+        from scripts.apin_v2 import auth_db as _adb
+        # Authentication: cookie session, same pattern as /api/auth/me.
+        raw_session = request.cookies.get("apin_v2_session")
+        if not raw_session:
+            return JSONResponse({"ok": False,
+                                 "error": {"code": "unauthenticated",
+                                           "message": "login required"}},
+                                status_code=401)
+        sess = _adb.lookup_session_by_token(raw_session)
+        if not sess or not sess.get("user_id"):
+            return JSONResponse({"ok": False,
+                                 "error": {"code": "unauthenticated",
+                                           "message": "session expired"}},
+                                status_code=401)
+        try:
+            n = max(1, min(int(limit), 50))
+        except Exception:
+            n = 10
+        try:
+            events = _adb.list_audit_log(
+                user_id=int(sess["user_id"]), key_id=None, limit=n)
+        except Exception as _exc:
+            logger.warning("audit_recent failed for user=%s: %s",
+                           sess.get("user_id"), _exc)
+            events = []
+        # Normalise field names for the dashboard JS: `at` instead of
+        # `timestamp`, `action` left as-is, `public_id` mirrors `key_id`.
+        out = []
+        for e in events:
+            out.append({
+                "action": e.get("action"),
+                "at": e.get("timestamp"),
+                "key_id": e.get("key_id"),
+                "public_id": e.get("key_id"),
+                "key_name_at_time": e.get("key_name_at_time"),
+                "actor_ip": e.get("actor_ip"),
+                "detail": (e.get("details")
+                           if isinstance(e.get("details"), str)
+                           else (e.get("details") or {}).get("note")
+                                if isinstance(e.get("details"), dict)
+                                else None),
+            })
+        return {"ok": True, "data": {"events": out, "count": len(out)}}
+
+
+def _add_perception_routes(app):
+    """Register the Phase-2 batch-1 drone perception endpoints."""
+    import io
+    from dataclasses import asdict
+    from PIL import Image as _PIL_Image
+    import numpy as np
+    import hashlib
+    from datetime import datetime, timezone
+    from fastapi import Header, Form, Query
+    from scripts.apin_v2.api_envelope import (
+        api_endpoint, ApiError, paginated)
+    from scripts.apin_v2 import auth_db as _auth_db
+
+    diag_db = _load_diagnosis_db()
+
+    # ── Bearer auth gate (same shape used elsewhere) ──────────────────
+    def _require_api_key(authorization: str | None,
+                          x_api_key:     str | None) -> dict:
+        raw = None
+        if authorization and authorization.lower().startswith("bearer "):
+            raw = authorization[7:].strip()
+        elif x_api_key:
+            raw = x_api_key.strip()
+        if not raw:
+            raise ApiError(
+                "auth_required",
+                "This endpoint requires an API key.",
+                hint=("Send Authorization: Bearer <token> or "
+                      "X-API-Key: <token>. Mint a key at POST /api/keys."))
+        auth = _auth_db.find_api_key(raw)
+        if auth is None:
+            raise ApiError(
+                "auth_invalid",
+                "The provided API key is not valid or has been revoked.",
+                hint="List your active keys with GET /api/keys; mint a "
+                     "new one with POST /api/keys.")
+        return auth
+
+    # ── image decode + inference (shared with /api/predict/full) ──────
+    def _decode_image_with_sha(data: bytes,
+                                *, max_bytes: int = 12_000_000
+                                ) -> tuple[np.ndarray, str, int]:
+        if not data:
+            raise ApiError("invalid_parameter",
+                           "Image file is empty.",
+                           hint="Upload a non-empty JPEG, PNG, or WebP.",
+                           field="file")
+        if len(data) > max_bytes:
+            raise ApiError(
+                "payload_too_large",
+                f"Image exceeds the {max_bytes // 1_000_000} MB "
+                f"per-file limit (got {len(data) // 1_000_000} MB).",
+                hint="Downscale the longest side to ~2048 px and retry.",
+                field="file")
+        try:
+            pil = _PIL_Image.open(io.BytesIO(data)).convert("RGB")
+            img = np.array(pil, dtype=np.uint8)
+        except Exception:
+            logger.exception("scan: image decode failed")
+            raise ApiError(
+                "unsupported_media_type",
+                "Could not decode the uploaded file as an image.",
+                hint="Send a JPEG, PNG, or WebP image.")
+        sha = hashlib.sha256(data).hexdigest()
+        return img, sha, len(data)
+
+    def _convert_np(o):
+        if isinstance(o, np.ndarray):              return o.tolist()
+        if isinstance(o, (np.float32, np.float64)): return float(o)
+        if isinstance(o, (np.int32, np.int64)):     return int(o)
+        if isinstance(o, dict):
+            return {k: _convert_np(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [_convert_np(v) for v in o]
+        return o
+
+    def _run_apin(img_rgb: np.ndarray) -> dict:
+        from scripts.apin.section8_apin_server import get_apin
+        result = get_apin().predict(img_rgb)
+        try:
+            return _convert_np(asdict(result))
+        except Exception:
+            return _convert_np(
+                {k: v for k, v in vars(result).items()
+                 if not k.startswith("_")})
+
+    # ── helpers for the /api/scan input parsing ───────────────────────
+    # Form-field path (drones with simple HTTP clients) — accept geo as
+    # individual form fields. Multipart-with-JSON sidecar (fancier
+    # clients) — accept a `geo` JSON field. Either works.
+    def _geo_from_form(latitude, longitude, altitude_m, heading_deg,
+                       accuracy_m, captured_at, flight_id,
+                       persist_image, geo_json_blob) -> tuple[dict, str,
+                                                              str, bool]:
+        # If geo JSON is provided, prefer it (richer + future-proof for
+        # extra fields like camera intrinsics later).
+        if geo_json_blob:
+            try:
+                geo_in = json.loads(geo_json_blob)
+            except Exception:
+                raise ApiError(
+                    "invalid_parameter",
+                    "Field 'geo' is not valid JSON.",
+                    field="geo")
+            if not isinstance(geo_in, dict):
+                raise ApiError(
+                    "invalid_parameter",
+                    "Field 'geo' must be a JSON object.",
+                    field="geo")
+            cap = geo_in.get("captured_at")
+            fid = geo_in.get("flight_id")
+            persist = bool(geo_in.get("persist_image"))
+        else:
+            geo_in = {
+                "latitude":    latitude,
+                "longitude":   longitude,
+                "altitude_m":  altitude_m,
+                "heading_deg": heading_deg,
+                "accuracy_m":  accuracy_m,
+            }
+            cap = captured_at
+            fid = flight_id
+            persist = bool(persist_image)
+        geo = _validate_geo(geo_in)
+        cap_iso = _parse_iso_captured_at(cap)
+        return geo, cap_iso, (fid or None), persist
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ POST /api/scan                                               ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.post("/api/scan", status_code=201)
+    @api_endpoint("/api/scan", success_status=201)
+    async def v1_scan(
+        file: UploadFile = File(...),
+        latitude:      str | None = Form(default=None),
+        longitude:     str | None = Form(default=None),
+        altitude_m:    str | None = Form(default=None),
+        heading_deg:   str | None = Form(default=None),
+        accuracy_m:    str | None = Form(default=None),
+        captured_at:   str | None = Form(default=None),
+        flight_id:     str | None = Form(default=None),
+        persist_image: str | None = Form(default=None),
+        geo:           str | None = Form(default=None),
+        authorization: str | None = Header(default=None),
+        x_api_key:     str | None = Header(default=None,
+                                            alias="X-API-Key"),
+    ):
+        """Run inference on one drone frame and persist the result.
+
+        Returns the scan record + a single RFC 7946 GeoJSON Feature
+        ready to drop into a Mapbox / QGIS / Leaflet layer.
+        """
+        auth = _require_api_key(authorization, x_api_key)
+        geo_parsed, cap_iso, flight_id_in, persist = _geo_from_form(
+            latitude, longitude, altitude_m, heading_deg, accuracy_m,
+            captured_at, flight_id, persist_image, geo)
+        try:
+            data = await file.read()
+        except Exception:
+            logger.exception("/api/scan: upload read failed")
+            raise ApiError(
+                "invalid_parameter",
+                "Could not read the uploaded file.",
+                hint="Retry; if it persists the multipart stream may "
+                     "be truncated.")
+        img, image_sha, n_bytes = _decode_image_with_sha(data)
+        loop = asyncio.get_running_loop()
+        import time as _t
+        t0 = _t.perf_counter()
+        result = await loop.run_in_executor(None,
+                                             lambda: _run_apin(img))
+        elapsed_ms = int((_t.perf_counter() - t0) * 1000)
+        # Substitute now() if captured_at was omitted, and remember
+        # where the value came from so callers can audit.
+        cap_source = "client"
+        if not cap_iso:
+            cap_iso = (datetime.now(timezone.utc)
+                       .isoformat(timespec="milliseconds")
+                       .replace("+00:00", "Z"))
+            cap_source = "server"
+        scan = _auth_db.create_scan(
+            user_id=auth["user_id"],
+            api_key_id=auth["key_id"],
+            flight_id=flight_id_in,
+            geo=geo_parsed,
+            captured_at=cap_iso,
+            image_sha256=image_sha,
+            image_bytes=(data if persist else None),
+            result=result,
+            processing_ms=elapsed_ms)
+        feature = _scan_to_geojson_feature(scan, diag_db)
+        return {
+            "scan":     scan,
+            "geojson":  feature,
+            "captured_at_source": cap_source,
+            "authenticated_as": {
+                "user_id":   auth["user_id"],
+                "key_id":    auth["key_id"],
+                "key_name":  auth["name"],
+            },
+            "links": {
+                "self":      f"/api/scans/{scan['scan_uid']}",
+                "with_full_result":
+                    f"/api/scans/{scan['scan_uid']}?include=result",
+            },
+        }
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ POST /api/scan/batch                                         ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    _BATCH_MAX_SCANS = 16
+    _BATCH_MAX_TOTAL_BYTES = 32_000_000
+
+    @app.post("/api/scan/batch", status_code=201)
+    @api_endpoint("/api/scan/batch", success_status=201)
+    async def v1_scan_batch(
+        files: list[UploadFile] = File(...),
+        # The geo manifest is a JSON array, one entry per file, in the
+        # SAME ORDER. We chose an out-of-band JSON manifest over
+        # per-field arrays because multipart form arrays are clumsy and
+        # most drone ground-station SDKs already emit JSON.
+        manifest:      str | None = Form(default=None),
+        flight_id:     str | None = Form(default=None),
+        persist_image: str | None = Form(default=None),
+        authorization: str | None = Header(default=None),
+        x_api_key:     str | None = Header(default=None,
+                                            alias="X-API-Key"),
+    ):
+        auth = _require_api_key(authorization, x_api_key)
+        if not files:
+            raise ApiError("missing_parameter",
+                           "Send at least one image in `files`.",
+                           field="files")
+        if len(files) > _BATCH_MAX_SCANS:
+            raise ApiError(
+                "payload_too_large",
+                f"Batch is limited to {_BATCH_MAX_SCANS} frames per "
+                f"request; got {len(files)}.",
+                hint=f"Split into batches of <= {_BATCH_MAX_SCANS} and "
+                     "call /api/scan/batch repeatedly.",
+                field="files",
+                details={"limit": _BATCH_MAX_SCANS,
+                         "received": len(files)})
+        if not manifest:
+            raise ApiError(
+                "missing_parameter",
+                "Field 'manifest' is required for /api/scan/batch.",
+                hint='Send a JSON array, one entry per file in the '
+                     'SAME order, each like {"latitude":12.3,'
+                     '"longitude":76.5,"altitude_m":50,'
+                     '"captured_at":"2026-05-23T12:34:56Z"}.',
+                field="manifest")
+        try:
+            man = json.loads(manifest)
+        except Exception:
+            raise ApiError("invalid_parameter",
+                           "Field 'manifest' is not valid JSON.",
+                           field="manifest")
+        if not isinstance(man, list):
+            raise ApiError(
+                "invalid_parameter",
+                "Field 'manifest' must be a JSON array.",
+                field="manifest")
+        if len(man) != len(files):
+            raise ApiError(
+                "invalid_parameter",
+                f"Manifest length ({len(man)}) does not match files "
+                f"count ({len(files)}).",
+                hint="Send one manifest entry per file in the same "
+                     "order.",
+                field="manifest",
+                details={"files":    len(files),
+                         "manifest": len(man)})
+
+        loop = asyncio.get_running_loop()
+        import time as _t
+        items: list[dict] = []
+        features: list[dict] = []
+        total_bytes = 0
+        n_ok = n_err = 0
+        persist = bool(persist_image)
+        diag_counter: dict = {}
+        for i, (f, m) in enumerate(zip(files, man)):
+            entry = {"index": i, "filename": f.filename}
+            try:
+                if not isinstance(m, dict):
+                    raise ApiError(
+                        "invalid_parameter",
+                        f"Manifest entry {i} must be a JSON object.",
+                        field=f"manifest[{i}]")
+                data = await f.read()
+                total_bytes += len(data)
+                if total_bytes > _BATCH_MAX_TOTAL_BYTES:
+                    raise ApiError(
+                        "payload_too_large",
+                        ("Total batch upload exceeds the "
+                         f"{_BATCH_MAX_TOTAL_BYTES // 1_000_000} MB "
+                         "aggregate limit."),
+                        hint=f"Send a smaller batch (<= "
+                             f"{_BATCH_MAX_TOTAL_BYTES // 1_000_000} "
+                             "MB total).",
+                        field="files",
+                        details={
+                            "aggregate_limit_bytes":
+                                _BATCH_MAX_TOTAL_BYTES,
+                            "received_so_far_bytes": total_bytes,
+                            "stopped_at_index": i})
+                img, image_sha, _ = _decode_image_with_sha(data)
+                geo = _validate_geo(m)
+                cap_iso = _parse_iso_captured_at(m.get("captured_at"))
+                if not cap_iso:
+                    cap_iso = (datetime.now(timezone.utc)
+                               .isoformat(timespec="milliseconds")
+                               .replace("+00:00", "Z"))
+                t0 = _t.perf_counter()
+                result = await loop.run_in_executor(
+                    None, lambda im=img: _run_apin(im))
+                elapsed_ms = int((_t.perf_counter() - t0) * 1000)
+                scan = _auth_db.create_scan(
+                    user_id=auth["user_id"],
+                    api_key_id=auth["key_id"],
+                    flight_id=(m.get("flight_id") or flight_id),
+                    geo=geo,
+                    captured_at=cap_iso,
+                    image_sha256=image_sha,
+                    image_bytes=(data if persist else None),
+                    result=result,
+                    processing_ms=elapsed_ms)
+                feature = _scan_to_geojson_feature(scan, diag_db)
+                features.append(feature)
+                entry.update({"ok": True,
+                              "scan_uid": scan["scan_uid"],
+                              "diagnosis": scan["diagnosis"],
+                              "confidence": scan["confidence"]})
+                if scan["diagnosis"]:
+                    diag_counter[scan["diagnosis"]] = (
+                        diag_counter.get(scan["diagnosis"], 0) + 1)
+                n_ok += 1
+            except ApiError as e:
+                entry.update({"ok": False,
+                              "error": {"code": e.code,
+                                        "message": e.message,
+                                        "hint": e.hint}})
+                n_err += 1
+                if e.code == "payload_too_large":
+                    items.append(entry)
+                    break
+            except Exception:
+                logger.exception(
+                    "/api/scan/batch: frame %d failed", i)
+                entry.update({"ok": False,
+                              "error": {"code": "inference_failed",
+                                        "message": ("Inference failed "
+                                                    "for this frame."),
+                                        "hint": ("Retry; if persistent, "
+                                                 "quote the request_id "
+                                                 "in support.")}})
+                n_err += 1
+            items.append(entry)
+
+        feature_collection = {
+            "type": "FeatureCollection",
+            "features": features,
+        }
+        return paginated(
+            items, page=1, page_size=len(items), total=len(items),
+            feature_collection=feature_collection,
+            ok_count=n_ok,
+            error_count=n_err,
+            diagnosis_counts=diag_counter,
+            authenticated_as={"user_id":  auth["user_id"],
+                              "key_id":   auth["key_id"],
+                              "key_name": auth["name"]})
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ GET /api/scans                                               ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.get("/api/scans")
+    @api_endpoint("/api/scans")
+    async def v1_scans_list(
+        page: int             = Query(default=1, ge=1),
+        page_size: int        = Query(default=50, ge=1, le=200),
+        flight_id: str | None = Query(default=None),
+        diagnosis: str | None = Query(default=None),
+        since:     str | None = Query(default=None,
+                                        description="ISO-8601 lower bound on captured_at"),
+        until:     str | None = Query(default=None,
+                                        description="ISO-8601 upper bound on captured_at"),
+        as_geojson: int       = Query(default=0,
+                                        description="If 1, include a FeatureCollection"),
+        authorization: str | None = Header(default=None),
+        x_api_key:     str | None = Header(default=None,
+                                            alias="X-API-Key"),
+    ):
+        auth = _require_api_key(authorization, x_api_key)
+        rows, total = _auth_db.list_scans(
+            auth["user_id"],
+            page=page, page_size=page_size,
+            flight_id=flight_id, diagnosis=diagnosis,
+            since_iso=since, until_iso=until)
+        extra: dict = {
+            "filters": {
+                "flight_id": flight_id,
+                "diagnosis": diagnosis,
+                "since":     since,
+                "until":     until,
+            },
+            "owner": {"user_id": auth["user_id"]},
+        }
+        if as_geojson:
+            extra["feature_collection"] = {
+                "type": "FeatureCollection",
+                "features": [_scan_to_geojson_feature(r, diag_db)
+                             for r in rows],
+            }
+        return paginated(rows, page=page, page_size=page_size,
+                          total=total, **extra)
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ GET /api/scans/{scan_uid}                                    ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.get("/api/scans/{scan_uid}")
+    @api_endpoint("/api/scans/{scan_uid}")
+    async def v1_scan_get(
+        scan_uid: str,
+        include:  str | None = Query(default=None,
+                                       description="Comma-separated extras: 'result', 'image'"),
+        authorization: str | None = Header(default=None),
+        x_api_key:     str | None = Header(default=None,
+                                            alias="X-API-Key"),
+    ):
+        auth = _require_api_key(authorization, x_api_key)
+        extras = {p.strip() for p in (include or "").split(",") if p.strip()}
+        scan = _auth_db.get_scan(
+            auth["user_id"], scan_uid,
+            include_image=("image"  in extras),
+            include_result=("result" in extras))
+        if scan is None:
+            raise ApiError(
+                "not_found",
+                f"No scan with uid {scan_uid!r} on your account.",
+                hint="List your scans with GET /api/scans.",
+                field="scan_uid")
+        return {
+            "scan":    scan,
+            "geojson": _scan_to_geojson_feature(scan, diag_db),
+        }
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║ DELETE /api/scans/{scan_uid}                                 ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    @app.delete("/api/scans/{scan_uid}")
+    @api_endpoint("/api/scans/{scan_uid}")
+    async def v1_scan_delete(
+        scan_uid: str,
+        authorization: str | None = Header(default=None),
+        x_api_key:     str | None = Header(default=None,
+                                            alias="X-API-Key"),
+    ):
+        auth = _require_api_key(authorization, x_api_key)
+        ok = _auth_db.delete_scan(auth["user_id"], scan_uid)
+        if not ok:
+            raise ApiError(
+                "not_found",
+                f"No active scan with uid {scan_uid!r} on your account.",
+                hint="GET /api/scans to see your active scans.",
+                field="scan_uid")
+        return {
+            "scan_uid":   scan_uid,
+            "deleted":    True,
+            "deleted_at": (datetime.now(timezone.utc)
+                           .isoformat(timespec="milliseconds")
+                           .replace("+00:00", "Z")),
+            "note": ("Scan was soft-deleted (deleted_at timestamp set). "
+                     "It no longer appears in list/get queries; admin "
+                     "tooling can restore it from the DB if needed."),
+        }
+
+    logger.info("APIN /api/ perception routes registered - /api/scan "
+                "/api/scan/batch /api/scans /api/scans/{uid} GET+DELETE")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Pipeline Atlas (Phase 4) · the /pipeline page + GET /api/recent
+# ══════════════════════════════════════════════════════════════════════
+# The Pipeline Atlas is APIN's architecture page. It explains the
+# 4-module pipeline (Router · Tomato · Chilli · APIN okra+brassica)
+# with interactive visualisations, animated charts, and a live request
+# log driven by the new /api/recent endpoint.
+#
+# The middleware below records EVERY request the server handles into a
+# bounded in-process deque, skipping static assets. The /api/recent
+# endpoint reads from that deque. Auth is intentionally absent: the log
+# only carries path templates, status codes, and latency, never request
+# bodies or auth headers, so it is safe to expose.
+
+from collections import deque as _deque
+import time as _pa_time
+
+_RECENT_REQUESTS_BUFFER = _deque(maxlen=200)
+_RECENT_SKIP_PREFIXES = (
+    "/favicon", "/logo", "/static/", "/robots.txt", "/sitemap.xml",
+    "/api/recent",   # don't pollute the log with self-polls
+)
+_RECENT_SKIP_SUFFIXES = (
+    ".css", ".js", ".png", ".svg", ".ico", ".jpg", ".jpeg",
+    ".webp", ".woff", ".woff2", ".ttf", ".map",
+)
+
+
+def _add_pipeline_route(app):
+    """Register the Pipeline Atlas page and its supporting /api/recent
+    endpoint, plus the request-capture middleware.
+
+    Purely additive. The middleware is read-only: it observes every
+    request, never modifies request or response, and any internal error
+    is swallowed so it cannot break inference.
+    """
+    # PDA round 1: BaseHTTPMiddleware import removed (dead - we use the
+    # @app.middleware("http") decorator, not the BaseHTTPMiddleware class).
+    from datetime import datetime as _pa_dt, timezone as _pa_tz
+    from fastapi import Query, HTTPException
+    import re as _pa_re
+    import os as _pa_os
+    import json as _pa_json
+
+    # Sanitiser for unmatched paths (404s). When FastAPI does not match a
+    # route template we still receive a rendered URL which can carry
+    # user-supplied IDs (scn_..., apin_..., long numeric ids). We
+    # collapse those to {id} so the public log never echoes raw values.
+    _PATH_SANITISE_PATTERNS = [
+        (_pa_re.compile(r"/(scn|apin|req)_[0-9a-f]{8,}"), r"/\1_{id}"),
+        # PDA round 5: was `/\d{4,}` which missed short ids like
+        # /api/keys/42. Lower bound to 1+ so any all-digit segment
+        # gets collapsed.
+        (_pa_re.compile(r"/\d+"), "/{id}"),
+    ]
+
+    def _sanitise_raw_path(p):
+        out = p
+        for pat, repl in _PATH_SANITISE_PATTERNS:
+            out = pat.sub(repl, out)
+        return out
+
+    # ── middleware ────────────────────────────────────────────────────
+    @app.middleware("http")
+    async def _capture_recent(request, call_next):
+        path = request.url.path
+        method = request.method
+        # Skip static assets + our own polling endpoint
+        if any(path.startswith(p) for p in _RECENT_SKIP_PREFIXES):
+            return await call_next(request)
+        if any(path.endswith(s) for s in _RECENT_SKIP_SUFFIXES):
+            return await call_next(request)
+
+        t0 = _pa_time.perf_counter()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        finally:
+            try:
+                elapsed_ms = int(
+                    (_pa_time.perf_counter() - t0) * 1000)
+                # Prefer the route template if FastAPI matched one;
+                # falls back to a sanitised raw path on 404 / static so
+                # the log never echoes user-supplied IDs verbatim
+                # (PDA round 1 finding).
+                route = request.scope.get("route", None)
+                path_template = (getattr(route, "path", None)
+                                 or _sanitise_raw_path(path))
+                _RECENT_REQUESTS_BUFFER.appendleft({
+                    "captured_at": (_pa_dt.now(_pa_tz.utc)
+                                    .isoformat(timespec="milliseconds")
+                                    .replace("+00:00", "Z")),
+                    "method": method,
+                    "path": path_template,
+                    "status": status,
+                    "latency_ms": elapsed_ms,
+                })
+            except Exception:
+                # Never let the middleware crash a request
+                pass
+
+    # ── GET /api/recent ───────────────────────────────────────────────
+    from scripts.apin_v2.api_envelope import api_endpoint, paginated
+
+    @app.get("/api/recent")
+    @api_endpoint("/api/recent")
+    async def api_recent(
+        limit: int = Query(default=50, ge=1, le=200,
+                            description="Number of recent requests to return (1-200, default 50)."),
+    ):
+        """Return the N most recent HTTP requests this process has
+        handled. Skips static assets. Carries path templates only;
+        never request bodies, auth tokens, or user identifiers."""
+        # FastAPI's Query(ge=1, le=200) already validates limit, so we
+        # trust it directly. The earlier defensive clamp was dead code.
+        n = limit
+        rows = list(_RECENT_REQUESTS_BUFFER)[:n]
+        return paginated(rows, page=1, page_size=n, total=len(rows),
+                          buffer_capacity=_RECENT_REQUESTS_BUFFER.maxlen)
+
+    # ── GET /pipeline (the page) ──────────────────────────────────────
+    _PIPELINE_HEADERS = {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+    }
+
+    @app.get("/pipeline", response_class=HTMLResponse)
+    async def pipeline_page():
+        return HTMLResponse(_load_html("pipeline.html"),
+                            headers=_PIPELINE_HEADERS)
+
+    # Phase 4B: serve the precomputed module data JSON files. These are written
+    # by scripts/apin_v2/extract_pipeline_atlas_{router,tomato,chilli}.py. The
+    # files live under _qa_tmp/ (outside the public assets dir) so the route
+    # reads them from disk and returns them with no-store. Path traversal is
+    # impossible because we whitelist exact filenames.
+    _ATLAS_DATA_FILES = {
+        "router":  "_pipeline_atlas_router.json",
+        "tomato":  "_pipeline_atlas_tomato.json",
+        "chilli":  "_pipeline_atlas_chilli.json",
+        # Phase 4C: animated forward-pass diagram data (4 models × 3 images
+        # × N stages, with hand-drafted narrations). Appended last per plan
+        # v4 §A15 so the not_found error hint enumerates slugs in insertion
+        # order. ~2-4 MB payload; served with the same no-store header as
+        # all other slugs.
+        "forward_pass": "_pipeline_atlas_forward_pass.json",
+        # Phase 4D: calibration deep dive + scattered fills + lineage
+        # data computed from real cached results by extract_phase_d.py.
+        "phase_d":      "_pipeline_atlas_phase_d.json",
+    }
+    _ATLAS_ROOT = _pa_os.path.dirname(_pa_os.path.dirname(
+        _pa_os.path.dirname(_pa_os.path.abspath(__file__))
+    ))
+    _ATLAS_QA_DIR = _pa_os.path.join(_ATLAS_ROOT, "_qa_tmp")
+
+    # Use the project's ApiError convention so the envelope shape stays
+    # consistent with every other /api/* endpoint.
+    from scripts.apin_v2.api_envelope import ApiError as _PA_ApiError
+
+    @app.get("/api/pipeline_data/{slug}")
+    @api_endpoint("/api/pipeline_data/{slug}")
+    async def pipeline_data(slug: str):
+        fname = _ATLAS_DATA_FILES.get(slug)
+        if fname is None:
+            raise _PA_ApiError(
+                "not_found",
+                f"Unknown atlas data slug: {slug!r}",
+                hint="Valid slugs: " + ", ".join(_ATLAS_DATA_FILES.keys()),
+                field="slug",
+            )
+        path = _pa_os.path.join(_ATLAS_QA_DIR, fname)
+        if not _pa_os.path.exists(path):
+            raise _PA_ApiError(
+                "not_found",
+                f"Atlas data not extracted yet for {slug}.",
+                hint=f"Run python scripts/apin_v2/extract_pipeline_atlas_{slug}.py",
+                field="slug",
+            )
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = _pa_json.load(f)
+        except Exception as e:
+            raise _PA_ApiError(
+                "internal_error",
+                "Atlas data file is unreadable.",
+                hint=str(e)[:200],
+            )
+        return payload
+
+    logger.info("Pipeline Atlas registered · /pipeline page + "
+                "GET /api/recent endpoint + GET /api/pipeline_data/{slug} + "
+                "recent-requests middleware")
+
+
+def _add_v1_validation_handler(app):
+    """Wrap FastAPI's RequestValidationError into the §3 error envelope.
+
+    PVA drift fix: without this, calling POST /predict/quick with no
+    file (or /predict/batch with no files) returned FastAPI's default
+    raw {"detail":[{"type":"missing",…}]} body — a totally different
+    shape from every other §3 error response. Machine clients that
+    branch on `body.error.code` would crash with KeyError on a missing
+    field.
+
+    Scope: ONLY pydantic body/query/header validation failures hit
+    this handler. The existing browser-facing endpoints (/predict/full,
+    /auth/*, /feedback, ...) parse their bodies manually and either
+    succeed or raise HTTPException — neither path goes through this
+    handler, so this is a strictly additive change.
+    """
+    from fastapi.exceptions import RequestValidationError
+    from scripts.apin_v2.api_envelope import (
+        new_request_id, API_VERSION, ERROR_STATUS)
+    from datetime import datetime as _vh_dt, timezone as _vh_tz
+
+    _DOCS = "https://dxv-404-apin.hf.space/docs#errors"
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_failed(request: Request,
+                                  exc: RequestValidationError):
+        rid = new_request_id()
+        # Surface the first failing field; the full list is in details
+        # so the client can show every offense.
+        errs    = exc.errors() or []
+        first   = errs[0] if errs else {}
+        loc     = first.get("loc", []) or []
+        # loc looks like ("body","file") or ("query","page")
+        field   = ".".join(str(x) for x in loc[1:]) if len(loc) > 1 else None
+        msg     = first.get("msg", "Validation failed.")
+        # Trim the per-error dicts to the safe subset — never echo
+        # `ctx`, which can contain raw exception text from validators.
+        safe_errs = [
+            {"loc":  e.get("loc"),
+             "msg":  e.get("msg"),
+             "type": e.get("type")}
+            for e in errs
+        ]
+        # FX-P8-A2: ERROR_STATUS has no "validation_failed" key — the dict
+        # only holds canonical spec codes + legacy codes. Pre-fix this
+        # crashed with a KeyError and the user saw a generic 500. Map
+        # FastAPI's RequestValidationError to the canonical `invalid_parameter`
+        # envelope (400) so callers get a clean response with the offending
+        # field surfaced in details.
+        try:
+            status = ERROR_STATUS["invalid_parameter"]
+        except KeyError:
+            status = 400
+        code_for_envelope = "invalid_parameter"
+        now_iso = (_vh_dt.now(_vh_tz.utc).isoformat(timespec="milliseconds")
+                   .replace("+00:00", "Z"))
+        env = {
+            "api_version":         API_VERSION,
+            "request_id":          rid,
+            "endpoint":            request.url.path,
+            "ok":                  False,
+            "processed_at":        now_iso,
+            "processing_time_ms":  0,
+            "status_code":         status,
+            "error": {
+                "code":     code_for_envelope,
+                "message":  ("Request did not match the expected shape: "
+                              + str(msg)),
+                "docs_url": _DOCS,
+                "hint":     ("Check the field listed in `error.field` "
+                              "and the full list in `error.details.errors`."),
+                "field":    field,
+                "details":  {"errors": safe_errs},
+            },
+        }
+        return JSONResponse(env, status_code=status,
+                            headers={"X-Request-Id": rid,
+                                     "X-API-Version": API_VERSION,
+                                     "Cache-Control": "no-store"})
+
+    logger.info("APIN /api/ validation handler registered - "
+                "RequestValidationError -> §3 envelope")
+
+
+# ════════════════════════════════════════════════════════════════════
+# Stage 2 · KPI summary + telemetry ingest routes
+#
+# /api/stats/summary  — composes the 4 KPI tiles (inferences served,
+#                       top disease this week, test quality, live activity)
+#                       from auth_db helpers; cache-friendly read-only.
+#
+# /api/telemetry/ingest — accepts a batch payload (page_views, clicks,
+#                         impressions, events, api_calls, errors, goals,
+#                         experiments_exposures, plus an optional session
+#                         object) and forwards it to ingest_telemetry_batch.
+#                         Never blocks the user — returns 200 with per-table
+#                         insert counts even on malformed payloads.
+# ════════════════════════════════════════════════════════════════════
+def _add_stats_and_telemetry_routes(app):
+    """Register the KPI summary endpoint, the telemetry ingest beacon,
+    and (Stage 6.2) the Server-Sent Events live-stream endpoint."""
+    from fastapi.responses import JSONResponse, StreamingResponse
+    from scripts.apin_v2 import auth_db as _auth_db
+    import asyncio as _asyncio
+    import json as _json_mod
+
+    # ════════════════════════════════════════════════════════════════════
+    # Stage 6.2 · Real-time Live Now feed via Server-Sent Events
+    # ════════════════════════════════════════════════════════════════════
+    # Why SSE replaced the 2 s poll: Chrome (and every Chromium-based
+    # browser) clamps setInterval in hidden tabs to >=1 Hz, and after 5
+    # minutes hidden invokes "intensive throttling" — 1 fire / minute
+    # at most. So when /pipeline was the observer tab and the user
+    # switched away, the count visibly lagged by 2-5 minutes on return.
+    #
+    # SSE is server-driven push. The browser does NOT throttle event
+    # delivery the way it throttles timers; events emitted to a hidden
+    # tab queue locally and fire as soon as the tab returns to visible.
+    # Combined with the visibility-resume manual refetch on the client
+    # (defensive belt-and-suspenders for the rare case where the SSE
+    # connection died while hidden) this gives the tile sub-second
+    # update latency in every realistic browser state.
+    #
+    # Architecture:
+    #   _LiveNowBus         — process-local pub-sub. Subscribers are
+    #                         bounded asyncio.Queue objects (max 8) so a
+    #                         slow consumer cannot exhaust memory.
+    #   _build_live_now_snapshot()
+    #                       — builds the same shape the polling endpoint
+    #                         returns under .live_now. Single source of
+    #                         truth — both endpoints call it.
+    #   _publish_live_now() — convenience wrapper: snapshot + fan out.
+    #   _live_now_sweeper() — 2 s periodic task that re-publishes
+    #                         whenever the signature changes for reasons
+    #                         OTHER than a telemetry beacon (a heartbeat
+    #                         aging past the window, the GPU memory
+    #                         crossing a threshold, etc.). Without this
+    #                         the count would freeze when sessions go
+    #                         silent (the explicit pagehide beacon
+    #                         covers graceful close but not browser
+    #                         crashes / OS kills / mobile suspend).
+    #
+    # Production notes:
+    #   · X-Accel-Buffering: no  — disables Nginx response buffering on
+    #     the HF Space upstream path. Without it the edge layer holds
+    #     individual events and ships them in 5+ second batches.
+    #   · 15 s SSE comment-ping  — keeps the connection alive against
+    #     proxies that drop idle streams. HF Space's edge times out
+    #     around 60 s of silence; 15 s is comfortably under that.
+    #   · Bounded queue + drop-oldest backpressure — one bad client
+    #     cannot block the publisher loop or balloon memory.
+    #   · subscribe()/unsubscribe() are async + lock-protected so the
+    #     subscriber set is safe under concurrent connects + disconnects.
+    #   · Sweeper is idempotently started · the first SSE connection
+    #     triggers it via _ensure_sweeper(), so it does not even spin
+    #     up on a server nobody is observing.
+    # ════════════════════════════════════════════════════════════════════
+
+    class _LiveNowBus:
+        """In-memory pub-sub for live_now snapshots. One instance per app."""
+        def __init__(self):
+            self._subscribers: set = set()
+            self._lock = _asyncio.Lock()
+
+        async def subscribe(self) -> _asyncio.Queue:
+            q: _asyncio.Queue = _asyncio.Queue(maxsize=8)
+            async with self._lock:
+                self._subscribers.add(q)
+            return q
+
+        async def unsubscribe(self, q: _asyncio.Queue) -> None:
+            async with self._lock:
+                self._subscribers.discard(q)
+
+        async def publish(self, snapshot: dict) -> None:
+            async with self._lock:
+                subs = list(self._subscribers)
+            for q in subs:
+                try:
+                    q.put_nowait(snapshot)
+                except _asyncio.QueueFull:
+                    # Slow consumer · drop oldest, append new. Keeps the
+                    # subscriber alive but ensures they get the LATEST
+                    # state next read instead of an arbitrarily-old one.
+                    try: q.get_nowait()
+                    except Exception: pass
+                    try: q.put_nowait(snapshot)
+                    except Exception: pass
+
+        def subscriber_count(self) -> int:
+            return len(self._subscribers)
+
+    if not hasattr(app.state, "_live_now_bus"):
+        app.state._live_now_bus = _LiveNowBus()
+        app.state._live_now_sweeper_started = False
+    _bus: _LiveNowBus = app.state._live_now_bus
+
+    def _build_live_now_snapshot() -> dict:
+        """Compose the live_now object the polling endpoint also returns."""
+        try:
+            ln = _auth_db.live_sessions_by_route(window_s=30)
+        except Exception:
+            ln = {"active_count": 0, "by_route": [], "as_of": None}
+        compute = {"device": "cpu", "vram_gb": None, "vram_allocated_gb": None}
+        try:
+            import torch as _torch
+            if _torch.cuda.is_available():
+                compute["device"] = "cuda"
+                try:
+                    compute["vram_allocated_gb"] = round(
+                        _torch.cuda.memory_allocated() / (1024 ** 3), 2)
+                except Exception:
+                    pass
+                try:
+                    props = _torch.cuda.get_device_properties(0)
+                    compute["vram_gb"] = round(props.total_memory / (1024 ** 3), 1)
+                    compute["device_name"] = props.name
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        ln["compute"] = compute
+        return ln
+
+    async def _publish_live_now() -> None:
+        try:
+            snap = _build_live_now_snapshot()
+            await _bus.publish(snap)
+        except Exception:
+            logger.exception("live_now publish failed")
+
+    async def _live_now_sweeper() -> None:
+        """Periodic re-publisher · catches state changes the ingest hook
+        cannot see (sessions aging out of the 30 s heartbeat window with
+        no new telemetry arriving). Signature is (active_count, sorted
+        route counts, vram_allocated_gb) — any change re-publishes."""
+        last_sig = None
+        while True:
+            try:
+                snap = _build_live_now_snapshot()
+                sig = (
+                    snap.get("active_count"),
+                    tuple(sorted(
+                        ((r.get("route"), r.get("count"))
+                         for r in (snap.get("by_route") or [])),
+                    )),
+                    (snap.get("compute") or {}).get("vram_allocated_gb"),
+                )
+                if sig != last_sig:
+                    await _bus.publish(snap)
+                    last_sig = sig
+            except Exception:
+                logger.exception("live_now sweeper iteration failed")
+            await _asyncio.sleep(2.0)
+
+    def _ensure_live_now_sweeper() -> None:
+        if app.state._live_now_sweeper_started:
+            return
+        try:
+            _asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        app.state._live_now_sweeper_started = True
+        _asyncio.create_task(_live_now_sweeper())
+        logger.info("live_now SSE sweeper started (2 s signature-change interval)")
+
+    @app.on_event("startup")
+    async def _live_now_startup_hook():
+        _ensure_live_now_sweeper()
+
+    @app.get("/api/stats/summary")
+    async def v2_stats_summary(window_days: int = 7):
+        """Aggregate snapshot for the Pipeline Atlas KPI tiles.
+
+        Returns:
+          inferences_served : {total, user, guest, scan}
+          top_disease       : {class, count, share, window_days} or null
+          live_activity     : {last_60s_count, last_5min_count,
+                               last_hour_count, median_latency_ms,
+                               error_rate_pct, as_of}
+          test_quality      : (placeholder; populated by Phase 4D extractor)
+
+        The endpoint is intentionally cheap — it issues four COUNT(*) /
+        GROUP BY queries against indexed columns. Safe to poll every 5-10s.
+        """
+        try:
+            totals = _auth_db.count_total_inferences()
+        except Exception:
+            totals = {"total": 0, "user": 0, "guest": 0, "scan": 0}
+        try:
+            wnd = int(window_days)
+            if wnd < 1 or wnd > 365:
+                wnd = 7
+            top = _auth_db.top_disease_in_window(days=wnd)
+        except Exception:
+            top = None
+        try:
+            live = _auth_db.live_activity_summary()
+        except Exception:
+            live = None
+
+        # Stage 6.2 · delegate to the shared snapshot builder so the
+        # polling endpoint and the SSE stream return BIT-IDENTICAL shapes.
+        # window_s defaults to 30 s now (was 90 s in Stage 6) — the SSE
+        # push is the primary liveness signal, so the SQL window only
+        # needs to cover the "client died silently" fallback case, and
+        # 30 s gives much faster cleanup of crashed/force-quit tabs.
+        live_now = _build_live_now_snapshot()
+
+        # test_quality is sourced from the Phase 4D extractor's frozen JSON.
+        # The Pipeline Atlas already inlines PHASE_D_DATA; the API mirror is
+        # provided for clients that want to drive the same tile without
+        # re-parsing the HTML.
+        test_quality = None
+        try:
+            from pathlib import Path as _P
+            import json as _json
+            _td = (PROJECT_ROOT / "scripts" / "apin_v2"
+                   / "phase_d_data.json")
+            if _td.exists():
+                _d = _json.loads(_td.read_text(encoding="utf-8"))
+                # Surface a compact pair: ECE + macro-F1 (or whatever the
+                # extractor labels as the headline quality numbers).
+                test_quality = {
+                    "macro_f1": _d.get("macro_f1") or _d.get("test_macro_f1"),
+                    "ece":      _d.get("ece")      or _d.get("test_ece"),
+                    "n_test":   _d.get("n_test")   or _d.get("test_n"),
+                    "as_of":    _d.get("generated_at")
+                                or _d.get("as_of"),
+                }
+        except Exception:
+            test_quality = None
+
+        return JSONResponse({
+            "inferences_served": totals,
+            "top_disease":       top,
+            "live_activity":     live,
+            "test_quality":      test_quality,
+            "live_now":          live_now,   # Stage 6 · tile 4
+        }, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/stats/live-stream")
+    async def v2_stats_live_stream(request: Request):
+        """Server-Sent Events feed for the Live Now tile.
+
+        Emits a `snapshot` event with the same shape as
+        /api/stats/summary's `live_now` field:
+          { active_count, by_route[], compute{}, as_of }
+
+        Events fire:
+          · immediately on connect (initial state — client doesn't wait)
+          · whenever a telemetry beacon causes a session change (instant)
+          · whenever the 2 s sweeper detects a state change for reasons
+            other than a beacon (stale eviction · GPU memory change ·
+            etc.)
+
+        SSE comment-ping every 15 s prevents proxy idle-timeout. The
+        EventSource API on the client side auto-reconnects on drop.
+
+        Production deployment note: this works on HF Spaces because we
+        emit X-Accel-Buffering: no, which disables Nginx response
+        buffering on the upstream path. Without that header, individual
+        events are batched into 5+ second flushes.
+        """
+        _ensure_live_now_sweeper()
+        q = await _bus.subscribe()
+
+        async def gen():
+            try:
+                # 1) Initial snapshot — sent on connect so the client UI
+                #    populates immediately without waiting for the next
+                #    change event.
+                try:
+                    initial = _build_live_now_snapshot()
+                    yield f"event: snapshot\ndata: {_json_mod.dumps(initial)}\n\n"
+                except Exception:
+                    pass
+
+                # 2) Stream changes. timeout=15 wakes the loop so we can
+                #    (a) check is_disconnected() and (b) emit a comment
+                #    keep-alive.
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        snap = await _asyncio.wait_for(q.get(), timeout=15.0)
+                        yield f"event: snapshot\ndata: {_json_mod.dumps(snap)}\n\n"
+                    except _asyncio.TimeoutError:
+                        # SSE protocol · lines starting with `:` are
+                        # comments. Maintains the connection through
+                        # idle-timeout-aggressive proxies.
+                        yield ": keep-alive\n\n"
+            finally:
+                await _bus.unsubscribe(q)
+
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control":     "no-store",
+                "X-Accel-Buffering": "no",     # HF Space / Nginx · disable buffering
+                "Connection":        "keep-alive",
+            },
+        )
+
+    @app.post("/api/telemetry/ingest")
+    async def v2_telemetry_ingest(request: Request):
+        """Accept a batch of client-side telemetry events.
+
+        Expected payload shape (every key optional, missing → empty):
+        {
+          "session": {
+            "id": "<browser_session_id>",
+            "session_start_at": "<iso>",
+            "device_type": "...",
+            "ip_country": "...",
+            ...
+          },
+          "page_views":            [{...}, ...],
+          "clicks":                [{...}, ...],
+          "impressions":           [{...}, ...],
+          "events":                [{...}, ...],
+          "api_calls":             [{...}, ...],
+          "inference_telemetry":   [{...}, ...],
+          "errors":                [{...}, ...],
+          "goals":                 [{...}, ...],
+          "experiments_exposures": [{...}, ...]
+        }
+
+        Returns per-table insert counts. Malformed rows in a batch are
+        silently dropped — the rest are still inserted, mirroring how
+        real-world telemetry pipelines treat partial failures.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse(
+                {"ok": False, "reason": "expected JSON object",
+                 "counts": None},
+                status_code=200,
+                headers={"Cache-Control": "no-store"},
+            )
+
+        # [F-5] Cap per-table batch size. A malicious client could otherwise
+        # POST millions of events in one request. The cap is per-table so a
+        # well-behaved client sending 200 page_views + 200 clicks still works.
+        _BATCH_CAP = 500
+        _truncated = False
+        for _k in ("page_views", "clicks", "impressions", "events",
+                   "api_calls", "inference_telemetry", "errors",
+                   "goals", "experiments_exposures"):
+            _items = body.get(_k)
+            if isinstance(_items, list) and len(_items) > _BATCH_CAP:
+                body[_k] = _items[:_BATCH_CAP]
+                _truncated = True
+
+        # Best-effort server-side enrichment of the session object: stamp
+        # IP country / region / city from edge headers if the client
+        # didn't already provide them, plus a salted IP hash. This way
+        # the client never has to know the visitor's geo or IP.
+        try:
+            sess = body.get("session")
+            if isinstance(sess, dict):
+                if "client_ip_hash" not in sess or not sess.get("client_ip_hash"):
+                    try:
+                        # REV-R5-I08: rightmost-untrusted via helper, not
+                        # leftmost XFF entry.
+                        ip = _client_ip_rightmost(request)
+                        ih = _hash_client_ip(ip)
+                        if ih:
+                            sess["client_ip_hash"] = ih
+                    except Exception:
+                        pass
+                geo = _client_geo_from_headers(request.headers)
+                for k in ("client_country", "client_region", "client_city"):
+                    if k in geo and not sess.get(k.replace("client_", "ip_")):
+                        # browser_sessions column is `ip_country` etc.
+                        sess[k.replace("client_", "ip_")] = geo[k]
+        except Exception:
+            pass
+
+        try:
+            counts = _auth_db.ingest_telemetry_batch(body)
+        except Exception:
+            logger.exception("ingest_telemetry_batch raised — returning zero counts")
+            counts = {
+                "session_upserted": 0,
+                "page_views": 0, "clicks": 0, "impressions": 0,
+                "events": 0, "api_calls": 0, "inference_telemetry": 0,
+                "errors": 0, "goals": 0, "experiments_exposures": 0,
+            }
+
+        # Stage 6.2 · push fresh snapshot to all SSE subscribers the
+        # instant a session row changed. This is the primary realtime
+        # signal: a tab opening, heartbeating, changing route, or
+        # ending propagates to every /pipeline observer in <1 hop
+        # round-trip. Sweeper handles state changes that DIDN'T arrive
+        # via telemetry (silent client deaths) on a 2 s cadence.
+        # Skipped when no session content arrived (counts.session_upserted = 0),
+        # which avoids pushing duplicate snapshots when a batch only
+        # contained click/api_call rows.
+        if counts.get("session_upserted"):
+            try:
+                await _publish_live_now()
+            except Exception:
+                logger.warning("SSE publish after ingest failed", exc_info=True)
+
+        return JSONResponse(
+            {"ok": True, "counts": counts, "truncated": _truncated},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    # Stage 3 · serve the client-side telemetry library at /static/telemetry.js
+    #
+    # We use a hand-rolled GET route (rather than mounting a StaticFiles
+    # directory) for three reasons:
+    #   1. Only one file in scripts/apin_v2/ should be reachable from the
+    #      web. Mounting the whole directory would expose every adjacent
+    #      .py module.
+    #   2. We want strong caching headers so the browser does not re-fetch
+    #      the same ~14 KB blob on every navigation.
+    #   3. The Content-Type must be application/javascript for the browser
+    #      to execute it; FastAPI's FileResponse picks text/javascript on
+    #      some platforms which works but is technically the older mimetype.
+    _TLM_FILE = Path(__file__).resolve().parent / "telemetry.js"
+    _TLM_CACHE = {"mtime": 0.0, "body": None, "etag": None}
+
+    @app.get("/static/telemetry.js")
+    async def v2_telemetry_js(request: Request):
+        from fastapi.responses import Response
+        try:
+            mt = _TLM_FILE.stat().st_mtime
+            if (_TLM_CACHE["mtime"] != mt) or (_TLM_CACHE["body"] is None):
+                _TLM_CACHE["body"]  = _TLM_FILE.read_bytes()
+                _TLM_CACHE["mtime"] = mt
+                # ETag = first 12 hex chars of sha256(content). Cheap
+                # invariant: any byte change → new ETag → forced re-download.
+                import hashlib
+                _TLM_CACHE["etag"] = (
+                    '"' + hashlib.sha256(_TLM_CACHE["body"]).hexdigest()[:12] + '"'
+                )
+            # Stage 5 [post-mortem] · the 1-hour cache header that lived
+            # here meant the browser served a STALE telemetry.js after we
+            # shipped a bug fix; the in-browser walkthrough only worked
+            # because we manually busted the cache via fetch+eval. Switch
+            # to revalidate-every-time + ETag so deploys propagate
+            # immediately while still saving bandwidth on unchanged files.
+            inm = request.headers.get("if-none-match")
+            if inm and inm == _TLM_CACHE["etag"]:
+                return Response(status_code=304, headers={
+                    "ETag": _TLM_CACHE["etag"],
+                    "Cache-Control": "public, max-age=0, must-revalidate",
+                })
+            return Response(
+                content=_TLM_CACHE["body"],
+                media_type="application/javascript",
+                headers={
+                    "Cache-Control": "public, max-age=0, must-revalidate",
+                    "ETag": _TLM_CACHE["etag"],
+                    "X-APIN-Telemetry-Version": "v1",
+                },
+            )
+        except FileNotFoundError:
+            return Response(status_code=404, content=b"telemetry.js not found")
+
+    logger.info("Stage 2 + 6.2 routes registered — /api/stats/summary + "
+                "/api/stats/live-stream (SSE) + /api/telemetry/ingest + "
+                "/static/telemetry.js")
+
+    # The auto-inject HTML middleware lives in
+    # _add_telemetry_inject_middleware() (called from main BEFORE gzip)
+    # — see comment block there for the rationale.
+
+
+# ════════════════════════════════════════════════════════════════════
+# Stage 6 follow-up · auto-inject the telemetry library into every HTML
+# page so visits to /docs, /, /landing, /dashboard, etc. all count
+# toward the "Live now" KPI tile.
+#
+# Why this middleware lives at module-scope (and is registered in
+# main() BEFORE GZipMiddleware): if gzip processes the response first,
+# the response body is compressed bytes by the time we see it · UTF-8
+# decode fails · we skip injection. Registering this middleware EARLIER
+# (so it's the INNERMOST on the response phase, seen first going out)
+# means we always get the raw, uncompressed HTML, modify it, then gzip
+# compresses the modified version downstream of us.
+#
+# Why a middleware rather than touching every HTML file:
+#   1. 13 HTML pages. Edit-once vs edit-everywhere is a much smaller
+#      maintenance surface.
+#   2. The cache-bust query (`?v=<etag>`) lives in ONE place. When
+#      telemetry.js changes byte-for-byte its ETag flips, the script
+#      URL changes, every browser refetches automatically — no manual
+#      version bumping required.
+#   3. Idempotent: if a page already has /static/telemetry.js in its
+#      HTML (pipeline.html does), we just rewrite the URL to add the
+#      version query · no duplicate <script> tags.
+# ════════════════════════════════════════════════════════════════════
+# ⚠ DEAD CODE — DO NOT REGISTER FROM main() WITHOUT REVIEW ⚠
+#
+# This middleware is the abandoned auto-inject design (see the design
+# post-mortem comment block ~125 lines below). It is intentionally
+# defined but never wired. PDA-P3.1-R2 nearly flagged this as a P0 on
+# the false assumption that it was active — saved by the fact that
+# grep confirms zero `_add_telemetry_inject_middleware(app)` call sites
+# in main().
+#
+# If you register this in the future, you WILL break the API Console
+# Content-Security-Policy. The Console page at /account/api/keys uses
+# `script-src 'self'` (no inline scripts, no nonces) — see DEC-P31-FX-A
+# in _qa_tmp/api_console_spec/decisions.md. Auto-injecting an inline
+# <script> tag into that response would be silently CSP-rejected by
+# the browser, leaving the page non-functional without any server-side
+# error. The fix would be to either (a) inject as `<script src="..."`
+# (external reference, not inline) or (b) keep the per-page <script>
+# tag pattern that replaced this middleware.
+#
+# Keeping the implementation here for archaeology only.
+def _add_telemetry_inject_middleware(app):
+    from re import sub as _re_sub
+    from fastapi.responses import Response as _Resp
+    from pathlib import Path as _Path
+    _TLM = _Path(__file__).resolve().parent / "telemetry.js"
+
+    def _etag_for_telemetry():
+        try:
+            import hashlib
+            data = _TLM.read_bytes()
+            return hashlib.sha256(data).hexdigest()[:12]
+        except Exception:
+            return "v1"
+
+    @app.middleware("http")
+    async def _inject_telemetry_into_html(request: Request, call_next):
+        response = await call_next(request)
+        if request.method != "GET":
+            return response
+        ct = response.headers.get("content-type", "")
+        if "text/html" not in ct.lower():
+            return response
+        if request.url.path.startswith("/static/"):
+            return response
+        try:
+            body_chunks = []
+            async for chunk in response.body_iterator:
+                body_chunks.append(chunk)
+        except Exception:
+            return response
+        body_bytes = b"".join(body_chunks)
+
+        # If gzip ran before us (added BEFORE in main · this happens
+        # when FastAPI's middleware order surprises us · see code-review
+        # comment for the rationale), decompress so we can edit. We'll
+        # leave the body uncompressed and clear Content-Encoding; gzip
+        # won't run again on the way out because middleware only sees a
+        # response once per request. The downside is slightly larger
+        # bytes on the wire for HTML; this is acceptable since HTML is
+        # only ~600 KB and the auto-inject visibility is more important.
+        encoding = response.headers.get("content-encoding", "").lower()
+        if "gzip" in encoding:
+            try:
+                import gzip as _gz
+                body_bytes = _gz.decompress(body_bytes)
+            except Exception:
+                return _Resp(content=body_bytes, status_code=response.status_code,
+                             headers=dict(response.headers), media_type=ct)
+        elif "deflate" in encoding:
+            try:
+                import zlib as _zl
+                body_bytes = _zl.decompress(body_bytes)
+            except Exception:
+                return _Resp(content=body_bytes, status_code=response.status_code,
+                             headers=dict(response.headers), media_type=ct)
+        elif "br" in encoding:
+            # Brotli requires the brotli package; skip if not available.
+            try:
+                import brotli as _br
+                body_bytes = _br.decompress(body_bytes)
+            except Exception:
+                return _Resp(content=body_bytes, status_code=response.status_code,
+                             headers=dict(response.headers), media_type=ct)
+
+        try:
+            text = body_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return _Resp(content=body_bytes, status_code=response.status_code,
+                         headers=dict(response.headers), media_type=ct)
+        idx = text.lower().rfind("</body>")
+        if idx < 0:
+            return _Resp(content=body_bytes, status_code=response.status_code,
+                         headers=dict(response.headers), media_type=ct)
+        ver = _etag_for_telemetry()
+        if "/static/telemetry.js" in text:
+            # Idempotent rewrite · upgrade any pre-existing reference
+            # with the current cache-bust version.
+            text = _re_sub(
+                r'(/static/telemetry\.js)(\?[^"\'\s>]*)?',
+                lambda m: m.group(1) + '?v=' + ver,
+                text,
+            )
+            new_text = text
+        else:
+            route = request.url.path or "/"
+            route_js = route.replace("\\", "\\\\").replace('"', '\\"')
+            snippet = (
+                '\n<!-- apin telemetry · auto-injected by server middleware -->'
+                '\n<script src="/static/telemetry.js?v=' + ver + '" defer></script>'
+                '\n<script>document.addEventListener("DOMContentLoaded",function(){'
+                'try{if(window.APIN_TLM)window.APIN_TLM.init({page_route:"' + route_js + '"})}'
+                'catch(e){}});</script>\n'
+            )
+            idx = text.lower().rfind("</body>")
+            new_text = text[:idx] + snippet + text[idx:]
+        new_bytes = new_text.encode("utf-8")
+        # Drop Content-Length (we mutated size) AND Content-Encoding (we
+        # decompressed earlier, so the body is now uncompressed even if
+        # the original was gzipped).
+        _drop = {"content-length", "content-encoding"}
+        headers = {k: v for k, v in response.headers.items()
+                   if k.lower() not in _drop}
+        return _Resp(content=new_bytes, status_code=response.status_code,
+                     headers=headers, media_type=ct)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8766,
@@ -2663,6 +7216,37 @@ def main():
 
     import uvicorn
     app = make_app()
+
+    # Stage 6 follow-up · Telemetry instrumentation
+    # ────────────────────────────────────────────────────────────────
+    # The earlier approach (a response-body-rewriting middleware that
+    # auto-injected the <script> tag) fought with FastAPI's gzip
+    # middleware in unfortunate ways · gzip compressed responses
+    # BEFORE the inject middleware could see them, leaving the inject
+    # middleware looking at compressed bytes. After repeated attempts
+    # to negotiate that ordering, the simpler-and-more-reliable design
+    # is: each HTML page directly includes <script src="/static/telemetry.js"
+    # defer> in its <head>. telemetry.js's auto-init now falls back to
+    # location.pathname when no data-tlm-route attribute is present,
+    # so a single one-line script tag per page is enough.
+
+    # PVA round 6 D-11: gzip compression on responses >= 1 KB.
+    # MOVED to `_add_account_console_routes()` LAST in Phase 3.2 R1 fix
+    # bundle (PDA-P3.2-R1-F02). Original placement here ran GZip BEFORE
+    # the Phase 2.3 security middlewares, putting TokenRedactionMiddleware
+    # outside GZip in the stack — TokenRedaction would then scan already-
+    # compressed bytes and fail to detect plaintext token leaks.
+    #
+    # By registering GZip inside `_add_account_console_routes()` AFTER the
+    # 4 security middlewares, GZip ends up OUTERMOST at runtime (Starlette
+    # `add_middleware()` prepends — last added = outermost). The new order:
+    #   GZip (outer) > TokenRedaction > TokenFormat > Session > Sudo (inner)
+    # ↳ redaction sees plaintext; GZip compresses the (already-redacted)
+    # final response.
+    #
+    # See DEC-P32-MW-1 + DEC-P32-FIX-F02 in
+    # _qa_tmp/api_console_spec/decisions.md.
+
     _override_index_route(app)
     _add_landing_route(app)  # cinematic landing + login/signup (additive)
     _add_seo_routes(app)     # favicon, logo, robots.txt, sitemap.xml
@@ -2683,6 +7267,42 @@ def main():
     # /health, and a once-a-minute heartbeat task. Additive + override.
     _add_status_routes(app)
     _override_health_route(app)
+
+    # API v1 — contract-conforming machine endpoints (API_CONTRACT.md).
+    # Phase 1, batch 1: read-only reference endpoints. Purely additive.
+    _add_reference_routes(app)
+    # Phase 1, batch 2: action endpoints (predict/quick, predict/batch,
+    # warmup, benchmarks, keys). Purely additive; existing /predict/full
+    # and the inference website are untouched.
+    _add_v1_action_routes(app)
+    # Phase 1, batch 3: envelope-mirror endpoints under /api/... of
+    # legacy /predict/full, /apin/info, /feedback, /feedback/stats,
+    # and /feedback/retrain/history. Legacy paths remain untouched so
+    # the inference website is unaffected.
+    _add_v1_mirror_routes(app)
+    # Phase 3: /docs page (the human-facing API monograph).
+    _add_docs_route(app)
+    # Phase 2, batch 1: drone perception endpoints (/api/scan,
+    # /api/scan/batch, /api/scans, /api/scans/{uid}). Persists scans
+    # to the scans table; emits RFC 7946 GeoJSON. Additive.
+    _add_perception_routes(app)
+    # Phase 1, batch 2 (PVA drift fix): wrap FastAPI's
+    # RequestValidationError so the new v1 endpoints emit §3 errors when
+    # the body is missing/wrong, instead of raw {"detail":[…]}.
+    _add_v1_validation_handler(app)
+    # Phase 4: Pipeline Atlas page (/pipeline) + GET /api/recent + the
+    # request-capture middleware that feeds the live request log.
+    _add_pipeline_route(app)
+    # Stage 2: KPI summary (/api/stats/summary) + telemetry ingest
+    # (/api/telemetry/ingest). The Pipeline Atlas KPI tiles will read
+    # from /api/stats/summary; the client-side telemetry library
+    # (Stage 3) beacons batches into /api/telemetry/ingest.
+    _add_stats_and_telemetry_routes(app)
+    # Stage 7 / Phase 3.1: API Console (keys list + the 6 CRUD endpoints
+    # from scripts.apin_v2.account.routes_keys). Middleware stack wiring
+    # is intentionally deferred to Phase 3.4 — see the helper's docstring
+    # for the security model rationale.
+    _add_account_console_routes(app)
 
     if args.preload:
         logger.info("Warming APIN (Model 2 + EfficientNet + DINOv2 + PSV)...")

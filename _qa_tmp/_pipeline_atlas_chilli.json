@@ -1,0 +1,42 @@
+{
+  "produced_at": "2026-05-23T13:14:41Z",
+  "source": "scripts/apin_v2/extract_pipeline_atlas_chilli.py",
+  "reach": {
+    "rows": [
+      {
+        "split": "router_train",
+        "n_images": 2578,
+        "classes": "chilli (single label)"
+      },
+      {
+        "split": "router_val",
+        "n_images": 544,
+        "classes": "chilli"
+      },
+      {
+        "split": "router_test",
+        "n_images": 1174,
+        "classes": "chilli"
+      }
+    ],
+    "router_pool_on_disk": 9468,
+    "sum_of_split_rows": 4296
+  },
+  "specialist_staged": {
+    "note": "These class folders are staged on disk for a future chilli specialist. They are NOT used by any currently-deployed model. Counted here for transparency about what data exists.",
+    "classes": {
+      "chilli_anthracnose": 653,
+      "chilli_cercospora_leaf_spot": 1432,
+      "chilli_healthy": 3385,
+      "chilli_leaf_curl": 3317
+    }
+  },
+  "sample_gallery": [
+    "data/specialist/router/cleaned/chilli/multi_D_100_513b404d.jpg",
+    "data/specialist/router/cleaned/chilli/orig_chilli_cold_karnataka_IMG_4624_3bfb383a.jpg",
+    "data/specialist/router/cleaned/chilli/sourceB_healthy_08193.jpg",
+    "data/specialist/router/cleaned/chilli/srcC_chilli_000786.jpg",
+    "data/specialist/router/cleaned/chilli/srcC_chilli_002364.jpg",
+    "data/specialist/router/cleaned/chilli/srcF_chilli_000248.jpg"
+  ]
+}

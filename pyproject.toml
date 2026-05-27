@@ -1,0 +1,133 @@
+# Phase 3 task 3 per master prompt Section 4 Phase 3 (line 215).
+# Minimal pytest configuration. Phase 4 may extend (markers, coverage, etc.)
+# as implementer subagent adds them per spec Section 26.
+
+[tool.pytest.ini_options]
+testpaths = ["tomato_sandbox/tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+
+# ---------------------------------------------------------------------------
+# ruff — linter configuration
+# Per spec Section 26.6 lines 7747-7748:
+#   "ruff with rules from pyproject.toml. No warnings in CI; new warnings
+#   block merge."
+# Per spec Section 26.4 lines 7700-7701: CI stage "Lint (ruff, black, mypy)"
+# runs on every PR and blocks merge.
+#
+# Rule set rationale (DEC-027):
+#   E   — pycodestyle errors (PEP 8 correctness)
+#   F   — pyflakes (unused imports, undefined names, etc.)
+#   W   — pycodestyle warnings
+#   I   — isort (import ordering)
+#   UP  — pyupgrade (modernise Python syntax)
+#   C90 — mccabe complexity (flags functions > complexity 10)
+#   ANN is excluded: annotation rules are superseded by mypy strict mode
+#       (adding both creates redundant, conflicting diagnostics).
+#   D   is excluded: docstring *style* is enforced by code review per spec
+#       26.6 ("every public function has a docstring ... reviewer checks"),
+#       not automated linting.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+# Per spec Section 26.6 line 7749: line length matches black's 100-char limit
+line-length = 100
+# Target Python version present in the sandbox runtime
+target-version = "py310"
+
+[tool.ruff.lint]
+# spec: 26.6 lines 7747-7748 — "ruff with rules from pyproject.toml"
+select = ["E", "F", "W", "I", "UP", "C90"]
+ignore = [
+    # E501: line too long — black handles line length; ruff E501 is redundant
+    # when black is the formatter.
+    "E501",
+    # W503/W504: line break rules conflict with black's style. Excluded per
+    # standard black+ruff co-existence guidance.
+    "W503",
+    "W504",
+]
+# Directories that are never linted (generated files, third-party vendored code)
+exclude = [
+    ".git",
+    "__pycache__",
+    "*.egg-info",
+    "venv",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint.mccabe]
+# spec: 26.6 line 7750 — complexity is tracked as part of code quality gates
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+# Group tomato_sandbox as first-party so isort places it in the correct section
+known-first-party = ["tomato_sandbox"]
+
+# ---------------------------------------------------------------------------
+# mypy — type checker configuration
+# Per spec Section 26.6 lines 7746-7747:
+#   "mypy with strict mode on tomato_sandbox/. `# type: ignore` is permitted
+#   for third-party libraries without type stubs or for legitimate dynamic
+#   patterns; each ignore requires an inline comment explaining why."
+# Per spec Section 26.4 lines 7700-7701: "Lint (ruff, black, mypy)" blocks
+# merge.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+# spec: 26.6 lines 7746 — "mypy with strict mode"
+strict = true
+# Sandbox scope: only check tomato_sandbox/ code
+files = ["tomato_sandbox"]
+# ignore_missing_imports: necessary because numpy, fastapi, torch, and
+# several other dependencies may lack py.typed markers or bundled stubs in
+# the current environment. This is a pragmatic concession; as stub packages
+# are added (e.g. types-requests) this can be tightened per-module.
+# spec: 26.6 lines 7746 — "`# type: ignore` is permitted for third-party
+# libraries without type stubs."
+ignore_missing_imports = true
+# Show error codes in output for easier suppression scoping
+show_error_codes = true
+# Warn about unused `# type: ignore` suppressions so stale ignores are caught
+warn_unused_ignores = true
+# Per-module overrides for third-party modules that are known to be untyped
+# and for which we cannot install stubs. Add new [[tool.mypy.overrides]]
+# sections as needed rather than broadening the global ignore.
+
+[[tool.mypy.overrides]]
+# structlog is used in logging.py; it has a py.typed marker in recent
+# releases (>=23.1.0) but the exact installed version may not. Suppress
+# missing-import errors here rather than globally.
+# spec: 26.6 lines 7746 — "each ignore requires an inline comment explaining why"
+module = "structlog.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# cv2 (opencv-python) ships no bundled stubs and the opencv-stubs package
+# is optional. Suppressed to avoid spurious import errors.
+module = "cv2.*"
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# black — code formatter configuration
+# Per spec Section 26.6 lines 7748-7749:
+#   "black with line length 100. Auto-applied by pre-commit hook; CI verifies."
+# Per spec Section 26.4 lines 7700-7701: CI Lint stage includes black.
+# ---------------------------------------------------------------------------
+[tool.black]
+# spec: 26.6 line 7749 — "black with line length 100"
+line-length = 100
+# Target versions: minimum Python 3.10 (sandbox runtime); 3.11, 3.12, 3.13
+# listed so black does not apply syntax transforms not yet valid on 3.10.
+target-version = ["py310", "py311", "py312", "py313"]
+# Directories black should skip
+exclude = '''
+/(
+    \.git
+  | __pycache__
+  | \.venv
+  | venv
+  | build
+  | dist
+)/
+'''

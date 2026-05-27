@@ -1,0 +1,1440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="__APIN_CSRF_TOKEN__">
+<title>Usage · APIN Console</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ────────────────────────────────────────────────────────────────────
+ * Phase 9.E · account-wide Usage observability page.
+ *
+ *   ┌─ crumbs ───────────────────────────────────────────────────────────┐
+ *   │  H1 Usage     range chips · key/env filters · export csv          │
+ *   ├──────────────────────────────────────────────────────────────────┤
+ *   │  KPI strip · 6 tiles: requests / errors / 429s / p95 / bytes      │
+ *   ├──────────────────────────────────────────────────────────────────┤
+ *   │  Time-series card (mode switcher)                                  │
+ *   │   ▣ requests   ▣ by status   ▣ by endpoint   ▣ latency   ▣ errors │
+ *   │   ┌───────────────────────────────────────────────────────────────┐│
+ *   │   │  paper-ink SVG · drag-to-zoom · click drills into minute     ││
+ *   │   └───────────────────────────────────────────────────────────────┘│
+ *   ├────────────────────────┬─────────────────────┬───────────────────┤
+ *   │  Top endpoints         │ Status donut         │ Latency hist     │
+ *   ├────────────────────────┴─────────────────────┴───────────────────┤
+ *   │  Top keys │ Top IPs │ Top error codes                            │
+ *   ├──────────────────────────────────────────────────────────────────┤
+ *   │  Recent requests · filterable + CSV export                       │
+ *   └──────────────────────────────────────────────────────────────────┘
+ *
+ * Click anywhere on the time-series → opens a right-side drill drawer
+ * with the raw rows that landed in that minute.
+ * ──────────────────────────────────────────────────────────────── */
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;src:url('/fonts/inter-w400.woff2') format('woff2'),local('Inter');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;src:url('/fonts/inter-w500.woff2') format('woff2'),local('Inter Medium');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;src:url('/fonts/inter-w600.woff2') format('woff2'),local('Inter SemiBold');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;src:url('/fonts/inter-w700.woff2') format('woff2'),local('Inter Bold');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;src:url('/fonts/jetbrains-mono-w400.woff2') format('woff2'),local('JetBrains Mono');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;src:url('/fonts/jetbrains-mono-w500.woff2') format('woff2'),local('JetBrains Mono Medium');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:600;font-display:swap;src:url('/fonts/jetbrains-mono-w600.woff2') format('woff2'),local('JetBrains Mono SemiBold');}
+
+:root{
+  --paper:#fbf9f3; --paper-deep:#e9e2d1; --paper-edge:#c7bca9;
+  --paper-soft:#f4efe6;
+  --ink:#1a1612; --ink-soft:#5a5246; --ink-mute:#8b8273;
+  /* Semantic series tokens used by chart components */
+  --c-ok:#2f6f3e; --c-warn:#b87d1e; --c-amber:#d49620;
+  --c-danger:#b01820; --c-info:#2d6a96; --c-ink:#1a1612;
+  --c-muted:#8b8273;
+  --c-series-0:#2d6a96; --c-series-1:#2f6f3e; --c-series-2:#b87d1e;
+  --c-series-3:#9c5cd9; --c-series-4:#3a7d9b;
+  --green:#2f6f3e; --green-soft:#d8e9d3; --green-deep:#1f5b32;
+  --ochre:#b87d1e; --ochre-soft:#fbe3c2; --ochre-deep:#7a4e0a;
+  --crimson:#b01820; --crimson-soft:#f4cbc8; --crimson-deep:#7c1c1c;
+  --blue:#2d6a96; --blue-soft:#d6e8f3; --blue-deep:#1a4d77;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:0 4px 12px rgba(0,0,0,0.06);
+  --shadow-lg:0 8px 24px rgba(0,0,0,0.08);
+  --radius:10px; --radius-sm:6px; --radius-lg:14px;
+  --tx:0.18s cubic-bezier(.4,0,.2,1);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper-soft);color:var(--ink);font-family:'Inter',system-ui,sans-serif;
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;text-align:left}
+a{color:var(--green);text-decoration:none;transition:color var(--tx)}
+a:hover{color:var(--green-deep)}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+[hidden]{display:none !important}
+.icon{width:16px;height:16px;display:inline-block;vertical-align:-3px;stroke:currentColor;
+  fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+
+.page{max-width:1280px;margin:0 auto;padding:24px 24px 80px}
+.crumbs{font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);margin-bottom:10px}
+.crumbs .sep{margin:0 6px;color:var(--ink-mute)}
+
+/* ── Header strip with title + filters + export ─────────── */
+.head{display:flex;justify-content:space-between;align-items:flex-end;
+  gap:18px;margin-bottom:24px;flex-wrap:wrap}
+.head h1{font-family:'Fraunces',serif;font-weight:500;font-size:34px;
+  letter-spacing:-0.014em;line-height:1.05}
+.head .sub{font-family:'Fraunces',serif;font-style:italic;color:var(--ink-soft);
+  font-size:13.5px;margin-top:4px}
+
+.range-strip{display:inline-flex;border:1.5px solid var(--paper-edge);
+  background:var(--paper);border-radius:var(--radius-sm);overflow:hidden}
+.range-strip button{padding:7px 12px;font-size:12px;font-weight:500;
+  color:var(--ink-soft);border-right:1px solid var(--paper-edge);
+  transition:all var(--tx);font-family:'JetBrains Mono',monospace}
+.range-strip button:last-child{border-right:0}
+.range-strip button:hover{background:var(--paper-deep);color:var(--ink)}
+.range-strip button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+
+/* 9.N.2 · Filter chip strip ───────────────────────────────────────────── */
+.chip-strip{display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+  padding:10px 0 4px;margin-bottom:6px;
+  border-top:1px solid var(--paper-edge);border-bottom:1px solid var(--paper-edge);
+  padding-top:12px;padding-bottom:12px;margin-top:8px}
+.chip-strip .chip{display:inline-flex;align-items:center;gap:6px;
+  padding:5px 6px 5px 10px;background:var(--paper-deep);
+  border:1px solid var(--paper-edge);border-radius:0;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink);
+  letter-spacing:0.01em;line-height:1}
+.chip-strip .chip-icon{width:12px;height:12px;color:var(--ink-soft)}
+.chip-strip .chip-label{color:var(--ink)}
+.chip-strip .chip-x{background:transparent;border:0;cursor:pointer;
+  width:18px;height:18px;padding:0;display:inline-flex;align-items:center;
+  justify-content:center;color:var(--ink-soft);
+  border-left:1px solid var(--paper-edge);margin-left:4px}
+.chip-strip .chip-x svg{width:10px;height:10px}
+.chip-strip .chip-x:hover{color:var(--ink);background:var(--paper)}
+.chip-strip .chip-clear{background:transparent;border:1px solid var(--paper-edge);
+  cursor:pointer;padding:5px 10px;font-family:'JetBrains Mono',monospace;
+  font-size:11px;color:var(--ink-soft);letter-spacing:0.04em;
+  display:inline-flex;align-items:center;gap:5px;font-style:italic}
+.chip-strip .chip-clear svg{width:11px;height:11px}
+.chip-strip .chip-clear:hover{color:var(--ink);background:var(--paper-deep)}
+
+/* 9.N.4 · KPI sparkline · always-24h trace inside each tile.
+   Renders as a ~32px tall ink-soft stroke with two terminal dots, no fill. */
+.kpi-spark{height:32px;margin:6px 0 4px;position:relative}
+.kpi-spark svg{width:100%;height:100%;display:block;overflow:visible}
+.kpi-spark .ks-line{fill:none;stroke:var(--ink-soft,#6b6453);
+  stroke-width:1.2;stroke-linejoin:round;stroke-linecap:round;opacity:0.7}
+.kpi-spark .ks-dot{fill:var(--ink,#1a1612);stroke:var(--paper,#fbf9f3);
+  stroke-width:1.2}
+.kpi-spark .ks-base{stroke:var(--paper-edge,#c7bca9);stroke-width:0.6;
+  stroke-dasharray:2 3;opacity:0.6}
+.kpi-spark .ks-empty{font-family:'JetBrains Mono',monospace;font-size:9.5px;
+  fill:var(--ink-soft,#6b6453);font-style:italic;opacity:0.7;text-anchor:middle}
+
+.filter-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.filter-row select,.filter-row input{padding:7px 12px;font-size:12.5px;
+  border:1.5px solid var(--paper-edge);border-radius:var(--radius-sm);
+  background:var(--paper);color:var(--ink);font-family:inherit;
+  transition:border-color var(--tx);min-width:140px}
+.filter-row select:focus,.filter-row input:focus{outline:none;border-color:var(--ink-soft)}
+.filter-row .spacer{flex:1}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;
+  border-radius:var(--radius-sm);font-weight:500;font-size:12.5px;
+  border:1.5px solid var(--paper-edge);background:var(--paper);
+  transition:all var(--tx);cursor:pointer;white-space:nowrap;color:var(--ink)}
+.btn:hover{transform:translateY(-1px);border-color:var(--ink-soft);box-shadow:var(--shadow-sm)}
+.btn .icon{width:14px;height:14px}
+.btn-primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+
+/* ── KPI strip ─────────────────────────────────────────── */
+.kpi-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+  gap:14px;margin-bottom:20px}
+.kpi{background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow-sm);
+  transition:transform var(--tx),box-shadow var(--tx)}
+.kpi:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
+.kpi .lbl{font-size:11px;color:var(--ink-soft);text-transform:uppercase;
+  letter-spacing:0.07em;font-weight:600;margin-bottom:8px;display:flex;
+  align-items:center;gap:6px}
+.kpi .lbl .icon{width:13px;height:13px;color:var(--ink-mute)}
+.kpi .num{font-family:'Fraunces',serif;font-weight:500;font-size:30px;
+  letter-spacing:-0.01em;font-variant-numeric:tabular-nums;line-height:1.05}
+.kpi .num .unit{font-size:14px;color:var(--ink-mute);margin-left:4px;
+  font-weight:400}
+.kpi .sub{margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--ink-soft);display:flex;align-items:center;gap:4px}
+.delta{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;
+  display:inline-flex;align-items:center;gap:2px}
+.delta.up{color:var(--crimson)}
+.delta.down{color:var(--green)}
+.delta.flat{color:var(--ink-mute)}
+.delta.up.good{color:var(--green)}
+.delta.down.good{color:var(--crimson)}
+.delta.none{color:var(--ink-mute);font-style:italic;font-family:'Fraunces',serif;font-weight:400}
+
+/* 9.J — KPI tile sub-line for errors breakdown / rate-limited explanation */
+.kpi .breakdown{margin-top:6px;font-family:'JetBrains Mono',monospace;
+  font-size:10.5px;color:var(--ink-soft);display:flex;gap:10px;flex-wrap:wrap}
+.kpi .breakdown b{color:var(--ink);font-weight:600}
+.kpi.is-clickable{cursor:pointer}
+.kpi.is-clickable:active{transform:translateY(0);transition:transform 80ms}
+
+/* 9.J — odometer CSS contract (see scripts/apin_v2/odometer.js header) */
+.apin-odometer{display:inline-flex;line-height:1;font-variant-numeric:tabular-nums}
+.apin-odometer-digit{width:.62em;height:1em;overflow:hidden;display:inline-block}
+.apin-odometer-digit-col{display:flex;flex-direction:column;
+  transition:transform .42s cubic-bezier(.22,1,.36,1)}
+.apin-odometer-digit-col>span{height:1em;line-height:1;display:flex;
+  align-items:center;justify-content:center}
+.apin-odometer-static{display:inline-block;line-height:1}
+.apin-odometer-digit.is-spinning .apin-odometer-digit-col{filter:blur(.6px)}
+
+/* ── Card ──────────────────────────────────────────────── */
+.card{background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:var(--radius);box-shadow:var(--shadow-sm);overflow:hidden;
+  margin-bottom:18px}
+.card-head{padding:14px 22px;border-bottom:1px solid var(--paper-edge);
+  background:var(--paper-deep);display:flex;align-items:center;
+  justify-content:space-between;gap:10px;flex-wrap:wrap}
+.card-head h2{font-family:'Fraunces',serif;font-weight:500;font-size:17px;
+  letter-spacing:-0.005em}
+.card-head .aux{font-family:'Fraunces',serif;font-style:italic;
+  font-size:12.5px;color:var(--ink-soft)}
+.card-body{padding:20px 22px}
+.card-body.bare{padding:0}
+
+/* 9.N.6 · Universal expand button — sits in every card-head right edge */
+.card-expand{background:transparent;border:1px solid var(--paper-edge);
+  color:var(--ink-soft);cursor:pointer;width:28px;height:28px;
+  display:inline-flex;align-items:center;justify-content:center;padding:0;
+  border-radius:0;transition:background .15s cubic-bezier(0.22,1,0.36,1),
+  color .15s cubic-bezier(0.22,1,0.36,1);flex-shrink:0}
+.card-expand svg{width:13px;height:13px;fill:none;stroke:currentColor;
+  stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.card-expand:hover{background:var(--paper);color:var(--ink)}
+.card-expand:active{background:var(--ink);color:var(--paper)}
+
+/* 9.N.6.f · KPI tile expand affordance — small ⤢ in upper-right corner.
+   Click the tile body = preset filter/mode action.  Click the corner ⤢ =
+   open the tile's lightbox detail. */
+.kpi{position:relative}
+.kpi-expand{position:absolute;top:6px;right:6px;width:20px;height:20px;
+  background:transparent;border:0;cursor:pointer;color:var(--ink-soft);
+  display:inline-flex;align-items:center;justify-content:center;padding:0;
+  opacity:0;transition:opacity .15s cubic-bezier(0.22,1,0.36,1),
+  color .15s cubic-bezier(0.22,1,0.36,1);z-index:2}
+.kpi:hover .kpi-expand{opacity:1}
+.kpi-expand:hover{color:var(--ink)}
+.kpi-expand svg{width:11px;height:11px;fill:none;stroke:currentColor;
+  stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
+
+/* 9.N.6 · Lightbox sub-section layout helpers */
+.lb-kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:14px;margin-bottom:6px}
+.lb-kpi{background:var(--paper-deep);border:1px solid var(--paper-edge);
+  padding:14px 16px;position:relative}
+.lb-kpi-lbl{font-family:'Fraunces',serif;font-style:italic;font-size:11px;
+  letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-soft);
+  margin-bottom:6px}
+.lb-kpi-val{font-family:'Fraunces',serif;font-weight:500;font-size:24px;
+  color:var(--ink);letter-spacing:-0.01em;font-variant-numeric:tabular-nums}
+.lb-kpi-sub{font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  color:var(--ink-soft);margin-top:4px}
+.lb-table{width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;
+  font-size:12px}
+.lb-table th{text-align:left;padding:8px 10px;background:var(--paper-deep);
+  color:var(--ink-soft);font-size:10px;text-transform:uppercase;
+  letter-spacing:0.08em;font-weight:500;border-bottom:1px solid var(--paper-edge)}
+.lb-table td{padding:8px 10px;border-bottom:1px solid var(--paper-edge);
+  color:var(--ink);vertical-align:top}
+.lb-table tr:last-child td{border-bottom:0}
+.lb-table .num{text-align:right;font-variant-numeric:tabular-nums slashed-zero}
+.lb-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
+.lb-action{font-family:'JetBrains Mono',monospace;font-size:11px;
+  padding:7px 14px;border:1px solid var(--paper-edge);background:var(--paper);
+  cursor:pointer;color:var(--ink);transition:background .15s,color .15s}
+.lb-action svg{width:12px;height:12px;margin-right:6px;vertical-align:-2px}
+.lb-action:hover{background:var(--ink);color:var(--paper)}
+.lb-empty{padding:16px;font-family:Fraunces,serif;font-style:italic;
+  color:var(--ink-soft);text-align:center}
+
+/* 9.N.7 · Live stream styles ──────────────────────────────────────────── */
+.ls-shell{font-family:'JetBrains Mono',monospace}
+.ls-status-bar{display:flex;align-items:center;gap:10px;padding:10px 16px;
+  border-bottom:1px solid var(--paper-edge);background:var(--paper-deep);
+  font-size:11.5px;color:var(--ink-soft)}
+.ls-spacer{flex:1}
+.ls-conn-dot{width:8px;height:8px;border-radius:50%;background:var(--ink-soft);
+  display:inline-block;flex-shrink:0;transition:background .2s}
+.ls-conn-dot[data-conn="connecting"]{background:var(--c-amber)}
+.ls-conn-dot[data-conn="connected"]  {background:var(--c-ok);
+  animation:ls-pulse 2s ease-in-out infinite}
+.ls-conn-dot[data-conn="reconnecting"]{background:var(--c-amber);
+  animation:ls-pulse 1.2s ease-in-out infinite}
+.ls-conn-dot[data-conn="disconnected"]{background:var(--c-danger)}
+@keyframes ls-pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+.ls-conn-label{font-style:italic;color:var(--ink)}
+.ls-conn-count{font-variant-numeric:tabular-nums;color:var(--ink-soft)}
+.ls-pause-btn{background:transparent;border:1px solid var(--paper-edge);
+  color:var(--ink-soft);cursor:pointer;padding:4px 10px;display:inline-flex;
+  align-items:center;gap:5px;font-family:'JetBrains Mono',monospace;
+  font-size:11px;transition:background .15s,color .15s}
+.ls-pause-btn svg{width:11px;height:11px;fill:none;stroke:currentColor;
+  stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.ls-pause-btn:hover{background:var(--paper);color:var(--ink)}
+.ls-pause-btn[data-paused="true"]{background:var(--ink);color:var(--paper)}
+.ls-hover-note{padding:6px 16px;font-family:Fraunces,serif;font-style:italic;
+  font-size:11px;color:var(--ink-soft);background:var(--paper-deep);
+  border-bottom:1px solid var(--paper-edge)}
+.ls-rows{max-height:380px;overflow-y:auto}
+.ls-row{display:grid;
+  grid-template-columns:78px 56px 1fr 70px 76px 22px;
+  gap:14px;align-items:center;
+  padding:8px 16px;border-bottom:1px solid var(--paper-edge);
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;cursor:pointer;
+  transition:background .12s cubic-bezier(0.22,1,0.36,1)}
+.ls-row:hover{background:var(--paper-deep)}
+.ls-row-err{background:rgba(176,24,32,0.04)}
+.ls-row-warn{background:rgba(212,150,32,0.04)}
+.ls-t{color:var(--ink-soft);font-variant-numeric:tabular-nums}
+.ls-m{font-weight:600;font-size:10.5px;letter-spacing:0.04em;
+  padding:1px 5px;border:1px solid var(--paper-edge);
+  background:var(--paper);color:var(--ink);text-transform:uppercase;
+  text-align:center;border-radius:0;display:inline-block;width:fit-content}
+.ls-m-get   {color:var(--c-info,#2d6a96)}
+.ls-m-post  {color:var(--c-amber,#d49620)}
+.ls-m-put   {color:var(--c-info,#2d6a96)}
+.ls-m-delete{color:var(--c-danger,#b01820)}
+.ls-p{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ls-s{display:inline-flex;align-items:center;gap:5px;
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+.ls-glyph{width:9px;height:9px;flex-shrink:0}
+.ls-status-ok{color:var(--c-ok,#2f6f3e)}
+.ls-status-info{color:var(--c-info,#2d6a96)}
+.ls-status-warn{color:var(--c-amber,#d49620)}
+.ls-status-err{color:var(--c-danger,#b01820)}
+.ls-status-mute{color:var(--ink-soft)}
+.ls-l{color:var(--ink-soft);font-variant-numeric:tabular-nums;text-align:right}
+.ls-src{color:var(--ink-soft);display:inline-flex;align-items:center}
+.ls-src svg{width:13px;height:13px;fill:none;stroke:currentColor;
+  stroke-width:1.4;stroke-linejoin:round;stroke-linecap:round}
+.ls-tail-divider{padding:6px 16px;font-family:Fraunces,serif;font-style:italic;
+  font-size:10.5px;color:var(--ink-soft);text-align:center;background:var(--paper-deep)}
+
+/* 9.N.7.f · Live tail plant empty state ────────────────────────────── */
+.ls-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:18px 16px 22px;text-align:center}
+.ls-empty-leaf{width:80px;height:96px;color:var(--ink);
+  margin-bottom:8px}
+.ls-empty-caption{font-family:'Fraunces',serif;font-style:italic;font-size:14px;
+  color:var(--ink);margin-top:6px}
+.ls-empty-sub{font-family:'JetBrains Mono',monospace;font-style:italic;
+  font-size:10.5px;color:var(--ink-soft);margin-top:3px}
+
+/* 9.N.7.f · Commentary ticker (small widgets) ───────────────────────── */
+.ls-ticker-host{padding:7px 16px;background:var(--paper-deep);
+  border-top:1px solid var(--paper-edge)}
+.lc-ticker{display:flex;align-items:center;gap:8px;
+  font-family:'Fraunces',serif;font-style:italic;font-size:11.5px;
+  color:var(--ink);transition:opacity 200ms cubic-bezier(0.22,1,0.36,1);
+  min-height:14px}
+.lc-ticker[data-empty="true"]{opacity:0.45}
+.lc-bullet{color:var(--ink-soft);flex-shrink:0}
+.lc-ticker[data-tone="danger"] .lc-bullet{color:var(--c-danger)}
+.lc-ticker[data-tone="warn"] .lc-bullet{color:var(--c-amber)}
+.lc-ticker[data-tone="great"] .lc-bullet{color:var(--c-ok)}
+.lc-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lc-row{display:grid;grid-template-columns:14px 1fr 60px;gap:10px;
+  align-items:flex-start;padding:8px 16px;
+  border-bottom:1px solid var(--paper-edge);
+  font-family:'Fraunces',serif;font-size:13px;color:var(--ink);
+  font-style:italic;line-height:1.5}
+.lc-row[data-tone="danger"] .lc-bullet{color:var(--c-danger);font-weight:bold}
+.lc-row[data-tone="warn"] .lc-bullet{color:var(--c-amber);font-weight:bold}
+.lc-row[data-tone="great"] .lc-bullet{color:var(--c-ok);font-weight:bold}
+.lc-row .lc-time{font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  color:var(--ink-soft);text-align:right;font-style:normal}
+.lc-empty{padding:24px;font-family:'Fraunces',serif;font-style:italic;
+  font-size:13px;color:var(--ink-soft);text-align:center}
+
+/* 9.N.7.f · Time scrubber for the requests chart ──────────────────── */
+.ts-scrubber{display:flex;align-items:center;gap:10px;
+  padding:10px 16px;margin-top:10px;
+  border:1px solid var(--paper-edge);background:var(--paper-deep)}
+.ts-scrub-btn{background:transparent;border:1px solid var(--paper-edge);
+  cursor:pointer;width:28px;height:28px;display:inline-flex;
+  align-items:center;justify-content:center;padding:0;color:var(--ink-soft);
+  transition:background 150ms cubic-bezier(0.22,1,0.36,1),color 150ms cubic-bezier(0.22,1,0.36,1);flex-shrink:0}
+.ts-scrub-btn svg{width:12px;height:12px;fill:none;stroke:currentColor;
+  stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.ts-scrub-btn:hover{background:var(--paper);color:var(--ink)}
+.ts-scrub-btn[data-playing="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.ts-scrub-rail{flex:1;height:6px;background:var(--paper);
+  border:1px solid var(--paper-edge);position:relative;cursor:pointer}
+.ts-scrub-fill{position:absolute;left:0;top:0;height:100%;
+  background:var(--ink);opacity:0.78;width:100%;
+  transition:width 80ms linear}
+.ts-scrub-handle{position:absolute;width:14px;height:14px;
+  background:var(--paper);border:2px solid var(--ink);border-radius:50%;
+  top:50%;transform:translate(-50%,-50%);right:0;cursor:grab;
+  transition:right 80ms linear}
+.ts-scrub-handle:active{cursor:grabbing;background:var(--ink)}
+.ts-scrub-handle:focus{outline:1px solid var(--ink);outline-offset:2px}
+.ts-scrub-time{font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--ink-soft);min-width:88px;text-align:right;
+  font-variant-numeric:tabular-nums}
+.ts-scrub-speed{background:var(--paper);border:1px solid var(--paper-edge);
+  color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:11px;
+  padding:4px 6px;cursor:pointer;flex-shrink:0}
+
+/* 9.N.7.f · Live pulse widget ───────────────────────────────────────── */
+.lp-shell{display:flex;flex-direction:column;height:100%}
+.lp-bar{display:flex;align-items:center;gap:10px;padding:8px 16px;
+  border-bottom:1px solid var(--paper-edge);background:var(--paper-deep);
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-soft);
+  flex-wrap:wrap}
+.lp-bar-left{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.lp-pulse-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;
+  background:var(--c-ok);transition:background 300ms cubic-bezier(0.22,1,0.36,1)}
+.lp-pulse-dot[data-state="active"]{background:var(--c-ok);
+  animation:lp-pulse 1.5s ease-in-out infinite}
+.lp-pulse-dot[data-state="idle"]{background:var(--c-amber);
+  animation:lp-pulse 2.4s ease-in-out infinite}
+.lp-pulse-dot[data-state="disc"]{background:var(--c-danger);
+  animation:lp-pulse 1s ease-in-out infinite}
+@keyframes lp-pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+.lp-metric-label{font-family:Fraunces,serif;font-style:italic;
+  font-size:11.5px;color:var(--ink);letter-spacing:0.02em}
+.lp-bar-spacer{flex:1}
+.lp-controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.lp-toggle{display:inline-flex;border:1px solid var(--paper-edge);background:var(--paper)}
+.lp-toggle button{background:transparent;border:0;cursor:pointer;
+  font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-soft);
+  padding:3px 7px;border-right:1px solid var(--paper-edge);
+  transition:background 120ms cubic-bezier(0.22,1,0.36,1),color 120ms cubic-bezier(0.22,1,0.36,1)}
+.lp-toggle button:last-child{border-right:0}
+.lp-toggle button:hover{background:var(--paper-deep);color:var(--ink)}
+.lp-toggle button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.lp-chart{position:relative;flex:1;min-height:140px;cursor:crosshair;
+  background:var(--paper)}
+/* 9.N.7.f · Hybrid SVG+Canvas rendering. Canvas underneath holds the
+   dynamic line/area/halo (~60fps capable, no DOM thrash). SVG overlay
+   on top holds the static-ish chrome (ticks, axis labels, baseline,
+   pulse dot, capture rect for mouse hit-testing). SVG pointer-events
+   stay on, so hover/click work via the lp-capture rect. */
+.lp-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
+.lp-svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.lp-svg-pulse{transition:opacity 200ms}
+.lp-svg-pulse-inner{fill:var(--c-ok);transition:fill 300ms;
+  animation:lp-pulse 1.5s ease-in-out infinite}
+.lp-pulse-dot[data-state="idle"] ~ .lp-chart .lp-svg-pulse-inner{fill:var(--c-amber)}
+.lp-pulse-dot[data-state="disc"] ~ .lp-chart .lp-svg-pulse-inner{fill:var(--c-danger)}
+.lp-tooltip{position:absolute;background:var(--paper);
+  border:1px solid var(--ink-soft);padding:8px 11px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--ink);box-shadow:0 4px 14px rgba(0,0,0,0.10);
+  pointer-events:none;z-index:10;line-height:1.5;min-width:140px}
+.lp-cursor{position:absolute;top:6px;bottom:14px;width:1px;
+  background:var(--ink-soft);opacity:0.35;pointer-events:none}
+.lp-footer{display:flex;align-items:center;gap:14px;padding:7px 16px;
+  background:var(--paper-deep);border-top:1px solid var(--paper-edge);
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  color:var(--ink-soft);flex-wrap:wrap}
+.lp-stat{font-variant-numeric:tabular-nums}
+.lp-stat-current{color:var(--ink)}
+.lp-stat-peak{color:var(--ink-soft)}
+.lp-ticker-host{flex:1;min-width:0}
+.lp-ticker-host .lc-ticker{justify-content:flex-end}
+.lp-ticker-host .lc-text{flex:0 1 auto;text-align:right}
+
+/* 9.N.7.f · Multi-request chooser popover (when user clicks a chart point
+   that holds >1 request). Floats inside the pulse card, anchored top. */
+.lp-chooser{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:var(--paper);border:1px solid var(--ink-soft);
+  box-shadow:0 6px 22px rgba(0,0,0,0.18);z-index:50;
+  min-width:280px;max-width:90%;max-height:80%;display:flex;flex-direction:column;
+  font-family:'JetBrains Mono',monospace}
+.lp-chooser-head{display:flex;justify-content:space-between;align-items:center;
+  padding:8px 12px;border-bottom:1px solid var(--paper-edge);
+  background:var(--paper-deep);font-size:11.5px;color:var(--ink)}
+.lp-chooser-close{background:transparent;border:0;font-size:18px;cursor:pointer;
+  color:var(--ink-soft);padding:0 4px;line-height:1}
+.lp-chooser-close:hover{color:var(--ink)}
+.lp-chooser-list{overflow-y:auto;max-height:300px}
+.lp-chooser-row{display:grid;grid-template-columns:36px 38px 1fr 56px;gap:8px;
+  align-items:center;padding:7px 12px;cursor:pointer;font-size:11px;
+  border-bottom:1px solid var(--paper-edge);transition:background 120ms cubic-bezier(0.22,1,0.36,1)}
+.lp-chooser-row:hover{background:var(--paper-deep)}
+.lp-chooser-row:last-child{border-bottom:0}
+.lp-chooser-status{font-weight:600;font-variant-numeric:tabular-nums}
+.lp-chooser-method{color:var(--ink-soft);font-size:10.5px}
+.lp-chooser-path{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lp-chooser-lat{color:var(--ink-soft);text-align:right;font-size:10.5px;font-variant-numeric:tabular-nums}
+
+/* 9.N.7.f · Live-row sizing — cards must NOT stretch to each other.
+   Without this, a tall live-tail (rows + ticker + divider ≈ 470px) drags
+   the live-pulse card to the same height, leaving a huge empty space
+   below the chart. align-items:start lets each card size to its own
+   content; explicit chart height stops the SVG from exploding to fill
+   its parent's auto height (which itself depends on the SVG → circular). */
+.grid-2.live-row{align-items:start}
+.grid-2.live-row > .card{display:flex;flex-direction:column;margin-bottom:0}
+.grid-2.live-row > .card > .card-body{display:flex;flex-direction:column;overflow:hidden;position:relative}
+.grid-2.live-row .ls-rows{max-height:240px}
+/* DEFINITE chart height — SVG width:100%/height:100% needs a sized parent;
+   otherwise it grows to match its width (square aspect → 864px tall). */
+.grid-2.live-row .lp-chart{flex:0 0 auto;height:240px;min-height:240px}
+.grid-2.live-row .lp-shell{height:auto}
+
+/* 9.N.10 · Compare-mode toggle */
+.compare-toggle{display:inline-flex;align-items:center;gap:6px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-soft);
+  padding:6px 12px;border:1px solid var(--paper-edge);background:var(--paper);
+  cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.compare-toggle:hover{background:var(--paper-deep);color:var(--ink)}
+.compare-toggle.is-on{background:var(--ink);color:var(--paper);
+  border-color:var(--ink)}
+.compare-toggle svg{width:12px;height:12px;fill:none;stroke:currentColor;
+  stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+
+/* ── Mode switcher (chart modes) ───────────────────────── */
+.mode-switcher{display:inline-flex;border:1.5px solid var(--paper-edge);
+  background:var(--paper);border-radius:var(--radius-sm);overflow:hidden;
+  font-family:'JetBrains Mono',monospace}
+.mode-switcher button{padding:6px 12px;font-size:11.5px;font-weight:500;
+  color:var(--ink-soft);border-right:1px solid var(--paper-edge);
+  transition:all var(--tx)}
+.mode-switcher button:last-child{border-right:0}
+.mode-switcher button:hover{background:var(--paper-deep);color:var(--ink)}
+.mode-switcher button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+
+.logy-toggle{position:absolute;top:8px;right:14px;
+  font-size:10.5px;color:var(--ink-soft);
+  font-family:'JetBrains Mono',monospace;display:inline-flex;align-items:center;
+  gap:5px;padding:3px 8px;border:1px solid var(--paper-edge);
+  border-radius:4px;background:var(--paper)}
+.logy-toggle input{accent-color:var(--ink)}
+
+/* ── Chart styling ─────────────────────────────────────── */
+.chart-host{position:relative;width:100%;min-height:300px}
+/* 9.K-A · time-series host scrolls horizontally when bucket count exceeds
+   the visible width (60px/bucket floor) — donut/hist/topbar hosts stay
+   fitted because their renderers use host.clientWidth without a floor. */
+#ts-host{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
+#ts-host::-webkit-scrollbar{height:8px}
+#ts-host::-webkit-scrollbar-thumb{background:var(--paper-edge);border-radius:4px}
+#ts-host::-webkit-scrollbar-thumb:hover{background:var(--ink-soft)}
+.chart-svg{display:block;width:100%;height:auto}
+.chart-empty{padding:60px 24px;text-align:center;color:var(--ink-soft);
+  font-family:'Fraunces',serif;font-style:italic;font-size:14px}
+.chart-grid{stroke:var(--paper-edge);stroke-width:0.7;opacity:0.55}
+.chart-axis{font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  fill:var(--ink-mute)}
+.chart-legend{display:flex;flex-wrap:wrap;gap:14px;padding:10px 0 0;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink-soft)}
+.chart-legend-vertical{flex-direction:column;gap:6px}
+.chart-legend-item{display:inline-flex;align-items:center;gap:7px}
+.chart-swatch{display:inline-block;width:11px;height:11px;border-radius:3px;
+  flex-shrink:0}
+
+/* ── 3-column grid for sub-charts ──────────────────────── */
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
+.grid-3 > .card{margin-bottom:0}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.grid-2 > .card{margin-bottom:0}
+
+/* ── Drill drawer (right slide-in) ─────────────────────── */
+.drawer-mask{position:fixed;inset:0;background:rgba(20,16,12,0.36);
+  opacity:0;pointer-events:none;transition:opacity .2s;z-index:8000}
+.drawer-mask.show{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;height:100vh;width:520px;max-width:96vw;
+  background:var(--paper);border-left:1px solid var(--paper-edge);
+  box-shadow:var(--shadow-lg);transform:translateX(100%);
+  transition:transform .25s cubic-bezier(.4,0,.2,1);z-index:8001;
+  display:flex;flex-direction:column;overflow:hidden}
+.drawer.show{transform:translateX(0)}
+.drawer-head{padding:18px 22px;border-bottom:1px solid var(--paper-edge);
+  background:var(--paper-deep);display:flex;align-items:center;
+  justify-content:space-between;gap:10px;flex-shrink:0}
+.drawer-head h3{font-family:'Fraunces',serif;font-weight:500;font-size:18px}
+.drawer-body{flex:1;overflow-y:auto;padding:18px 22px}
+
+/* ── Tables ────────────────────────────────────────────── */
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px;
+  font-family:'JetBrains Mono',monospace}
+.tbl th{text-align:left;padding:10px 12px;background:var(--paper-deep);
+  color:var(--ink-soft);font-size:10.5px;text-transform:uppercase;
+  letter-spacing:0.05em;font-weight:600;border-bottom:1px solid var(--paper-edge);
+  position:sticky;top:0}
+.tbl td{padding:9px 12px;border-bottom:1px solid var(--paper-edge);
+  vertical-align:top}
+.tbl tr:hover td{background:var(--paper-deep)}
+.tbl tr:last-child td{border-bottom:none}
+.meth{font-weight:600;font-size:10.5px;padding:2px 8px;border-radius:9px;display:inline-block}
+.meth-GET{background:var(--green-soft);color:var(--green-deep)}
+.meth-POST{background:var(--blue-soft);color:var(--blue-deep)}
+.meth-PUT,.meth-PATCH{background:var(--ochre-soft);color:var(--ochre-deep)}
+.meth-DELETE{background:var(--crimson-soft);color:var(--crimson-deep)}
+.stat{font-weight:600;font-size:11.5px;padding:2px 8px;border-radius:9px;display:inline-block}
+.stat-2xx{background:var(--green-soft);color:var(--green-deep)}
+.stat-3xx{background:var(--blue-soft);color:var(--blue-deep)}
+.stat-4xx{background:var(--ochre-soft);color:var(--ochre-deep)}
+.stat-5xx{background:var(--crimson-soft);color:var(--crimson-deep)}
+.err{color:var(--crimson-deep);font-size:11px;background:var(--crimson-soft);
+  padding:1px 6px;border-radius:9px}
+.scroll-y{max-height:520px;overflow-y:auto}
+.placeholder{padding:36px 22px;text-align:center;color:var(--ink-soft);
+  font-family:'Fraunces',serif;font-style:italic;font-size:14px}
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 980px){
+  .grid-3{grid-template-columns:1fr}
+  .grid-2{grid-template-columns:1fr}
+}
+@media (max-width: 580px){
+  .page{padding:16px 14px 60px}
+  .head h1{font-size:26px}
+  .kpi .num{font-size:24px}
+  .drawer{width:100vw}
+}
+</style>
+</head>
+<body>
+<!-- @ICON_SPRITE@ -->
+<!-- @CONSOLE_NAV@ -->
+<div class="page">
+  <div class="crumbs">
+    <a href="/dashboard">dashboard</a>
+    <span class="sep">·</span>
+    <a href="/account/api/keys">API Console</a>
+    <span class="sep">·</span>
+    <span>Usage</span>
+  </div>
+
+  <div class="head">
+    <div>
+      <h1>Usage</h1>
+      <div class="sub">requests, errors, latency &mdash; across every key in this account</div>
+    </div>
+    <div>
+      <div class="range-strip" id="range-strip" role="tablist" aria-label="Time range">
+        <button data-range="15m">15m</button>
+        <button data-range="1h">1h</button>
+        <button data-range="6h">6h</button>
+        <button data-range="24h" aria-pressed="true">24h</button>
+        <button data-range="7d">7d</button>
+        <button data-range="30d">30d</button>
+      </div>
+      <div class="filter-row">
+        <select id="filter-key">
+          <option value="">all keys</option>
+        </select>
+        <select id="filter-env">
+          <option value="">all environments</option>
+          <option value="live">live</option>
+          <option value="test">test</option>
+        </select>
+        <select id="filter-status">
+          <option value="">all statuses</option>
+          <option value="2xx">2xx (success)</option>
+          <option value="3xx">3xx (redirect)</option>
+          <option value="4xx">4xx (client)</option>
+          <option value="429">429 (rate-limited)</option>
+          <option value="5xx">5xx (server)</option>
+        </select>
+        <input type="search" id="filter-endpoint" placeholder="endpoint contains…" autocomplete="off">
+        <div class="spacer"></div>
+        <!-- 9.N.10 · Compare-mode global toggle -->
+        <button class="compare-toggle" id="compare-toggle" aria-pressed="false" title="Show previous period overlay on charts">
+          <svg viewBox="0 0 24 24"><path d="M3 6h12 M3 12h18 M3 18h8"/></svg>
+          compare
+        </button>
+        <button class="btn" id="btn-export" title="Download CSV">
+          <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> export
+        </button>
+        <button class="btn" id="btn-refresh" title="Refresh">
+          <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9.N.2 · Filter chip strip (active filters as dismissible chips) -->
+  <div class="chip-strip" id="chip-strip" aria-live="polite" style="display:none"></div>
+
+  <!-- KPI strip -->
+  <div class="kpi-strip" id="kpi-strip">
+    <div class="kpi is-clickable" data-k="requests" data-kpi-action="reset">
+      <div class="lbl"><svg class="icon"><use href="#i-activity"/></svg> Requests</div>
+      <div class="num"><span class="apin-odometer" data-num>·</span></div>
+      <div class="kpi-spark" data-spark="requests"></div>
+      <div class="sub"><span class="delta" data-delta>·</span><span data-prev></span></div>
+    </div>
+    <div class="kpi is-clickable" data-k="errors" data-kpi-action="filter-errors">
+      <div class="lbl"><svg class="icon"><use href="#i-alert"/></svg> Errors</div>
+      <div class="num"><span class="apin-odometer" data-num>·</span></div>
+      <div class="breakdown">
+        <span>5xx <b data-breakdown-5xx>·</b></span>
+        <span>4xx <b data-breakdown-4xx>·</b></span>
+      </div>
+      <div class="kpi-spark" data-spark="errors"></div>
+      <div class="sub"><span class="delta" data-delta good>·</span><span data-prev></span></div>
+    </div>
+    <div class="kpi is-clickable" data-k="rate_limited" data-kpi-action="filter-429">
+      <div class="lbl"><svg class="icon"><use href="#i-funnel"/></svg> Rate-limited (429)</div>
+      <div class="num"><span class="apin-odometer" data-num>·</span></div>
+      <div class="kpi-spark" data-spark="rate_limited"></div>
+      <div class="sub"><span class="delta" data-delta good>·</span><span data-prev></span></div>
+    </div>
+    <div class="kpi is-clickable" data-k="latency_p95_ms" data-kpi-action="mode-latency">
+      <div class="lbl"><svg class="icon"><use href="#i-gauge"/></svg> p95 latency</div>
+      <div class="num"><span class="apin-odometer" data-num>·</span><span class="unit">ms</span></div>
+      <div class="breakdown">
+        <span>p50 <b data-breakdown-p50>·</b></span>
+        <span>p99 <b data-breakdown-p99>·</b></span>
+      </div>
+      <div class="kpi-spark" data-spark="latency_p95_ms"></div>
+      <div class="sub"><span class="delta" data-delta good>·</span><span data-prev></span></div>
+    </div>
+    <div class="kpi is-clickable" data-k="active_keys" data-kpi-action="mode-by-endpoint">
+      <div class="lbl"><svg class="icon"><use href="#i-key"/></svg> Keys with traffic</div>
+      <div class="num"><span class="apin-odometer" data-num>·</span></div>
+      <div class="breakdown"><span>of <b data-breakdown-total>·</b> total keys</span></div>
+      <div class="kpi-spark" data-spark="active_keys"></div>
+      <div class="sub"><span class="delta" data-delta>·</span><span data-prev></span></div>
+    </div>
+    <div class="kpi is-clickable" data-k="bytes_out" data-kpi-action="mode-bytes">
+      <div class="lbl"><svg class="icon"><use href="#i-download"/></svg> Bytes out</div>
+      <div class="num" data-bytes-out>·</div>
+      <div class="kpi-spark" data-spark="bytes_out"></div>
+      <div class="sub"><span class="delta" data-delta>·</span><span data-prev></span></div>
+    </div>
+  </div>
+
+  <!-- Time-series -->
+  <div class="card">
+    <div class="card-head">
+      <h2 id="ts-title">Requests &middot; 24h</h2>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="mode-switcher" id="ts-mode" role="tablist" aria-label="Chart mode">
+          <button data-mode="total" aria-pressed="true">requests</button>
+          <button data-mode="by_status">by status</button>
+          <button data-mode="by_endpoint">by endpoint</button>
+          <button data-mode="latency">latency</button>
+          <button data-mode="errors">errors</button>
+          <button data-mode="bytes">bytes</button>
+        </div>
+        <label class="logy-toggle" style="position:static" title="Log Y-axis">
+          <input type="checkbox" id="logy-toggle"> log
+        </label>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="chart-host" id="ts-host"><div class="placeholder">loading&hellip;</div></div>
+      <!-- 9.N.7.f · Time scrubber — video-player on the time-series chart -->
+      <div class="ts-scrubber" id="ts-scrubber">
+        <button class="ts-scrub-btn" data-act="start" title="Jump to start (24h ago)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-skip-back"/></svg>
+        </button>
+        <button class="ts-scrub-btn ts-scrub-play" data-act="play" title="Play / pause">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-play"/></svg>
+        </button>
+        <button class="ts-scrub-btn" data-act="end" title="Jump to end (live)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-skip-forward"/></svg>
+        </button>
+        <div class="ts-scrub-rail">
+          <div class="ts-scrub-fill"></div>
+          <div class="ts-scrub-handle" tabindex="0"></div>
+        </div>
+        <span class="ts-scrub-time">live</span>
+        <select class="ts-scrub-speed" title="Playback speed">
+          <option value="1">1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+          <option value="8">8×</option>
+        </select>
+      </div>
+      <div style="margin-top:10px;font-family:'JetBrains Mono',monospace;font-size:11px;
+        color:var(--ink-mute);text-align:center">
+        click a point to drill into that minute &middot; drag to zoom &middot; right-click for actions
+      </div>
+    </div>
+  </div>
+
+  <!-- 3-column sub-charts -->
+  <div class="grid-3">
+    <div class="card">
+      <div class="card-head">
+        <h2>Top endpoints</h2>
+        <span class="aux" id="top-ep-aux">·</span>
+      </div>
+      <div class="card-body" id="top-ep-host">
+        <div class="placeholder">loading&hellip;</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Status mix</h2>
+        <span class="aux" id="donut-aux">·</span>
+      </div>
+      <div class="card-body" id="donut-host">
+        <div class="placeholder">loading&hellip;</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Latency distribution</h2>
+        <span class="aux" id="hist-aux">latency buckets</span>
+      </div>
+      <div class="card-body" id="hist-host">
+        <div class="placeholder">loading&hellip;</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-3" style="margin-top:18px">
+    <div class="card">
+      <div class="card-head">
+        <h2>Top keys</h2>
+      </div>
+      <div class="card-body" id="top-keys-host">
+        <div class="placeholder">loading&hellip;</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Top IPs</h2>
+      </div>
+      <div class="card-body" id="top-ips-host">
+        <div class="placeholder">loading&hellip;</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Top error codes</h2>
+      </div>
+      <div class="card-body" id="top-errors-host">
+        <div class="placeholder">loading&hellip;</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9.N.5 · Activity heatmap with view-mode toggle (week/month/year/years) -->
+  <div class="card" style="margin-top:18px">
+    <div class="card-head">
+      <h2>Activity calendar</h2>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div class="mode-switcher" id="heatmap-mode" role="tablist" aria-label="Calendar zoom">
+          <button data-cal-mode="week"  aria-pressed="true">week</button>
+          <button data-cal-mode="month">month</button>
+          <button data-cal-mode="year">year</button>
+          <button data-cal-mode="years">years</button>
+        </div>
+        <span class="aux" id="heatmap-aux">click any cell to drill</span>
+      </div>
+    </div>
+    <div class="card-body" id="heatmap-host">
+      <div class="placeholder">loading&hellip;</div>
+    </div>
+  </div>
+
+  <!-- 9.N.7.f · Live row (grid-2): Live tail + Live pulse, real-time widgets -->
+  <div class="grid-2 live-row" style="margin-top:18px">
+    <div class="card">
+      <div class="card-head">
+        <h2>
+          <svg class="icon" aria-hidden="true" style="width:16px;height:16px;vertical-align:-2px;color:var(--c-ok)"><use href="#i-activity"/></svg>
+          Live tail
+        </h2>
+        <span class="aux">click any row to inspect · auto-pauses on hover</span>
+      </div>
+      <div class="card-body bare" id="livestream-host"><div class="placeholder">connecting…</div></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>
+          <svg class="icon" aria-hidden="true" style="width:16px;height:16px;vertical-align:-2px;color:var(--c-ok)"><use href="#i-activity"/></svg>
+          Live pulse
+        </h2>
+        <span class="aux">real-time chart · hover for detail · toggle metric &amp; window</span>
+      </div>
+      <div class="card-body bare" id="livepulse-host"></div>
+    </div>
+  </div>
+
+  <!-- 9.N.5 · Treemap + Spark grid (side-by-side) -->
+  <div class="grid-2" style="margin-top:18px">
+    <div class="card">
+      <div class="card-head">
+        <h2>Endpoint treemap</h2>
+        <span class="aux" id="treemap-aux">proportional by request count</span>
+      </div>
+      <div class="card-body" id="treemap-host">
+        <div class="placeholder">loading&hellip;</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Per-endpoint shapes</h2>
+        <span class="aux" id="sparkgrid-aux">activity over the range</span>
+      </div>
+      <div class="card-body bare" id="sparkgrid-host">
+        <div class="placeholder">loading&hellip;</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9.N.5 · Quadrant + Boxplot (side-by-side) -->
+  <div class="grid-2" style="margin-top:18px">
+    <div class="card">
+      <div class="card-head">
+        <h2>Endpoint health quadrant</h2>
+        <span class="aux">volume vs error rate · bubble = p95 latency</span>
+      </div>
+      <div class="card-body" id="quadrant-host">
+        <div class="placeholder">loading&hellip;</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Latency per endpoint</h2>
+        <span class="aux">p10–p90 box · p50 line · outliers as open circles</span>
+      </div>
+      <div class="card-body" id="boxplot-host">
+        <div class="placeholder">loading&hellip;</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9.N.5.f · "What's noteworthy" — auto-derived anomaly insights.
+       Replaces the p95-vs-SLO bullet card which duplicated info already
+       in the KPI strip. Each insight is one actionable observation:
+       traffic burst, error spike, slow endpoint, dormant key, etc. -->
+  <div class="card" style="margin-top:18px">
+    <div class="card-head">
+      <h2>What's noteworthy</h2>
+      <span class="aux" id="insights-aux">auto-derived from the current window</span>
+    </div>
+    <div class="card-body bare" id="insights-host">
+      <div class="placeholder">loading&hellip;</div>
+    </div>
+  </div>
+
+  <!-- Recent requests -->
+  <div class="card" style="margin-top:18px">
+    <div class="card-head">
+      <h2>Recent requests</h2>
+      <span class="aux" id="recent-aux">·</span>
+      <!-- 9.N.8e · Live-stream toggle + refresh.
+           - Live toggle: when on, new SSE events are inserted at the top
+             with a smooth wet-ink animation. When off, only manual refresh.
+           - Refresh: pulls a full fresh page. Uses #i-refresh handdrawn icon. -->
+      <div class="recent-actions">
+        <button class="recent-live-toggle" id="recent-live-toggle"
+                type="button" data-on="true" aria-label="Toggle live updates"
+                title="When on, new requests appear instantly without refresh">
+          <span class="recent-live-dot"></span>
+          <span class="recent-live-label">live</span>
+        </button>
+        <button class="recent-refresh-btn" id="recent-refresh"
+                type="button" aria-label="Refresh recent requests"
+                title="Refresh now">
+          <svg viewBox="0 0 24 24"><use href="#i-refresh"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="card-body bare">
+      <div class="scroll-y">
+        <table class="tbl" id="recent-tbl">
+          <thead>
+            <tr id="recent-thead-row">
+              <th data-sort-key="timestamp"  data-sort-default="desc">when</th>
+              <th data-sort-key="key_name">key</th>
+              <th data-sort-key="method">method</th>
+              <th data-sort-key="path">endpoint</th>
+              <th data-sort-key="status_code">status</th>
+              <th data-sort-key="error_code">error</th>
+              <th data-sort-key="latency_ms" style="text-align:right">latency</th>
+              <th data-sort-key="bytes_out" style="text-align:right">out</th>
+              <th data-sort-key="ip">ip</th>
+            </tr>
+          </thead>
+          <tbody id="recent-tbody">
+            <tr><td colspan="9" class="placeholder">loading&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="recent-pager" style="padding:14px 22px;text-align:center;
+        border-top:1px solid var(--paper-edge);background:var(--paper)" hidden>
+        <button class="btn" id="recent-more">load 50 more</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Minute / generic drill drawer -->
+<div class="drawer-mask" id="drawer-mask"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div>
+      <h3 id="drawer-title">Minute drill-down</h3>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-soft);margin-top:3px" id="drawer-sub">·</div>
+    </div>
+    <button class="btn" id="drawer-close" aria-label="close">×</button>
+  </div>
+  <div class="drawer-body" id="drawer-body">
+    <div class="placeholder">loading&hellip;</div>
+  </div>
+</aside>
+
+<!-- 9.I — Request detail drawer (separate, wider) -->
+<div class="drawer-mask" id="reqd-mask"></div>
+<aside class="drawer" id="reqd" aria-hidden="true" style="width:620px">
+  <div class="drawer-head">
+    <div>
+      <h3 id="reqd-title">Request detail</h3>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-soft);margin-top:3px" id="reqd-sub">·</div>
+    </div>
+    <button class="btn" id="reqd-close" aria-label="close">×</button>
+  </div>
+  <div class="drawer-body" id="reqd-body">
+    <div class="placeholder">loading&hellip;</div>
+  </div>
+</aside>
+
+<style>
+/* 9.I — request detail card styling */
+.reqd-section{background:var(--paper-deep);border:1px solid var(--paper-edge);
+  border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.reqd-section h4{font-family:'Fraunces',serif;font-weight:500;font-size:13.5px;
+  text-transform:uppercase;letter-spacing:0.08em;color:var(--ink-soft);
+  margin-bottom:10px;display:flex;align-items:center;gap:7px}
+.reqd-section h4 .icon{width:14px;height:14px}
+.reqd-row{display:grid;grid-template-columns:120px 1fr;gap:8px;font-size:12.5px;
+  padding:4px 0;font-family:'JetBrains Mono',monospace}
+.reqd-row dt{color:var(--ink-soft);text-transform:uppercase;font-size:10.5px;
+  letter-spacing:0.05em;padding-top:2px}
+.reqd-row dd{color:var(--ink);word-break:break-all}
+.reqd-row dd code{background:var(--paper);padding:2px 7px;border-radius:4px;
+  border:1px solid var(--paper-edge)}
+.reqd-status-bar{display:flex;align-items:center;gap:12px;font-family:'Fraunces',serif;
+  font-size:22px;margin-bottom:14px}
+.reqd-status-bar .stat{font-size:11.5px;font-weight:600;font-family:'JetBrains Mono',monospace;
+  padding:4px 11px;border-radius:11px}
+.reqd-status-bar .meth{font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;
+  padding:3px 9px;border-radius:9px}
+.reqd-status-bar .path{font-family:'JetBrains Mono',monospace;font-size:14px;
+  color:var(--ink);background:var(--paper-deep);padding:4px 10px;border-radius:6px;
+  border:1px solid var(--paper-edge);flex:1;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.reqd-latency-bar{height:10px;border-radius:5px;background:var(--paper-deep);
+  position:relative;overflow:hidden;margin:8px 0 4px}
+.reqd-latency-bar .fill{height:100%;background:linear-gradient(90deg, var(--green), var(--ochre), var(--crimson));
+  border-radius:5px;transition:width .4s}
+.reqd-latency-bar .lbl{position:absolute;right:8px;top:-1px;font-size:10px;
+  color:var(--ink);font-family:'JetBrains Mono',monospace;font-weight:600;
+  line-height:12px}
+
+/* 9.N.7.f · Real-baseline tags + comparison row */
+.reqd-lat-tag-row{margin-top:8px}
+.reqd-lat-tag{display:inline-block;padding:3px 9px;border-radius:11px;
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:500;
+  letter-spacing:0.02em}
+.reqd-lat-tag.good{background:rgba(47,111,62,0.12);color:var(--c-ok, #2f6f3e)}
+.reqd-lat-tag.warn{background:rgba(212,150,32,0.14);color:var(--c-amber, #8b621b)}
+.reqd-lat-tag.mute{background:var(--paper);color:var(--ink-soft);
+  border:1px solid var(--paper-edge)}
+.reqd-lat-baseline{display:flex;flex-wrap:wrap;gap:18px;margin-top:8px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-soft)}
+.reqd-lat-baseline b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.reqd-lat-baseline .reqd-lat-sample{font-style:italic;opacity:0.75}
+.reqd-lat-mute{font-style:italic}
+.reqd-mute{color:var(--ink-soft);font-size:11.5px;font-style:italic}
+
+/* ─────────────────────────────────────────────────────────────────────
+   9.N.8 · Request-detail drawer · Pass 2 sections.
+   All cards follow the same shell: 1px paper-edge border, paper-deep
+   background, 14×16 padding, 14px margin between cards.
+───────────────────────────────────────────────────────────────────── */
+
+/* Section heading — keep h4 + icon + optional inline meta on one line. */
+.reqd-section h4 .reqd-tl-total{margin-left:auto;font-family:'JetBrains Mono',monospace;
+  font-size:11px;color:var(--ink-soft);font-weight:400}
+.reqd-section h4 .reqd-mute{margin-left:6px}
+.reqd-section h4{display:flex;align-items:center;gap:8px}
+
+/* ── Timeline waterfall ───────────────────────────────────────────── */
+.reqd-tl-row{display:grid;grid-template-columns:84px 1fr 130px;gap:10px;
+  align-items:center;padding:5px 0;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink-soft)}
+.reqd-tl-label{color:var(--ink);font-variant-numeric:tabular-nums}
+.reqd-tl-bar{height:8px;background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:2px;overflow:hidden;position:relative}
+.reqd-tl-fill{height:100%;background:linear-gradient(90deg, var(--ink-soft), var(--ink));
+  border-radius:2px;transition:width 360ms cubic-bezier(0.22,1,0.36,1)}
+.reqd-tl-row.is-hot .reqd-tl-fill{background:linear-gradient(90deg, var(--c-amber), #c4711a)}
+.reqd-tl-val{text-align:right;font-variant-numeric:tabular-nums}
+.reqd-tl-val b{color:var(--ink);font-weight:600}
+.reqd-tl-hot{color:var(--c-amber);font-family:'Fraunces',serif;font-style:italic;
+  font-size:11px;margin-left:6px}
+
+/* ── Payload section ──────────────────────────────────────────────── */
+.reqd-payload-section h4{position:relative}
+.reqd-payload-modes{margin-left:auto;display:inline-flex;border:1px solid var(--paper-edge);
+  background:var(--paper);border-radius:5px;overflow:hidden}
+.reqd-payload-modes button{padding:4px 9px;font-size:10.5px;color:var(--ink-soft);
+  font-family:'JetBrains Mono',monospace;background:transparent;border:0;
+  border-right:1px solid var(--paper-edge);cursor:pointer;
+  transition:background 120ms cubic-bezier(0.22,1,0.36,1),color 120ms}
+.reqd-payload-modes button:last-child{border-right:0}
+.reqd-payload-modes button:hover{background:var(--paper-deep);color:var(--ink)}
+.reqd-payload-modes button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+
+.reqd-pl-block{margin-top:12px}
+.reqd-pl-block:first-of-type{margin-top:8px}
+.reqd-pl-toggle{display:flex;align-items:center;gap:6px;background:transparent;
+  border:0;padding:4px 0;cursor:pointer;width:100%;text-align:left;
+  font-family:'Fraunces',serif;font-style:italic;font-size:13px;color:var(--ink);
+  transition:color 120ms}
+.reqd-pl-toggle:hover{color:var(--c-ok)}
+.reqd-pl-chev{font-size:10px;color:var(--ink-soft);width:10px;display:inline-block}
+.reqd-pl-content{padding-left:14px;margin-top:4px}
+
+.reqd-headers-list{display:grid;grid-template-columns:160px 1fr;gap:4px 12px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink);
+  word-break:break-all}
+.reqd-headers-list dt{color:var(--ink-soft);text-transform:none;font-weight:500}
+.reqd-headers-list dd{color:var(--ink)}
+
+.reqd-pl-strip{display:flex;gap:10px;align-items:center;padding:6px 10px;
+  background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:5px 5px 0 0;font-family:'JetBrains Mono',monospace;
+  font-size:10.5px;color:var(--ink-soft)}
+.reqd-pl-ctype{color:var(--ink);font-weight:500}
+.reqd-pl-trunc{font-style:italic;color:var(--c-amber);margin-left:auto}
+
+.reqd-pl-body{background:var(--paper);border:1px solid var(--paper-edge);
+  border-top:0;border-radius:0 0 5px 5px;overflow:hidden}
+.reqd-pl-pre{margin:0;padding:10px 12px;font-family:'JetBrains Mono',monospace;
+  font-size:11.5px;line-height:1.5;color:var(--ink);
+  white-space:pre-wrap;word-break:break-word;max-height:280px;overflow:auto}
+.reqd-pl-pre code{background:transparent;padding:0;border-radius:0}
+.reqd-pl-binary{display:flex;align-items:center;gap:10px;padding:14px;
+  font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-soft)}
+.reqd-pl-bin-icon{width:18px;height:18px;color:var(--ink-soft);fill:none;
+  stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.reqd-pl-multipart{padding:10px 12px}
+
+/* 9.N.8e · Structured multipart parts list. Replaces the mojibake text
+   preview with a proper list of parts (name · filename · type · size).
+   Image parts get a hoverable filename that pops a thumbnail. */
+.reqd-pl-mp{padding:8px 0}
+.reqd-mp-list{display:flex;flex-direction:column;gap:6px;padding:0 12px}
+.reqd-mp-row{display:flex;align-items:flex-start;gap:10px;padding:9px 11px;
+  background:var(--paper-deep);border:1px solid var(--paper-edge);
+  border-radius:5px;transition:border-color 140ms cubic-bezier(0.22,1,0.36,1)}
+.reqd-mp-row:hover{border-color:var(--ink-soft)}
+.reqd-mp-icon{width:18px;height:18px;flex-shrink:0;color:var(--ink-soft);fill:none;
+  stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round;
+  margin-top:1px}
+.reqd-mp-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.reqd-mp-line1{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink)}
+.reqd-mp-name{font-weight:600;color:var(--ink)}
+.reqd-mp-fname{color:var(--ink-soft);font-style:italic;font-family:'Fraunces',serif;
+  font-size:13px}
+.reqd-mp-fname-img{cursor:pointer;color:var(--c-ok);
+  text-decoration:underline;text-decoration-style:dotted;
+  text-underline-offset:3px;text-decoration-color:var(--c-ok);
+  transition:color 120ms}
+.reqd-mp-fname-img:hover{color:var(--c-ok)}
+.reqd-mp-line2{display:flex;gap:12px;align-items:baseline;
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-soft)}
+.reqd-mp-ctype{color:var(--ink)}
+.reqd-mp-size{font-variant-numeric:tabular-nums}
+.reqd-mp-hint{margin-left:auto;font-style:italic;color:var(--ink-soft);opacity:0.75}
+
+/* Inline image preview (for direct image/* response bodies, not multipart) */
+.reqd-pl-image{padding:14px;text-align:center}
+.reqd-img-inline{max-width:100%;max-height:280px;border:1px solid var(--paper-edge);
+  border-radius:4px;display:block;margin:0 auto 8px}
+
+/* Floating image-preview popover. Anchored to cursor. Body-attached so
+   it can escape any clipped/overflow:hidden ancestor. */
+.reqd-img-popover{position:fixed;z-index:9999;pointer-events:none;
+  background:var(--paper);border:1px solid var(--ink-soft);
+  box-shadow:0 8px 24px rgba(0,0,0,0.18);
+  padding:6px;border-radius:4px;
+  opacity:0;transition:opacity 140ms ease-out;
+  max-width:280px}
+.reqd-img-popover img{display:block;max-width:240px;max-height:240px;
+  border-radius:2px;background:var(--paper-deep)}
+.reqd-img-popover-meta{margin-top:6px;font-family:'JetBrains Mono',monospace;
+  font-size:10.5px}
+.reqd-img-popover-fname{color:var(--ink);font-weight:600}
+.reqd-img-popover-sub{color:var(--ink-soft);margin-top:1px}
+
+/* Summary mode — richer layout */
+.reqd-pl-summary{margin-top:12px;padding:14px 16px;background:var(--paper);
+  border:1px solid var(--paper-edge);border-radius:6px}
+.reqd-pl-summary-title{font-family:'Fraunces',serif;font-style:italic;
+  font-size:14px;color:var(--ink);margin-bottom:10px}
+.reqd-pl-summary-grid{margin-bottom:10px}
+.reqd-pl-summary-subhead{font-family:'JetBrains Mono',monospace;
+  text-transform:uppercase;letter-spacing:0.04em;font-size:10.5px;
+  color:var(--ink-soft);margin-top:12px;margin-bottom:6px;
+  padding-bottom:4px;border-bottom:1px dashed var(--paper-edge)}
+.reqd-pl-summary-parts{list-style:none;margin:0;padding:0;
+  display:flex;flex-direction:column;gap:4px}
+.reqd-pl-summary-parts li{display:flex;align-items:center;gap:8px;
+  padding:4px 0;font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--ink-soft)}
+.reqd-pl-summary-pname{font-weight:600;color:var(--ink);min-width:80px}
+.reqd-pl-summary-pfile{color:var(--ink-soft);font-style:italic;
+  font-family:'Fraunces',serif;font-size:12px;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reqd-pl-summary-ptype{color:var(--ink)}
+.reqd-pl-summary-psize{font-variant-numeric:tabular-nums;color:var(--ink-soft);
+  min-width:60px;text-align:right}
+.reqd-pl-summary-resp{display:grid;grid-template-columns:170px 1fr;gap:4px 12px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink);
+  word-break:break-word}
+.reqd-pl-summary-resp dt{color:var(--ink-soft);font-weight:500}
+.reqd-pl-summary-resp dd{color:var(--ink)}
+.reqd-pl-summary-str{color:var(--ink);font-style:normal}
+.reqd-pl-summary-num{color:var(--c-info, #2d6a96);font-variant-numeric:tabular-nums}
+.reqd-pl-summary-bool{color:var(--c-amber, #d49620);font-weight:500}
+.reqd-pl-summary-null{color:var(--ink-soft);font-style:italic}
+.reqd-pl-summary-arr,.reqd-pl-summary-obj{color:var(--ink-soft);font-family:'JetBrains Mono',monospace}
+
+/* Export section: code wrapper holds the copy-btn ABOVE the line-numbered
+   code (which is its own scrollable container). */
+.reqd-export-codewrap{position:relative;margin-top:10px}
+.reqd-export-codewrap .copy-btn{position:absolute;top:8px;right:8px;
+  font-size:10.5px;background:var(--paper);color:var(--ink-soft);
+  border:1px solid var(--paper-edge);padding:4px 10px;border-radius:4px;
+  cursor:pointer;font-family:'JetBrains Mono',monospace;z-index:5;
+  transition:background 120ms,color 120ms,border-color 120ms}
+.reqd-export-codewrap .copy-btn:hover{background:var(--ink);color:var(--paper);
+  border-color:var(--ink)}
+.reqd-export-codewrap .copy-btn.copied{background:var(--c-ok);color:#fff;
+  border-color:var(--c-ok)}
+
+/* ─────────────────────────────────────────────────────────────────────
+   9.N.8e · Recent requests · live toggle + refresh button + sortable headers
+───────────────────────────────────────────────────────────────────── */
+
+.recent-actions{display:inline-flex;gap:8px;align-items:center;margin-left:auto}
+
+/* Live toggle — small pill with a colored dot that pulses when on */
+.recent-live-toggle{display:inline-flex;align-items:center;gap:6px;
+  padding:5px 10px;background:var(--paper);
+  border:1px solid var(--paper-edge);border-radius:14px;cursor:pointer;
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-soft);
+  text-transform:uppercase;letter-spacing:0.04em;
+  transition:background 140ms cubic-bezier(0.22,1,0.36,1),
+             color 140ms,border-color 140ms}
+.recent-live-toggle:hover{border-color:var(--ink-soft);color:var(--ink)}
+.recent-live-toggle[data-on="true"]{background:var(--paper-deep);
+  border-color:var(--c-ok);color:var(--c-ok)}
+.recent-live-dot{width:7px;height:7px;border-radius:50%;
+  background:var(--ink-soft);display:inline-block;flex-shrink:0;
+  transition:background 200ms}
+.recent-live-toggle[data-on="true"] .recent-live-dot{background:var(--c-ok);
+  animation:recent-live-pulse 1.6s ease-in-out infinite}
+@keyframes recent-live-pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(47,111,62,0.45);opacity:1}
+  50%{box-shadow:0 0 0 5px rgba(47,111,62,0);opacity:0.55}
+}
+
+/* Refresh button — handdrawn icon in a tight square */
+.recent-refresh-btn{display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;background:var(--paper);
+  border:1px solid var(--paper-edge);border-radius:6px;cursor:pointer;
+  color:var(--ink-soft);padding:0;
+  transition:background 140ms cubic-bezier(0.22,1,0.36,1),
+             color 140ms,border-color 140ms,transform 280ms}
+.recent-refresh-btn svg{width:14px;height:14px;fill:none;stroke:currentColor;
+  stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.recent-refresh-btn:hover{border-color:var(--ink);color:var(--ink);
+  background:var(--paper-deep)}
+.recent-refresh-btn:active{transform:scale(0.92)}
+.recent-refresh-btn.is-spinning svg{
+  animation:recent-refresh-spin 700ms cubic-bezier(0.22,1,0.36,1)}
+@keyframes recent-refresh-spin{
+  from{transform:rotate(0)} to{transform:rotate(360deg)}
+}
+
+/* Sortable headers — cursor pointer + sort indicator chevron */
+#recent-tbl thead th[data-sort-key]{cursor:pointer;user-select:none;
+  position:relative;padding-right:18px;
+  transition:color 140ms,background 140ms}
+#recent-tbl thead th[data-sort-key]:hover{color:var(--ink);background:var(--paper-deep)}
+#recent-tbl thead th[data-sort-key]::after{content:'';position:absolute;
+  right:6px;top:50%;transform:translateY(-50%);
+  width:0;height:0;
+  border-left:3px solid transparent;border-right:3px solid transparent;
+  opacity:0;transition:opacity 140ms}
+#recent-tbl thead th[data-sort-key]:hover::after{opacity:0.35;
+  border-top:4px solid currentColor}
+#recent-tbl thead th[data-sort-active="asc"]::after{opacity:1;
+  border-bottom:4px solid currentColor;border-top:none;color:var(--ink)}
+#recent-tbl thead th[data-sort-active="desc"]::after{opacity:1;
+  border-top:4px solid currentColor;border-bottom:none;color:var(--ink)}
+#recent-tbl thead th[data-sort-active]{color:var(--ink);font-weight:600}
+
+/* Live-row entry animation — when a new request slides in at the top
+   via SSE, do a brief paper-deep highlight that fades, plus translateY. */
+@keyframes recent-row-arrive{
+  0%   {background:var(--paper-deep);opacity:0;transform:translateY(-6px)}
+  10%  {opacity:1}
+  100% {background:transparent;opacity:1;transform:translateY(0)}
+}
+tr.recent-row-fresh{animation:recent-row-arrive 600ms cubic-bezier(0.22,1,0.36,1)}
+
+/* ── Burst context ───────────────────────────────────────────────── */
+.reqd-bc-summary{font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink);margin-bottom:8px}
+.reqd-bc-marker{display:flex;gap:2px;height:18px;margin-bottom:14px;
+  padding:4px 6px;background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:4px}
+.reqd-bc-bar{display:inline-block;width:5px;background:var(--ink-soft);
+  border-radius:1px;opacity:0.4;cursor:default;transition:opacity 120ms}
+.reqd-bc-bar.is-current{background:var(--c-ok);opacity:1;transform:scaleY(1.15)}
+.reqd-bc-bar:hover{opacity:0.85}
+.reqd-bc-neighbours-label{font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.02em;
+  margin-bottom:4px}
+.reqd-bc-list{display:flex;flex-direction:column;gap:1px;
+  background:var(--paper);border:1px solid var(--paper-edge);border-radius:5px;
+  overflow:hidden}
+.reqd-bc-row{display:grid;grid-template-columns:12px 90px 38px 1fr 48px 56px;gap:8px;
+  align-items:center;padding:6px 10px;font-family:'JetBrains Mono',monospace;
+  font-size:11px;color:var(--ink);transition:background 120ms cubic-bezier(0.22,1,0.36,1)}
+.reqd-bc-row:hover{background:var(--paper-deep)}
+.reqd-bc-row.is-current{background:var(--paper-deep);border-left:2px solid var(--c-ok);
+  padding-left:8px}
+.reqd-bc-arrow{color:var(--c-ok);font-weight:bold;text-align:center}
+.reqd-bc-ts{color:var(--ink-soft);font-variant-numeric:tabular-nums}
+.reqd-bc-path{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reqd-bc-lat{text-align:right;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+
+/* ── Endpoint health mini-sparklines ─────────────────────────────── */
+/* 9.N.8e · grid uses minmax(0,1fr) so the sparkline column can shrink
+   below its intrinsic content width — without this, a 20-cell unicode
+   line at 14px overflows the column track and pushes the totals off
+   the right edge of the section. */
+.reqd-hc-row{display:grid;grid-template-columns:74px minmax(0,1fr) auto;
+  gap:10px;align-items:center;padding:5px 0;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink-soft)}
+.reqd-hc-label{color:var(--ink-soft);text-transform:uppercase;font-size:10.5px;
+  letter-spacing:0.02em}
+/* Sparkline: SVG-based for pixel-accurate width. The host fills the 1fr
+   column and the inline-svg auto-scales to fit. */
+.reqd-hc-spark{display:block;width:100%;height:22px;min-width:0}
+.reqd-hc-spark svg{display:block;width:100%;height:100%;overflow:visible}
+.reqd-hc-cell{cursor:pointer;transition:opacity 120ms}
+.reqd-hc-cell rect{transition:fill 120ms,transform 120ms;transform-origin:bottom}
+.reqd-hc-cell:hover rect{fill:var(--c-ok);transform:scaleY(1.15)}
+.reqd-hc-row[data-metric="errors"] .reqd-hc-cell:hover rect{fill:var(--c-danger)}
+.reqd-hc-totals{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums;
+  font-weight:500;white-space:nowrap;min-width:90px}
+.reqd-hc-summary{margin-top:10px;padding-top:8px;
+  border-top:1px dashed var(--paper-edge);font-family:'JetBrains Mono',monospace;
+  font-size:10.5px;text-align:center}
+.reqd-hc-tip{position:absolute;background:var(--paper);border:1px solid var(--ink-soft);
+  padding:8px 11px;font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--ink);box-shadow:0 4px 12px rgba(0,0,0,0.12);pointer-events:none;
+  z-index:50;line-height:1.5;min-width:130px;
+  transform:translate(-50%,-100%);
+  transition:opacity 120ms ease-out}
+.reqd-hc-tip-time{font-weight:600;color:var(--ink);margin-bottom:2px}
+.reqd-hc-tip-lat{color:var(--ink-soft);font-size:10.5px;margin-top:2px}
+.reqd-section{position:relative}   /* anchor for absolute tooltip */
+
+/* ── Export section ──────────────────────────────────────────────── */
+.reqd-export-row-label{font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.02em;
+  margin-top:10px;margin-bottom:5px}
+.reqd-export-row-label:first-of-type{margin-top:4px}
+.reqd-export-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
+.reqd-chip{display:inline-flex;align-items:center;padding:5px 11px;
+  background:var(--paper);border:1px solid var(--paper-edge);
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-soft);
+  border-radius:14px;cursor:pointer;
+  transition:border-color 140ms cubic-bezier(0.22,1,0.36,1),color 140ms,background 140ms}
+.reqd-chip:hover{border-color:var(--ink);color:var(--ink);background:var(--paper-deep)}
+.reqd-chip:active{transform:translateY(1px)}
+
+/* Source card with hand-drawn icon */
+.reqd-source{display:flex;align-items:center;gap:14px;padding:12px 14px;
+  background:linear-gradient(135deg, var(--paper) 0%, var(--paper-deep) 100%);
+  border:1px solid var(--paper-edge);border-radius:10px}
+.reqd-source .source-icon{width:42px;height:42px;flex-shrink:0;
+  border-radius:50%;background:var(--paper);border:1.5px solid var(--paper-edge);
+  display:flex;align-items:center;justify-content:center;color:var(--ink)}
+.reqd-source .source-icon .icon{width:22px;height:22px}
+.reqd-source .source-info{flex:1;min-width:0}
+.reqd-source .source-name{font-family:'Fraunces',serif;font-size:16px;font-weight:500;color:var(--ink)}
+.reqd-source .source-sub{font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--ink-soft);margin-top:3px;word-break:break-all}
+
+/* Code-block toggle (curl / python / node tabs) */
+.reqd-code-tabs{display:flex;gap:0;background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:6px;padding:3px;width:fit-content;font-family:'JetBrains Mono',monospace}
+.reqd-code-tabs button{padding:5px 12px;font-size:11.5px;color:var(--ink-soft);
+  border:0;background:transparent;border-radius:4px;cursor:pointer}
+.reqd-code-tabs button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+/* 9.N.8e · Code block — light theme with gutter line numbers.
+   Previous design was dark (--ink bg) which made syn-kw / syn-fn / syn-url
+   tokens invisible (they're colored with --ink, same as bg). Stripe and
+   Twilio and Geeks for Geeks all use a soft cream/paper code block on
+   light pages — that's what we do too. The line-number gutter is rendered
+   via CSS counter on .reqd-code-line elements. */
+.reqd-code{background:var(--paper-deep);color:var(--ink);
+  border:1px solid var(--paper-edge);border-radius:6px;
+  padding:0;margin-top:10px;position:relative;overflow:hidden;
+  font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.55}
+.reqd-code-scroll{max-height:340px;overflow:auto;padding:12px 14px 12px 12px}
+.reqd-code .copy-btn{position:absolute;top:8px;right:8px;font-size:10.5px;
+  background:var(--paper);color:var(--ink-soft);border:1px solid var(--paper-edge);
+  padding:4px 10px;border-radius:4px;cursor:pointer;
+  font-family:'JetBrains Mono',monospace;z-index:5;
+  transition:background 120ms cubic-bezier(0.22,1,0.36,1),color 120ms,border-color 120ms}
+.reqd-code .copy-btn:hover{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.reqd-code .copy-btn.copied{background:var(--c-ok);color:#fff;border-color:var(--c-ok)}
+
+/* Numbered line wrapper — each line is one .reqd-code-line with a
+   pseudo-element gutter showing the line number. CSS counters give us
+   automatic numbering without polluting the textContent. */
+.reqd-code pre{margin:0;padding:0;font-family:'JetBrains Mono',monospace;
+  font-size:12px;line-height:1.55;color:var(--ink);
+  white-space:pre;counter-reset:lineno}
+.reqd-code-line{display:block;padding-left:44px;position:relative;
+  border-left:0;min-height:18px;white-space:pre}
+.reqd-code-line::before{counter-increment:lineno;content:counter(lineno);
+  position:absolute;left:0;width:32px;text-align:right;
+  color:var(--ink-soft);opacity:0.55;font-variant-numeric:tabular-nums;
+  user-select:none;pointer-events:none;font-size:10.5px;line-height:1.55;top:0;
+  padding-right:6px;border-right:1px solid var(--paper-edge)}
+.reqd-code-line:hover{background:rgba(0,0,0,0.022)}
+.reqd-code-line:hover::before{opacity:1;color:var(--ink)}
+</style>
+
+<script src="/static/odometer.js"></script>
+<script src="/static/apin_charts.js"></script>
+<!-- 9.N.3 · lightbox shell. Loaded BEFORE console_usage.js so chart
+     expand-handlers can call APIN.lightbox.open() at click time. -->
+<script src="/static/apin_lightbox.js"></script>
+<!-- 9.N.7 · live-stream SSE client + live pulse chart + syntax highlighter
+     · apin_live_pulse.js MUST load BEFORE apin_live_stream.js so the
+     · pulse accumulator and commentary engine exist when the stream
+     · client starts piping events into them. -->
+<script src="/static/apin_live_pulse.js"></script>
+<script src="/static/apin_live_stream.js"></script>
+<script src="/static/apin_syntax.js"></script>
+<script src="/static/console_usage.js"></script>
+</body>
+</html>

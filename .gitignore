@@ -126,3 +126,31 @@ templates/
 static/
 hf_deploy/
 hf_space/
+
+# ── QA / dev scratch directories ─────────────────────────────────────────
+# _qa_tmp/ holds session logs, audit reports, internal probes, and
+# regenerable artifacts. EXCEPT the pipeline-atlas JSON data files: the
+# /api/pipeline_data/{slug} endpoint reads them at runtime, so they must
+# ship with the deploy. Everything else under _qa_tmp/ is excluded.
+_qa_tmp/*
+!_qa_tmp/_pipeline_atlas_router.json
+!_qa_tmp/_pipeline_atlas_tomato.json
+!_qa_tmp/_pipeline_atlas_chilli.json
+!_qa_tmp/_pipeline_atlas_phase_d.json
+!_qa_tmp/_pipeline_atlas_forward_pass.json
+
+# ── tests/ — contains regression baselines + server logs, not unit tests ──
+tests/
+
+# ── One-shot QA / build helpers — never invoked at runtime ───────────────
+scripts/apin_v2/_glyph_audit.py
+scripts/apin_v2/_report_qa_seed.py
+scripts/apin_v2/_insert_console_nav_placeholder.py
+
+# ── Deploy helpers and binary samples not needed by the running app ──────
+deploy/_apply_rebrand.py
+deploy/_sample_report.pdf
+
+# ── Stray scratch artifacts ──────────────────────────────────────────────
+pipeline_dump.html
+UsersxplodVideos*

@@ -1,0 +1,206 @@
+{
+  "produced_at": "2026-05-23T13:14:40Z",
+  "source": "scripts/apin_v2/extract_pipeline_atlas_router.py",
+  "data": {
+    "rows": [
+      {
+        "source": "tomato",
+        "n_train": 5808,
+        "n_val": 1691,
+        "n_test": 1222,
+        "n_pool_on_disk": 24055,
+        "n_sm_total": 8721,
+        "acquired": "2025-09"
+      },
+      {
+        "source": "okra",
+        "n_train": 3122,
+        "n_val": 664,
+        "n_test": 744,
+        "n_pool_on_disk": 7366,
+        "n_sm_total": 4530,
+        "acquired": "2025-09"
+      },
+      {
+        "source": "brassica",
+        "n_train": 2929,
+        "n_val": 624,
+        "n_test": 683,
+        "n_pool_on_disk": 4269,
+        "n_sm_total": 4236,
+        "acquired": "2025-09"
+      },
+      {
+        "source": "chilli",
+        "n_train": 2578,
+        "n_val": 544,
+        "n_test": 1174,
+        "n_pool_on_disk": 9468,
+        "n_sm_total": 4296,
+        "acquired": "2025-11"
+      }
+    ],
+    "licenses": [
+      {
+        "source": "bangladesh_okra",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-09",
+        "citation": "Bangladesh okra disease dataset, Mendeley, 2023"
+      },
+      {
+        "source": "cabbage_balanced",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-10",
+        "citation": "Cabbage balanced disease, Mendeley, 2023"
+      },
+      {
+        "source": "caul_sharifashik",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-11",
+        "citation": "Sharifashik cauliflower final dataset, 2024"
+      },
+      {
+        "source": "cauliflower_noam",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-10",
+        "citation": "Cauliflower Noam dataset, Kaggle, 2024"
+      },
+      {
+        "source": "chilli_anthracnose_prudhvi",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-11",
+        "citation": "Prudhvi anthracnose chilli, Kaggle, 2023"
+      },
+      {
+        "source": "chilli_bangladesh",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-11",
+        "citation": "Bangladesh chilli disease, Mendeley, 2024"
+      },
+      {
+        "source": "chilli_bangladesh_2025",
+        "license": "CC-BY-4.0",
+        "acquired": "2026-02",
+        "citation": "Bangladesh chilli 2025 (extended), Mendeley, 2025"
+      },
+      {
+        "source": "chilli_cold_karnataka",
+        "license": "research use",
+        "acquired": "2026-01",
+        "citation": "Karnataka field chilli (cold collection), 2025"
+      },
+      {
+        "source": "diya_broccoli",
+        "license": "research use",
+        "acquired": "2025-11",
+        "citation": "Diya field-collected veg dataset, 2025"
+      },
+      {
+        "source": "diya_cabbage",
+        "license": "research use",
+        "acquired": "2025-11",
+        "citation": "Diya field-collected veg dataset, 2025"
+      },
+      {
+        "source": "diya_cauliflower",
+        "license": "research use",
+        "acquired": "2025-11",
+        "citation": "Diya field-collected veg dataset, 2025"
+      },
+      {
+        "source": "gadde_okra",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-09",
+        "citation": "Gadde okra dataset (Kaggle, 2023)"
+      },
+      {
+        "source": "inaturalist_brassica",
+        "license": "CC-BY-NC",
+        "acquired": "2025-11",
+        "citation": "iNaturalist brassica observations (research grade)"
+      },
+      {
+        "source": "inaturalist_chilli",
+        "license": "CC-BY-NC",
+        "acquired": "2025-11",
+        "citation": "iNaturalist chilli observations (research grade)"
+      },
+      {
+        "source": "inaturalist_okra",
+        "license": "CC-BY-NC",
+        "acquired": "2025-11",
+        "citation": "iNaturalist okra observations (research grade)"
+      },
+      {
+        "source": "inaturalist_tomato",
+        "license": "CC-BY-NC",
+        "acquired": "2025-11",
+        "citation": "iNaturalist tomato observations (research grade)"
+      },
+      {
+        "source": "mendeley_cabbage_dis",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-10",
+        "citation": "Cabbage disease combined, Mendeley, 2023"
+      },
+      {
+        "source": "mendeley_caul_leaf",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-09",
+        "citation": "Cauliflower leaf disease, Mendeley, 2022"
+      },
+      {
+        "source": "mendeley_okra",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-10",
+        "citation": "Mendeley okra 4-class, 2022"
+      },
+      {
+        "source": "plantdoc_eval",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-10",
+        "citation": "PlantDoc eval split (Singh et al., 2020)"
+      },
+      {
+        "source": "plantdoc_train",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-10",
+        "citation": "PlantDoc field tomato (Singh et al., 2020)"
+      },
+      {
+        "source": "plantvillage_tomato",
+        "license": "CC0",
+        "acquired": "2025-09",
+        "citation": "PlantVillage tomato (Penn State, 2016)"
+      },
+      {
+        "source": "tomato_ashish",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-10",
+        "citation": "Ashish tomato disease dataset, Kaggle, 2023"
+      },
+      {
+        "source": "tomato_kaustubh",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-11",
+        "citation": "Kaustubh tomato dataset, Kaggle, 2022"
+      },
+      {
+        "source": "tomato_luisolazo",
+        "license": "CC-BY-4.0",
+        "acquired": "2025-10",
+        "citation": "Luis Olazo tomato dataset, Kaggle, 2023"
+      },
+      {
+        "source": "yeesi",
+        "license": "CC0",
+        "acquired": "2025-10",
+        "citation": "Yeesi okra healthy/diseased, Kaggle, 2022"
+      }
+    ]
+  },
+  "metrics": {
+    "extraction_pending": true,
+    "note": "Router inference metrics (per-crop accuracy, confidence histogram, confusion matrix) require running the router on the locked test split. That is a separate extraction script (scripts/apin_v2/extract_router_metrics.py) deferred to Phase D."
+  }
+}

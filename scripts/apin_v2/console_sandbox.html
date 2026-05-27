@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="__APIN_CSRF_TOKEN__">
+<title>Sandbox · APIN Console</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..700,0..100,0..1;1,9..144,300..700,0..100,0..1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Phase 7 Wave 4 · Sandbox · interactive API playground.
+   Fires real HTTPS requests using the user's session (account endpoints)
+   or a Bearer key from the user's active key list (/predict/full).
+   Generates the equivalent cURL command so the user can lift the call out
+   of the browser. Request history persists to localStorage. */
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/fonts/inter-w400.woff2') format('woff2'),local('Inter');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/fonts/inter-w500.woff2') format('woff2'),local('Inter Medium');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;
+  src:url('/fonts/inter-w600.woff2') format('woff2'),local('Inter SemiBold');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;
+  src:url('/fonts/inter-w700.woff2') format('woff2'),local('Inter Bold');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w400.woff2') format('woff2'),local('JetBrains Mono');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w500.woff2') format('woff2'),local('JetBrains Mono Medium');}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:600;font-display:swap;
+  src:url('/fonts/jetbrains-mono-w600.woff2') format('woff2'),local('JetBrains Mono SemiBold');}
+:root{
+  --paper:#fbf9f3; --paper-deep:#e9e2d1; --paper-edge:#c7bca9;
+  --ink:#1a1612; --ink-soft:#5a5246;
+  --accent-green:#2f6f3e; --accent-ochre:#b87d1e; --accent-crimson:#b01820;
+  --accent-blue:#2d6a96;
+  --code-bg:#1a1612; --code-fg:#e8d9b8; --code-comment:#7a6f5b;
+  --code-str:#a9c587; --code-num:#e8b85d; --code-kw:#dca36e; --code-bool:#b7d3ff;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:0 4px 12px rgba(0,0,0,0.06);
+  --shadow-lg:0 12px 32px rgba(0,0,0,0.16);
+  --radius:10px; --radius-sm:6px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#f4efe6;color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;min-height:100vh}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;text-align:left}
+a{color:var(--accent-green);text-decoration:none}
+a:hover{text-decoration:underline}
+input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent-blue);outline-offset:2px}
+[hidden]{display:none !important}
+
+/* ── Layout ────────────────────────────────────────────── */
+.page{max-width:1320px;margin:0 auto;padding:24px}
+.crumbs{font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);margin-bottom:6px}
+.crumbs a{color:var(--accent-green);font-style:normal}
+.masthead{margin-bottom:18px}
+.masthead h1{font-family:'Fraunces',serif;font-weight:500;font-size:36px;
+  letter-spacing:-0.018em;line-height:1.05}
+.masthead .subtitle{font-family:'Fraunces',serif;font-style:italic;
+  font-size:15px;color:var(--ink-soft);margin-top:4px}
+
+/* Two-column workshop layout.
+   Phase 8.H fix · `min-width:0` on the columns. CSS Grid columns default
+   to `min-width:auto` which means they refuse to shrink below their
+   content's intrinsic width. Long single-line JSON responses (e.g.
+   the api_tomato_note paragraph) reported a huge intrinsic width on
+   the inner <pre>, ballooning the right column and pushing the compose
+   column off-screen. The grid itself stays 1.1fr/1.4fr; the panels
+   inside are now free to overflow:auto INSTEAD of growing the column.
+   `min-width:0` on the workshop itself prevents the same trap when the
+   whole row is inside another constrained ancestor. */
+.workshop{display:grid;grid-template-columns:1.1fr 1.4fr;gap:18px;
+  align-items:start;min-width:0}
+.workshop > * {min-width:0}
+
+/* ── Panels ───────────────────────────────────────────── */
+.panel{background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-sm);
+  min-width:0}
+.panel-head{padding:14px 20px;border-bottom:1px solid var(--paper-edge);
+  background:var(--paper-deep);display:flex;align-items:center;
+  justify-content:space-between;gap:10px}
+.panel-head h2{font-family:'Fraunces',serif;font-weight:500;font-size:17px;
+  letter-spacing:-0.005em}
+.panel-head .panel-aux{font-family:'Fraunces',serif;font-style:italic;
+  font-size:12.5px;color:var(--ink-soft)}
+.panel-body{padding:18px 20px}
+
+/* ── Compose form ──────────────────────────────────────── */
+.compose-row{display:grid;grid-template-columns:auto 1fr auto;
+  gap:8px;margin-bottom:14px;align-items:center}
+.method-pill{font-family:'JetBrains Mono',monospace;font-size:11.5px;
+  font-weight:600;padding:6px 12px;border-radius:var(--radius-sm);
+  text-transform:uppercase;letter-spacing:0.06em;min-width:64px;
+  text-align:center}
+.method-GET    {background:#d8e9d3;color:#1f5b32}
+.method-POST   {background:#d6e8f3;color:#1a4d77}
+.method-PATCH  {background:#fbe3c2;color:#7a4e0a}
+.method-DELETE {background:#f4cbc8;color:#7c1c1c}
+.endpoint-select{font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  padding:7px 10px;border:1.5px solid var(--paper-edge);
+  border-radius:var(--radius-sm);background:#fff;width:100%}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 16px;
+  border-radius:var(--radius-sm);font-weight:500;font-size:13px;
+  border:1.5px solid var(--paper-edge);background:var(--paper);
+  transition:transform .12s,border-color .12s,background .12s;cursor:pointer}
+.btn:hover{transform:translateY(-1px);border-color:var(--ink-soft)}
+.btn:disabled{opacity:0.45;pointer-events:none;transform:none}
+.btn-primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.btn-primary:hover{background:#000;border-color:#000}
+.btn-ghost{background:transparent;border-color:transparent;
+  color:var(--ink-soft);padding:5px 10px}
+.btn-ghost:hover{color:var(--ink);background:var(--paper-deep)}
+.btn-sm{padding:4px 10px;font-size:12px}
+
+.path-input{font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  padding:6px 10px;border:1.5px solid var(--paper-edge);
+  border-radius:var(--radius-sm);background:#fff;width:100%}
+
+.endpoint-desc{font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink-soft);margin-bottom:14px;padding:10px 14px;
+  background:var(--paper-deep);border-left:3px solid var(--accent-ochre);
+  border-radius:0 var(--radius-sm) var(--radius-sm) 0}
+
+.compose-section{margin-top:18px}
+.compose-section h3{font-family:'Inter',sans-serif;font-weight:600;font-size:12px;
+  text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);
+  margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.compose-section .badge{font-family:'JetBrains Mono',monospace;font-size:10px;
+  padding:2px 8px;border-radius:10px;background:var(--paper-deep);
+  color:var(--ink-soft);text-transform:none;letter-spacing:0.04em}
+.compose-section .badge.req{background:#fbe3c2;color:#7a4e0a}
+
+.path-param-row{display:grid;grid-template-columns:140px 1fr;gap:8px;
+  margin-bottom:8px;align-items:center}
+.path-param-row label{font-family:'JetBrains Mono',monospace;font-size:12px;
+  color:var(--ink-soft);text-align:right;padding-right:4px}
+
+.kv-row{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;
+  margin-bottom:6px}
+.kv-row input{font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  padding:5px 9px;border:1.5px solid var(--paper-edge);
+  border-radius:var(--radius-sm);background:#fff}
+
+.body-editor{width:100%;min-height:140px;padding:12px;
+  font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.55;
+  border:1.5px solid var(--paper-edge);border-radius:var(--radius-sm);
+  background:#fff;resize:vertical;tab-size:2}
+.body-editor.invalid{border-color:var(--accent-crimson);background:#fef5f5}
+.body-hint{font-family:'Fraunces',serif;font-style:italic;font-size:11.5px;
+  color:var(--ink-soft);margin-top:6px}
+.body-hint.err{color:var(--accent-crimson);font-weight:500}
+
+.file-pick{display:flex;align-items:center;gap:10px;padding:10px;
+  border:1.5px dashed var(--paper-edge);border-radius:var(--radius-sm);
+  background:#fff;font-size:12.5px;color:var(--ink-soft);cursor:pointer;
+  transition:border-color .12s,background .12s}
+.file-pick:hover{border-color:var(--accent-blue);background:#f8fbfd}
+.file-pick.has-file{border-color:var(--accent-green);background:#f0f7f0;
+  color:var(--ink)}
+.file-pick input[type=file]{position:absolute;width:1px;height:1px;
+  opacity:0;pointer-events:none}
+
+.key-select{font-family:'JetBrains Mono',monospace;font-size:12.5px;
+  padding:6px 10px;border:1.5px solid var(--paper-edge);
+  border-radius:var(--radius-sm);background:#fff;width:100%}
+.key-select-help{font-family:'Fraunces',serif;font-style:italic;font-size:12px;
+  color:var(--ink-soft);margin-top:6px}
+
+.actions-row{display:flex;align-items:center;justify-content:space-between;
+  gap:12px;margin-top:20px;padding-top:14px;border-top:1px dashed var(--paper-edge)}
+
+/* ── cURL preview ──────────────────────────────────────── */
+.curl-block{background:var(--code-bg);color:var(--code-fg);
+  padding:14px 18px;border-radius:var(--radius-sm);margin-top:12px;
+  position:relative}
+.curl-block pre{margin:0;white-space:pre-wrap;word-break:break-all;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.5}
+.curl-block .label{position:absolute;top:6px;right:14px;font-size:10px;
+  color:var(--code-comment);letter-spacing:0.06em;text-transform:uppercase;
+  font-family:'JetBrains Mono',monospace;font-weight:500}
+.curl-block .copy-curl{position:absolute;top:6px;right:80px;
+  background:rgba(255,255,255,0.06);border:1px solid #4a4540;
+  color:var(--code-fg);padding:2px 9px;border-radius:3px;font-size:10px;
+  letter-spacing:0.05em;text-transform:uppercase;cursor:pointer}
+.curl-block .copy-curl:hover{background:#3a3530}
+.curl-block .copy-curl.copied{background:var(--accent-green);
+  border-color:var(--accent-green);color:#fff}
+
+/* ── Response panel ────────────────────────────────────── */
+.response-status{display:flex;align-items:center;gap:12px;
+  font-family:'JetBrains Mono',monospace;font-size:13px}
+.response-status .status-pill{padding:3px 11px;border-radius:11px;
+  font-weight:600;font-size:12px}
+.status-pill.s-2xx{background:#d8e9d3;color:#1f5b32}
+.status-pill.s-3xx{background:#d6e8f3;color:#1a4d77}
+.status-pill.s-4xx{background:#fbe3c2;color:#7a4e0a}
+.status-pill.s-5xx{background:#f4cbc8;color:#7c1c1c}
+.status-pill.idle{background:var(--paper-deep);color:var(--ink-soft)}
+.response-status .meta{color:var(--ink-soft);font-size:11.5px}
+
+.response-tabs{display:flex;gap:2px;margin-bottom:0;
+  border-bottom:1px solid var(--paper-edge)}
+.response-tabs .tab{font:inherit;background:transparent;border:none;
+  cursor:pointer;padding:8px 14px;font-size:12px;color:var(--ink-soft);
+  border-radius:6px 6px 0 0;border-bottom:2px solid transparent;
+  margin-bottom:-1px;font-family:'JetBrains Mono',monospace;font-weight:500}
+.response-tabs .tab.active{color:var(--ink);
+  border-bottom-color:var(--accent-ochre);font-weight:600}
+.response-pane{display:none;min-height:200px}
+.response-pane.active{display:block}
+
+.response-body{background:var(--code-bg);color:var(--code-fg);
+  padding:16px 18px;border-radius:0 var(--radius-sm) var(--radius-sm) var(--radius-sm);
+  font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.5;
+  overflow:auto;max-height:520px;white-space:pre;word-break:normal}
+.response-body .j-key{color:var(--code-kw)}
+.response-body .j-str{color:var(--code-str)}
+.response-body .j-num{color:var(--code-num)}
+.response-body .j-bool{color:var(--code-bool)}
+.response-body .j-null{color:var(--code-comment);font-style:italic}
+.response-body.empty{color:var(--code-comment);font-style:italic;
+  padding:60px 20px;text-align:center}
+
+.headers-table{width:100%;border-collapse:collapse;font-size:12px;
+  font-family:'JetBrains Mono',monospace}
+.headers-table td{padding:5px 10px;border-bottom:1px solid var(--paper-edge);
+  vertical-align:top}
+.headers-table td:first-child{color:var(--accent-blue);width:34%;font-weight:500}
+.headers-table td:nth-child(2){word-break:break-all}
+
+/* ── History ───────────────────────────────────────────── */
+.history-list{padding:0;max-height:340px;overflow:auto}
+.hist-row{display:grid;grid-template-columns:60px 1fr auto auto;gap:10px;
+  padding:8px 18px;border-bottom:1px solid var(--paper-edge);
+  align-items:center;cursor:pointer;transition:background .12s;font-size:12px}
+.hist-row:hover{background:var(--paper-deep)}
+.hist-row .h-method{font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  font-weight:600;padding:2px 7px;border-radius:8px;text-align:center}
+.hist-row .h-path{font-family:'JetBrains Mono',monospace;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px}
+.hist-row .h-status{font-family:'JetBrains Mono',monospace;font-size:11px;
+  padding:1px 7px;border-radius:8px}
+.hist-row .h-time{font-family:'Fraunces',serif;font-style:italic;
+  font-size:11px;color:var(--ink-soft)}
+.hist-empty{padding:30px 20px;text-align:center;font-family:'Fraunces',serif;
+  font-style:italic;color:var(--ink-soft);font-size:13px}
+
+.history-controls{padding:6px 18px;display:flex;justify-content:flex-end;
+  border-bottom:1px solid var(--paper-edge);background:var(--paper-deep)}
+
+/* ── Toast ─────────────────────────────────────────────── */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%)
+  translateY(8px);background:var(--ink);color:var(--paper);
+  padding:10px 22px;border-radius:var(--radius-sm);font-size:13px;
+  font-weight:500;opacity:0;transition:opacity .2s,transform .2s;
+  z-index:9999;pointer-events:none;box-shadow:var(--shadow-lg)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.err{background:var(--accent-crimson)}
+.toast.ok{background:var(--accent-green)}
+
+@media (max-width: 980px){
+  .workshop{grid-template-columns:1fr}
+}
+
+/* ── Modal (Phase 8.H · paper-aesthetic, replaces window.prompt) ── */
+.modal-backdrop{position:fixed;inset:0;background:rgba(26,22,18,0.55);
+  display:flex;align-items:center;justify-content:center;z-index:1000;
+  animation:apin-fade-in .15s ease-out;font-family:'Inter',system-ui,sans-serif}
+.modal-backdrop[hidden]{display:none !important}
+@keyframes apin-fade-in{from{opacity:0}to{opacity:1}}
+.modal-card{background:var(--paper);border-radius:14px;padding:28px 32px;
+  max-width:460px;width:90%;text-align:center;
+  box-shadow:0 12px 40px rgba(0,0,0,0.25)}
+.modal-card .modal-icon{display:inline-flex;align-items:center;justify-content:center;
+  width:56px;height:56px;border-radius:14px;background:var(--paper-deep);
+  color:var(--ink-soft);margin:0 auto 12px}
+.modal-card .modal-icon svg{width:28px;height:28px}
+.modal-card .modal-icon.locked{background:#fae7c8;color:#b87d1e}
+.modal-card .modal-icon.danger{background:#f6cfd2;color:#b01820}
+.modal-card .modal-icon.success{background:#d8ecd8;color:#2f6f3e}
+.modal-card h2{font-family:'Fraunces',serif;font-weight:500;font-size:22px;
+  letter-spacing:-0.005em;color:var(--ink);margin:0 0 10px}
+.modal-card p{color:var(--ink-soft);font-size:13.5px;line-height:1.5;
+  margin:0 0 16px;text-align:center}
+.modal-card p code{font-family:'JetBrains Mono',monospace;font-size:12px;
+  background:var(--paper-deep);padding:1px 6px;border-radius:4px;color:var(--ink)}
+.modal-card p a{color:var(--accent-green);text-decoration:none}
+.modal-card p a:hover{text-decoration:underline}
+.modal-card .modal-subtitle{font-family:'Fraunces',serif;font-style:italic;
+  font-size:12.5px;color:var(--ink-soft);margin:8px 0 18px}
+.modal-card input[type="text"],
+.modal-card input[type="password"]{
+  font-family:'JetBrains Mono',monospace;font-style:normal;font-weight:400;
+  font-size:13px;color:var(--ink);
+  padding:10px 14px;border-radius:8px;
+  border:1.5px solid var(--paper-edge);background:#fff;
+  width:100%;margin-bottom:6px;text-align:left;
+  transition:border-color .12s,box-shadow .12s}
+.modal-card input:focus{outline:none;border-color:var(--ink-soft);
+  box-shadow:0 0 0 3px rgba(47,111,62,0.10)}
+.modal-card input::placeholder{color:#a59885}
+.modal-card .modal-actions{display:flex;gap:10px;justify-content:flex-end;
+  margin-top:14px}
+.modal-card .btn{display:inline-flex;align-items:center;justify-content:center;
+  gap:6px;padding:8px 18px;border-radius:8px;font-family:inherit;font-size:13px;
+  font-weight:500;cursor:pointer;text-decoration:none;
+  border:1px solid var(--paper-edge);background:transparent;color:var(--ink);
+  transition:background .12s,border-color .12s}
+.modal-card .btn:hover{background:var(--paper-deep);border-color:var(--ink-soft)}
+.modal-card .btn:disabled{opacity:0.45;pointer-events:none}
+.modal-card .btn-primary{background:var(--ink);color:#fbf9f3;border-color:var(--ink)}
+.modal-card .btn-primary:hover{background:#2a2520;color:#fbf9f3}
+.modal-card .btn-ghost{background:transparent}
+
+/* ── Language tabs + code block (Phase 8.H · sandbox code samples) ──
+   Sized to match industry-grade dev console code blocks (Stripe, Linear):
+   compact padding, fixed line-height, and the container hugs its content
+   below ~10 lines instead of always being 340px tall. */
+.lang-tabs{display:flex;gap:2px;margin-bottom:6px;flex-wrap:wrap}
+.lang-tab{font-family:'JetBrains Mono',monospace;font-size:11.5px;
+  padding:4px 9px;border-radius:6px 6px 0 0;cursor:pointer;
+  background:transparent;border:0;color:var(--ink-soft);
+  border-bottom:2px solid transparent;transition:color .12s,background .12s}
+.lang-tab:hover{background:var(--paper-deep);color:var(--ink)}
+.lang-tab.active{color:var(--ink);background:var(--paper-deep);
+  border-bottom-color:var(--accent-green)}
+.code-block{position:relative;background:#1a1612;border-radius:8px;
+  padding:12px 14px;color:#fbf9f3;font-family:'JetBrains Mono',monospace;
+  font-size:12px;line-height:1.5;overflow:auto;
+  max-height:280px}
+.code-block pre{margin:0;padding:0;font:inherit;color:inherit;
+  white-space:pre;line-height:inherit}
+.code-block .code-copy{position:absolute;top:7px;right:7px;
+  background:rgba(251,249,243,0.10);color:#fbf9f3;border:0;
+  padding:3px 9px;border-radius:5px;cursor:pointer;
+  font-family:inherit;font-size:10.5px;font-weight:500;
+  transition:background .12s;z-index:1}
+.code-block .code-copy:hover{background:rgba(251,249,243,0.22)}
+.code-block .code-copy.copied{background:#2f6f3e}
+/* Custom scrollbar so the dark code block doesn't get a stark
+   light-mode scrollbar overlay. */
+.code-block::-webkit-scrollbar{width:8px;height:8px}
+.code-block::-webkit-scrollbar-thumb{background:rgba(251,249,243,0.18);
+  border-radius:4px}
+.code-block::-webkit-scrollbar-thumb:hover{background:rgba(251,249,243,0.30)}
+.code-block::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+<!-- @ICON_SPRITE@ -->
+<!-- @CONSOLE_NAV@ -->
+<div class="page">
+  <div class="crumbs">
+    <a href="/dashboard">dashboard</a> · <a href="/account/api/keys">API Console</a> · Sandbox
+  </div>
+  <div class="masthead">
+    <h1>Sandbox</h1>
+    <p class="subtitle">interactive playground for every account endpoint and /predict/full. Fires real requests.</p>
+  </div>
+
+  <div class="workshop">
+    <!-- LEFT: Compose -->
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Compose request</h2>
+        <span class="panel-aux">cookie auth on account routes &middot; Bearer on /predict</span>
+      </div>
+      <div class="panel-body">
+
+        <div class="compose-row">
+          <span class="method-pill method-GET" id="method-pill">GET</span>
+          <select class="endpoint-select" id="endpoint-select" aria-label="Endpoint"></select>
+          <button type="button" class="btn btn-primary" id="send-btn">Send</button>
+        </div>
+
+        <div class="endpoint-desc" id="endpoint-desc"></div>
+
+        <!-- Path params (shown only for endpoints that have {placeholders}) -->
+        <div class="compose-section" id="path-section" hidden>
+          <h3>Path parameters</h3>
+          <div id="path-params"></div>
+        </div>
+
+        <!-- Query params -->
+        <div class="compose-section" id="query-section" hidden>
+          <h3>Query parameters <span class="badge">optional</span></h3>
+          <div id="query-rows"></div>
+          <button type="button" class="btn btn-ghost btn-sm" id="add-query-btn" style="margin-top:4px">+ add parameter</button>
+        </div>
+
+        <!-- File upload (only for /predict/full) -->
+        <div class="compose-section" id="file-section" hidden>
+          <h3>Image upload <span class="badge req">required</span></h3>
+          <label class="file-pick" id="file-pick">
+            <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp">
+            <span id="file-pick-label">click or drop a JPEG / PNG / WebP leaf photo here</span>
+          </label>
+        </div>
+
+        <!-- API key picker (only for /predict/full) -->
+        <div class="compose-section" id="key-section" hidden>
+          <h3>API key <span class="badge req">required</span></h3>
+          <select class="key-select" id="key-select" aria-label="API key for Bearer auth"></select>
+          <p class="key-select-help">/predict/full needs a Bearer key &mdash; the session cookie is not valid for it. Pick from your active keys. Mint one on the <a href="/account/api/keys">keys page</a>.</p>
+        </div>
+
+        <!-- Request body (JSON) -->
+        <div class="compose-section" id="body-section" hidden>
+          <h3>Request body <span id="body-badge" class="badge">JSON</span></h3>
+          <textarea class="body-editor" id="body-editor" spellcheck="false"
+            placeholder='{"key": "value"}'></textarea>
+          <p class="body-hint" id="body-hint">Will be sent as <code>application/json</code>. Sandbox parses the JSON locally to surface syntax errors before sending.</p>
+        </div>
+
+        <!-- Code samples (Phase 8.H · was cURL-only; now 4 languages) -->
+        <div class="compose-section">
+          <h3>Code sample</h3>
+          <div class="lang-tabs" role="tablist" aria-label="Language">
+            <button type="button" class="lang-tab active" data-lang="curl"   role="tab">cURL</button>
+            <button type="button" class="lang-tab"        data-lang="python" role="tab">Python</button>
+            <button type="button" class="lang-tab"        data-lang="js"     role="tab">JavaScript</button>
+            <button type="button" class="lang-tab"        data-lang="node"   role="tab">Node.js</button>
+            <button type="button" class="lang-tab"        data-lang="go"     role="tab">Go</button>
+          </div>
+          <div class="code-block">
+            <button type="button" class="code-copy" id="copy-curl-btn">copy</button>
+            <pre id="curl-preview">&hellip;</pre>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- RIGHT: Response + history -->
+    <div>
+      <div class="panel" style="margin-bottom:18px">
+        <div class="panel-head">
+          <h2>Response</h2>
+          <div class="response-status" id="response-status">
+            <span class="status-pill idle">idle</span>
+            <span class="meta" id="resp-meta">awaiting request</span>
+          </div>
+        </div>
+        <div class="response-tabs">
+          <button type="button" class="tab active" data-resp-tab="body">body</button>
+          <button type="button" class="tab" data-resp-tab="headers">headers</button>
+        </div>
+        <div class="response-pane active" data-resp-pane="body">
+          <pre class="response-body empty" id="response-body">Click Send to fire your first request.</pre>
+        </div>
+        <div class="response-pane" data-resp-pane="headers">
+          <table class="headers-table" id="response-headers"><tbody><tr><td colspan="2" style="font-style:italic;color:var(--ink-soft);padding:18px;text-align:center">no request yet</td></tr></tbody></table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>History</h2>
+          <span class="panel-aux" id="hist-count">empty</span>
+        </div>
+        <div class="history-controls">
+          <button type="button" class="btn btn-ghost btn-sm" id="clear-hist-btn">clear</button>
+        </div>
+        <div class="history-list" id="history-list">
+          <p class="hist-empty">Recent sandbox calls appear here. Stored locally in this browser only.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- ── Phase 8.H · Bearer-paste modal (replaces native window.prompt) ── -->
+<div class="modal-backdrop" id="bearer-modal" role="dialog"
+     aria-modal="true" aria-labelledby="bearer-title" hidden>
+  <div class="modal-card">
+    <span class="modal-icon locked" aria-hidden="true">
+      <svg><use href="#i-key"/></svg>
+    </span>
+    <h2 id="bearer-title">Paste your API key</h2>
+    <p id="bearer-body">
+      APIN does not store plaintext tokens, so we cannot fetch
+      <code id="bearer-key-name">this key</code>'s value from the keys list.
+      Paste the original value below, or mint a fresh key on the
+      <a href="/account/api/keys">keys page</a> if you do not have it.
+    </p>
+    <input type="password" id="bearer-input" autocomplete="off"
+           spellcheck="false" placeholder="apin_live_..."
+           aria-label="API key plaintext value">
+    <p class="modal-subtitle" id="bearer-hint">
+      Stored only in this browser tab&apos;s sessionStorage. Cleared when
+      you close the tab.
+    </p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="bearer-cancel">cancel</button>
+      <button type="button" class="btn btn-primary" id="bearer-use" disabled>use key</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/console_sandbox.js"></script>
+</body>
+</html>
