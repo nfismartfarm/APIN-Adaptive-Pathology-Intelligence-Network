@@ -11,11 +11,20 @@ What is staged:
     scripts/__init__.py                         (created — package marker)
     scripts/models.py
     scripts/apin/            *.py *.html         (NOT caches/ — from apin-models)
-    scripts/apin_v2/         *.py *.html
+    scripts/apin_v2/         *.py *.html *.js *.svg *.json
+                              (.js are allowlisted by /static/{filename};
+                               .svg is the icon sprite; .json = phase_d_data.json)
     scripts/ladi_net/        *.py
     scripts/model3_training/ *.py                (NOT checkpoints/ — from apin-models)
     scripts/dinov2_probe/    *.py                (NOT results/ — from apin-models)
     scripts/psv/             *.py
+    _qa_tmp/_pipeline_atlas_{router,tomato,chilli,forward_pass,phase_d}.json
+                              (carve-outs served by /api/pipeline_data/{slug})
+
+What is deliberately NOT staged:
+    *.md   — spec / contract / design documents (API_CONTRACT.md, request_detailed.md, etc.)
+    *.log  — runtime log artifacts
+    _build_*, _test_*, _seed_*  — dev-only helper scripts
 
 Run:  python deploy/stage_space.py
 Then: hf upload dxv-404/Apin deploy/apin-space . --repo-type space
@@ -38,12 +47,28 @@ SPACE_FILES = os.path.join(ROOT, "deploy", "space_files")
 # pickles, checkpoints) is either runtime history or comes from apin-models.
 CODE_PACKAGES = {
     "scripts/apin":            {".py", ".html"},
-    "scripts/apin_v2":         {".py", ".html"},
+    # scripts/apin_v2 needs .js (24 files allowlisted by /static/{filename}),
+    # .svg (console_icons.svg sprite), and .json (phase_d_data.json mirror).
+    # .md files (API_CONTRACT.md, DEPLOYMENT.md, request_detailed.md) are
+    # deliberately excluded — spec / contract docs, not runtime assets.
+    "scripts/apin_v2":         {".py", ".html", ".js", ".svg", ".json"},
     "scripts/ladi_net":        {".py"},
     "scripts/model3_training": {".py"},
     "scripts/dinov2_probe":    {".py"},
     "scripts/psv":             {".py"},
 }
+
+# Pipeline-atlas data files served by /api/pipeline_data/{slug}. They live
+# at _qa_tmp/ (outside scripts/) because the extractor scripts that produce
+# them are dev tooling — the route reads them at runtime, so they must ship.
+# The .gitignore has matching carve-outs (! prefix) for these exact names.
+PIPELINE_ATLAS_FILES = [
+    "_pipeline_atlas_router.json",
+    "_pipeline_atlas_tomato.json",
+    "_pipeline_atlas_chilli.json",
+    "_pipeline_atlas_forward_pass.json",
+    "_pipeline_atlas_phase_d.json",
+]
 SINGLE_FILES = [
     "scripts/models.py",
     # app/* config modules imported by the Model 2 / Model 3 / router code
@@ -162,6 +187,30 @@ def main():
     os.makedirs(feedback_dir, exist_ok=True)
     with open(os.path.join(feedback_dir, ".gitkeep"), "w") as f:
         f.write("")
+
+    # 6. Pipeline-atlas data files — read by /api/pipeline_data/{slug} at
+    #    runtime. Lives at _qa_tmp/ (outside scripts/) because the extractor
+    #    scripts are dev tooling. Without these the /pipeline page renders
+    #    but every module deep-dive returns 404.
+    atlas_src_dir = os.path.join(ROOT, "_qa_tmp")
+    atlas_dst_dir = os.path.join(STAGE, "_qa_tmp")
+    os.makedirs(atlas_dst_dir, exist_ok=True)
+    atlas_files = 0
+    atlas_bytes = 0
+    for fname in PIPELINE_ATLAS_FILES:
+        src = os.path.join(atlas_src_dir, fname)
+        if not os.path.exists(src):
+            print(f"  MISSING atlas file: _qa_tmp/{fname}")
+            counters["missing"].append(f"_qa_tmp/{fname}")
+            continue
+        shutil.copy2(src, os.path.join(atlas_dst_dir, fname))
+        atlas_files += 1
+        atlas_bytes += os.path.getsize(src)
+    if atlas_files:
+        print(f"  _qa_tmp atlas data        {atlas_files:4d} files  "
+              f"{atlas_bytes/1024:8.1f} KB")
+        counters["files"] += atlas_files
+        counters["bytes"] += atlas_bytes
 
     print("-" * 64)
     print(f"  TOTAL code staged: {counters['files']} files  "
