@@ -1618,6 +1618,9 @@ class UsageRecordingMiddleware:
                     body_in_truncated=req_body_truncated,
                     body_out_truncated=resp_body_truncated,
                     stage_timings=stage_timings_map,
+                    # 9.N.8g · Forward key name into SSE event so recent-
+                    # requests live rows show "test-app" instead of "·".
+                    key_name=key_record.get("name") or None,
                 )
             except Exception as e:
                 log.debug("UsageRecordingMiddleware swallow: %s", e)

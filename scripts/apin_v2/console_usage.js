@@ -1031,6 +1031,34 @@
     if (auxEl) auxEl.textContent = _recentItems.length + ' rows';
   }
 
+  // 9.N.8g · Cache of recent live SSE events keyed by the synthetic row id
+  // we assign at receive time. openRequestDetail consults this when the
+  // server returns 404 (row hasn't been flushed from the buffer to the DB
+  // yet) so the drawer can render the basic envelope from the live data
+  // instead of "failed to load request detail".
+  const _liveEventCache = new Map();   // id -> { event, capturedAt }
+  const _LIVE_CACHE_LIMIT = 200;
+  function _cacheLiveEvent(id, ev) {
+    _liveEventCache.set(id, { event: ev, capturedAt: Date.now() });
+    if (_liveEventCache.size > _LIVE_CACHE_LIMIT) {
+      // FIFO eviction — oldest first
+      const oldest = _liveEventCache.keys().next().value;
+      _liveEventCache.delete(oldest);
+    }
+  }
+
+  // 9.N.8g · key_id -> key_name lookup. Populated from availableKeys
+  // (loaded once at page boot via /api/account/keys). Used to resolve the
+  // key column on SSE events that lack key_name (older Space deploys).
+  function _resolveKeyName(ev) {
+    if (ev.key_name) return ev.key_name;
+    const ks = window.availableKeys || [];
+    const kid = ev.key_id || ev.key_public_id;
+    if (!kid) return null;
+    const match = ks.find(k => k.public_id === kid);
+    return match ? (match.name || null) : null;
+  }
+
   function _subscribeRecentToLiveStream() {
     // The live-pulse accumulator + live-stream client both publish to the
     // shared bus. We hook directly into the accumulator's subscribe API
@@ -1039,12 +1067,11 @@
     if (!accum || !accum.subscribe) return null;
     return accum.subscribe((ev, ts) => {
       if (!_recentLiveOn) return;
-      // The live event from SSE doesn't have a stable id we can reconcile
-      // against the recent-requests table — but it has timestamp+path+method
-      // +status which we can use as a synthetic row. We DO get the .id when
-      // available from the SSE frame.
+      // 9.N.8g · Generate synthetic id once (was inside object literal,
+      // which made it impossible to use the same id as the cache key).
+      const id = ev.id || ('live-' + ts + '-' + Math.random().toString(36).slice(2, 7));
       const item = {
-        id:           ev.id || ('live-' + ts + '-' + Math.random().toString(36).slice(2, 7)),
+        id:           id,
         timestamp:    ev.timestamp || new Date().toISOString().replace('T', ' '),
         method:       ev.method || 'GET',
         path:         ev.path || '/',
@@ -1053,14 +1080,18 @@
         latency_ms:   ev.latency_ms != null ? Number(ev.latency_ms) : null,
         bytes_out:    ev.bytes_out != null ? Number(ev.bytes_out) : null,
         ip:           ev.ip || null,
-        key_name:     ev.key_name || null,
-        key_public_id:ev.key_public_id || null,
+        key_name:     _resolveKeyName(ev),         // 9.N.8g · use availableKeys map
+        key_public_id:ev.key_id || ev.key_public_id || null,
         env:          ev.env || null,
       };
+      _cacheLiveEvent(id, item);                    // 9.N.8g · cache for drawer fallback
       _pendingLiveAdds.push(item);
       _scheduleLiveFlush();
     });
   }
+  // Expose the cache + resolver so openRequestDetail can read them.
+  window.APIN = window.APIN || {};
+  window.APIN._liveEventCache = _liveEventCache;
 
   function _wireRecentControls() {
     // Sortable column headers
@@ -1308,6 +1339,44 @@
     $('reqd-title').textContent = 'Request #' + rid;
     $('reqd-sub').textContent = 'loading…';
     $('reqd-body').innerHTML = '<div class="placeholder">loading&hellip;</div>';
+
+    // 9.N.8g · Synthetic live-IDs ("live-<ts>-<rand>") aren't in the DB
+    // yet — the row is still in the in-memory buffer awaiting flush.
+    // For these, render directly from the cached live event so the user
+    // sees the basic envelope instead of "failed to load request detail".
+    const ridStr = String(rid);
+    const isSyntheticLive = ridStr.indexOf('live-') === 0;
+    if (isSyntheticLive) {
+      const cached = window.APIN && APIN._liveEventCache && APIN._liveEventCache.get(rid);
+      if (cached && cached.event) {
+        const e = cached.event;
+        $('reqd-title').textContent = (e.method || '') + ' ' + (e.path || '');
+        $('reqd-sub').textContent = (e.timestamp || '') + ' UTC · key: ' + (e.key_name || e.key_public_id || '?')
+          + ' · (still buffering — full detail in ~5s)';
+        $('reqd-body').innerHTML =
+          '<div class="reqd-status-bar">' +
+            '<span class="meth ' + methClass(e.method) + '">' + escHtml(e.method || '') + '</span>' +
+            '<span class="stat ' + statusBucket(e.status_code) + '">' + (e.status_code || '') + '</span>' +
+            '<span class="path">' + escHtml(e.path || '') + '</span>' +
+          '</div>' +
+          '<div class="reqd-card" style="margin-top:14px"><h3>Live event (server flush pending)</h3>' +
+            '<div style="font-family:JetBrains Mono,monospace;font-size:12.5px;line-height:1.8;color:var(--ink)">' +
+              '<div>latency: <b>' + (e.latency_ms != null ? e.latency_ms + ' ms' : '·') + '</b></div>' +
+              '<div>bytes out: <b>' + (e.bytes_out != null ? fmtBytes(e.bytes_out) : '·') + '</b></div>' +
+              '<div>error: <b>' + (e.error_code || 'none') + '</b></div>' +
+              '<div>client ip: <b>' + escHtml(e.ip || '·') + '</b></div>' +
+            '</div>' +
+            '<p style="font-family:Fraunces,serif;font-style:italic;font-size:12.5px;color:var(--ink-soft);margin-top:14px;line-height:1.6">' +
+              'This row was just received via the live stream and hasn\'t been written to the database yet. ' +
+              'Headers, payload, stage timings, burst context, and the export snippets all appear once the buffer flushes ' +
+              '(every few seconds). Refresh the page or click again shortly to see the full detail.' +
+            '</p>' +
+          '</div>';
+        return;
+      }
+      // No cache hit — fall through to server lookup (may still 404)
+    }
+
     const { body } = await api('/api/account/usage/request/' + encodeURIComponent(rid));
     if (!body || !body.ok) {
       $('reqd-body').innerHTML = '<div class="placeholder">failed to load request detail</div>';
@@ -4383,15 +4452,29 @@
       }
     }, 200);
 
-    // Section 3: Live stats (KPI tiles auto-update from accumulator)
+    // Section 3: Live stats — 9.N.8g · KPI tiles now refresh every 1s from
+    // the shared accumulator. Previously they were snapshotted at lightbox
+    // open time and stayed frozen, which made "Error rate 0.0%" look wrong
+    // when the underlying 30s window had actually shifted.
     _appendSection(panel, 'Live stats (last 30s)',
-      _kpiGrid([
-        _kpiTile('Rate',       stats30.rate.toFixed(1) + '/sec',  'rolling 30s avg'),
-        _kpiTile('p50',        fmtNum(stats30.p50) + 'ms',         null),
-        _kpiTile('p95',        fmtNum(stats30.p95) + 'ms',         null),
-        _kpiTile('Error rate', stats30.errorRate.toFixed(1) + '%', null),
-      ])
-    );
+      '<div id="lb-pulse-kpis"></div>');
+    function _renderPulseKpis() {
+      const host = document.getElementById('lb-pulse-kpis');
+      if (!host) return false;            // host gone — stop ticking
+      const cur = accum ? accum.rollingStats(30)
+                        : { rate:0, errorRate:0, p50:0, p95:0, totalCount:0, totalErrors:0 };
+      host.innerHTML = _kpiGrid([
+        _kpiTile('Rate',       cur.rate.toFixed(1) + '/sec',  'rolling 30s avg'),
+        _kpiTile('p50',        fmtNum(cur.p50) + 'ms',         cur.totalCount + ' samples'),
+        _kpiTile('p95',        fmtNum(cur.p95) + 'ms',         null),
+        _kpiTile('Error rate', cur.errorRate.toFixed(1) + '%', (cur.totalErrors||0) + ' / ' + (cur.totalCount||0)),
+      ]);
+      return true;
+    }
+    _renderPulseKpis();
+    const _kpiTimer = setInterval(() => {
+      if (!_renderPulseKpis()) clearInterval(_kpiTimer);   // unmount cleanup
+    }, 1000);
 
     // Section 4: Active endpoints (last 5min from accumulator events)
     if (accum) {

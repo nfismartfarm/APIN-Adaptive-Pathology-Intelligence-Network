@@ -617,6 +617,15 @@
         if (toggle === 'metric') {
           state.metric = val;
           metricLbl.textContent = METRIC_DEFS[val].label;
+          // 9.N.8g · Reset Y-axis EMA when metric changes — otherwise the
+          // _displayMax from a previous metric (e.g. bytes/sec ~ 10000) is
+          // carried over and the new metric (e.g. req/sec ~ 5) renders as
+          // a tiny line until the EMA decays. Resetting forces _draw() to
+          // re-initialise _displayMax from the new metric's target on the
+          // next tick.
+          _displayMax = null;
+          _lastTickMax = null;       // force tick relabel on next paint
+          _lastTickMetric = null;
         }
         if (toggle === 'window') {
           state.windowSec = Number(val);

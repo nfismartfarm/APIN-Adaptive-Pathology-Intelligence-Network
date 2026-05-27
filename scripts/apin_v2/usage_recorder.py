@@ -272,7 +272,12 @@ def record_request(*, key_id: str, user_id: int,
                     body_out_ctype: Optional[str] = None,
                     body_in_truncated: bool = False,
                     body_out_truncated: bool = False,
-                    stage_timings: Optional[Dict[str, int]] = None) -> None:
+                    stage_timings: Optional[Dict[str, int]] = None,
+                    # 9.N.8g · Human-readable key label, forwarded into the
+                    # SSE event so the live recent-requests table shows the
+                    # key name (e.g. "test-app") instead of "·". Not persisted
+                    # to the DB — name lives in api_keys table already.
+                    key_name: Optional[str] = None) -> None:
     """Public entry point. Called from `_record_usage` in the decorator.
 
     Never raises. If anything goes wrong, log + swallow (this runs inside
@@ -327,7 +332,7 @@ def record_request(*, key_id: str, user_id: int,
         # SSE subscribers watching this user's stream. The publish is sync +
         # non-blocking (uses put_nowait + drop-oldest backpressure) so this
         # cannot slow down the request path.
-        _publish_stream_event(row, rate_limited, quota_blocked)
+        _publish_stream_event(row, rate_limited, quota_blocked, key_name=key_name)
     except Exception as e:
         log.debug("usage_recorder.record_request failed (non-fatal): %s", e)
 
@@ -413,10 +418,15 @@ def get_stream_bus() -> _AccountStreamBus:
 
 
 def _publish_stream_event(row: "_RequestRow",
-                            rate_limited: bool, quota_blocked: bool) -> None:
+                            rate_limited: bool, quota_blocked: bool,
+                            key_name: Optional[str] = None) -> None:
     """Fire-and-forget SSE publish. Called after a successful record_request
     so dashboard subscribers see the row in near-real-time. Failures are
     silently dropped — recording always succeeds even if streaming is dead.
+
+    9.N.8g · Now includes `key_name` so the recent-requests table can
+    display the human-readable label on live-pushed rows. Without this,
+    rows showed "·" (the fallback) until the user refreshed the page.
     """
     try:
         event = {
@@ -425,6 +435,7 @@ def _publish_stream_event(row: "_RequestRow",
             # Full row is fetchable via /api/account/usage/request/{id}.
             "timestamp": row.timestamp,
             "key_id": row.key_id,
+            "key_name": key_name,       # 9.N.8g · resolves "·" placeholder
             "method": row.method,
             "path": row.path,
             "status_code": row.status_code,
