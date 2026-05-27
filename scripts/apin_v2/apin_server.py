@@ -3185,32 +3185,44 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
         cutoff_24h = (now - _td2(hours=24)).strftime("%Y-%m-%dT%H:%M:%S.%f")
         cutoff_7d  = (now - _td2(days=7)).strftime("%Y-%m-%dT%H:%M:%S.%f")
 
+        # _ShimRow (the libsql HTTP shim's row class) supports __getitem__
+        # by name but NOT .get() — we have to convert to dict explicitly
+        # before using dict-style .get() helpers. _row_to_dict handles both
+        # _ShimRow and sqlite3.Row + tolerates None for empty result sets.
+        def _row_to_dict(r):
+            if r is None:
+                return {}
+            try:
+                return dict(r)
+            except Exception:
+                return {}
+
         with _adb.get_conn() as conn:
             # ── KPI rollup: 24h / 7d totals + p95 + last probe time ──
-            row24 = conn.execute(
+            row24 = _row_to_dict(conn.execute(
                 "SELECT COUNT(*) AS n, SUM(success) AS ok, MAX(issued_at_utc) AS last_at "
                 "FROM external_probes WHERE issued_at_utc >= ?",
                 (cutoff_24h,)
-            ).fetchone()
-            row7 = conn.execute(
+            ).fetchone())
+            row7 = _row_to_dict(conn.execute(
                 "SELECT COUNT(*) AS n, SUM(success) AS ok FROM external_probes "
                 "WHERE issued_at_utc >= ?", (cutoff_7d,)
-            ).fetchone()
-            row90 = conn.execute(
+            ).fetchone())
+            row90 = _row_to_dict(conn.execute(
                 "SELECT COUNT(*) AS n, SUM(success) AS ok FROM external_probes"
-            ).fetchone()
+            ).fetchone())
 
-            n24  = int((row24 or {})["n"] or 0)
-            ok24 = int((row24 or {})["ok"] or 0)
-            n7   = int((row7  or {})["n"]  or 0)
-            ok7  = int((row7  or {})["ok"] or 0)
-            n90  = int((row90 or {})["n"]  or 0)
-            ok90 = int((row90 or {})["ok"] or 0)
+            n24  = int(row24.get("n")  or 0)
+            ok24 = int(row24.get("ok") or 0)
+            n7   = int(row7.get("n")   or 0)
+            ok7  = int(row7.get("ok")  or 0)
+            n90  = int(row90.get("n")  or 0)
+            ok90 = int(row90.get("ok") or 0)
 
             up24 = round(100.0 * ok24 / n24, 3) if n24 else None
             up7  = round(100.0 * ok7  / n7,  3) if n7  else None
             up90 = round(100.0 * ok90 / n90, 3) if n90 else None
-            last_at = (row24 or {}).get("last_at") if row24 else None
+            last_at = row24.get("last_at")
 
             # p95 over last 24h
             p95 = None
@@ -3223,6 +3235,7 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
                     (cutoff_24h,)
                 ).fetchall()
                 if lats:
+                    # _ShimRow supports __getitem__ by both index AND name
                     arr = [int(r["total_ms"]) for r in lats]
                     p50 = arr[int(len(arr) * 0.50)]
                     p95 = arr[int(len(arr) * 0.95)] if len(arr) >= 2 else arr[-1]
@@ -3242,16 +3255,16 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
             ).fetchall()
             sources = []
             for r in src_rows:
-                rs = dict(r)
-                src_n  = int(rs["n"] or 0)
-                src_ok = int(rs["ok"] or 0)
+                rs = _row_to_dict(r)
+                src_n  = int(rs.get("n")  or 0)
+                src_ok = int(rs.get("ok") or 0)
                 sources.append({
-                    "name":       rs["probe_source"],
+                    "name":       rs.get("probe_source"),
                     "probes_24h": src_n,
                     "ok_24h":     src_ok,
                     "uptime_pct": round(100.0 * src_ok / src_n, 2) if src_n else None,
-                    "avg_ms":     round(float(rs["avg_ms"] or 0)),
-                    "last_at":    rs["last_at"],
+                    "avg_ms":     round(float(rs.get("avg_ms") or 0)),
+                    "last_at":    rs.get("last_at"),
                 })
 
             # ── 90-day daily bars ────────────────────────────────────
@@ -3263,7 +3276,10 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
                 "WHERE day >= ?",
                 (day_keys[0],)
             ).fetchall()
-            rollup_map = {dict(r)["day"]: dict(r) for r in rollup_rows}
+            rollup_map = {}
+            for r in rollup_rows:
+                rd = _row_to_dict(r)
+                rollup_map[rd.get("day")] = rd
 
             # Aggregate any days missing from rollup by querying raw
             missing = [dk for dk in day_keys if dk not in rollup_map]
@@ -3280,10 +3296,10 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
                     missing
                 ).fetchall()
                 for r in raw_rows:
-                    rd = dict(r)
-                    n = int(rd["n"] or 0)
-                    ok = int(rd["ok"] or 0)
-                    raw_map[rd["day"]] = {
+                    rd = _row_to_dict(r)
+                    n = int(rd.get("n") or 0)
+                    ok = int(rd.get("ok") or 0)
+                    raw_map[rd.get("day")] = {
                         "uptime_pct": round(100.0 * ok / n, 2) if n else None,
                         "probes_total":  n,
                         "probes_failed": n - ok,
@@ -3316,7 +3332,7 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
                 "FROM external_probes "
                 "ORDER BY id DESC LIMIT 50"
             ).fetchall()
-            recent = [dict(r) for r in rec_rows]
+            recent = [_row_to_dict(r) for r in rec_rows]
 
             # ── Recent incidents (failed probe runs, grouped into windows) ──
             inc_rows = conn.execute(
@@ -3327,7 +3343,7 @@ def _collect_external_availability_snapshot(day_keys: list) -> dict:
                 "ORDER BY issued_at_utc DESC LIMIT 50",
                 (cutoff_7d,)
             ).fetchall()
-            incidents = [dict(r) for r in inc_rows]
+            incidents = [_row_to_dict(r) for r in inc_rows]
 
         out["available"] = (n90 > 0)
         out["kpis"] = {
