@@ -1134,6 +1134,7 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
     cut     = (now - _td(minutes=win_min)).strftime("%Y-%m-%d %H:%M:%S.%f")
     cut_min = (now - _td(minutes=win_min)).strftime("%Y-%m-%d %H:%M")
     cut_cal = (now - _td(days=371)).strftime("%Y-%m-%d %H:%M:%S.%f")
+    cut_wk  = (now - _td(days=28)).strftime("%Y-%m-%d %H:%M:%S.%f")  # weekday×hour window
     out = {"public_id": public_id, "granularity": granularity, "tz_off": tz_off}
 
     def _utc_ms(local_naive):
@@ -1182,6 +1183,22 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
              "GROUP BY method, sb", (public_id, cut)),
             ("SELECT public_id, name FROM api_keys WHERE user_id=? AND deleted_at IS NULL",
              (user_id,)),
+            # weekday × hour matrix (local), last 28 days — for the clock expand
+            (f"SELECT CAST(strftime('%w', datetime(substr(timestamp,1,19), ?)) AS INTEGER) AS wd, "
+             f"CAST({hexpr} AS INTEGER) AS hr, COUNT(*) AS n "
+             "FROM api_key_request_log WHERE key_id=? AND timestamp>=? GROUP BY wd, hr",
+             (modifier, modifier, public_id, cut_wk)),
+            # largest single request in the bytes window — for the bytes expand
+            ("SELECT id, method, path, timestamp, COALESCE(bytes_in,0) AS bin, "
+             "COALESCE(bytes_out,0) AS bout FROM api_key_request_log "
+             "WHERE key_id=? AND timestamp>=? "
+             "ORDER BY (COALESCE(bytes_in,0)+COALESCE(bytes_out,0)) DESC LIMIT 1",
+             (public_id, cut)),
+            # payload byte values (bounded) — percentiles computed in Python
+            ("SELECT COALESCE(bytes_in,0) AS bin, COALESCE(bytes_out,0) AS bout "
+             "FROM api_key_request_log WHERE key_id=? AND timestamp>=? "
+             "AND (bytes_in IS NOT NULL OR bytes_out IS NOT NULL) LIMIT 5000",
+             (public_id, cut)),
         ]
         if hasattr(c, "batch_read"):
             try:
@@ -1191,7 +1208,8 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
                 res = [_rows(s, a) for s, a in READS]
         else:
             res = [_rows(s, a) for s, a in READS]
-        bucket_rows, cal_rows, clock_rows, ep_rows, peak_rows, matrix_rows, key_rows = res
+        (bucket_rows, cal_rows, clock_rows, ep_rows, peak_rows, matrix_rows,
+         key_rows, wkhr_rows, largest_rows, pctval_rows) = res
 
         key = next((r for r in key_rows if r.get("public_id") == public_id), None)
         if key is None:
@@ -1286,6 +1304,23 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
                          for i in range(nb)]
         total_in, total_out = sum(bina), sum(bouta)
         total_req = sum(h["total"] for h in hero)
+        # payload-size percentiles (computed in Python from bounded value list)
+        def _pctile(vals, p):
+            if not vals:
+                return 0
+            s = sorted(vals)
+            k = min(len(s) - 1, int(round((p / 100.0) * (len(s) - 1))))
+            return int(s[k])
+        bins = [int(r.get("bin") or 0) for r in pctval_rows if (r.get("bin") or 0) > 0]
+        bouts = [int(r.get("bout") or 0) for r in pctval_rows if (r.get("bout") or 0) > 0]
+        pct = ({"in_p50": _pctile(bins, 50), "in_p95": _pctile(bins, 95),
+                "out_p50": _pctile(bouts, 50)} if (bins or bouts) else None)
+        largest = None
+        if largest_rows and (int(largest_rows[0].get("bin") or 0) + int(largest_rows[0].get("bout") or 0)) > 0:
+            lr = largest_rows[0]
+            largest = {"id": lr.get("id"), "method": lr.get("method"),
+                       "path": lr.get("path"), "ts": lr.get("timestamp"),
+                       "bin": int(lr.get("bin") or 0), "bout": int(lr.get("bout") or 0)}
         out["bytes"] = {
             "buckets": bytes_buckets, "total_in": total_in, "total_out": total_out,
             "avg_in": round(total_in / total_req) if total_req else 0,
@@ -1294,6 +1329,7 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
             "by_endpoint": [{"path": r["path"], "bout": int(r.get("bout") or 0),
                              "bin": int(r.get("bin") or 0), "n": int(r.get("n") or 0)}
                             for r in ep_rows],
+            "largest": largest, "pct": pct,
         }
 
         n2t, n4t, n5t = sum(n2a), sum(n4a), sum(n5a)
@@ -1316,6 +1352,15 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
                 continue
             if 0 <= h < 24:
                 ch[h] = int(r.get("n") or 0); ce[h] = int(r.get("e") or 0)
+        # weekday × hour matrix (rows Mon..Sun, cols 0..23); SQLite %w: 0=Sun
+        wkhr = [[0] * 24 for _ in range(7)]
+        for r in wkhr_rows:
+            try:
+                wd_sql = int(r.get("wd")); hr = int(r.get("hr"))
+            except Exception:
+                continue
+            if 0 <= wd_sql < 7 and 0 <= hr < 24:
+                wkhr[(wd_sql + 6) % 7][hr] += int(r.get("n") or 0)
         out["clock"] = {
             "hours": [{"h": h, "n": ch[h], "e": ce[h],
                        "err_pct": round(100 * ce[h] / ch[h], 1) if ch[h] else 0}
@@ -1323,6 +1368,7 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
             "max": max(ch) if ch else 0,
             "busiest_h": (max(range(24), key=lambda h: ch[h]) if any(ch) else None),
             "now_h": now_local.hour, "now_min": now_local.minute,
+            "wkhr": (wkhr if any(any(row) for row in wkhr) else None),
         }
 
         # ── calendar: last ~52 weeks, daily (local dates) ──

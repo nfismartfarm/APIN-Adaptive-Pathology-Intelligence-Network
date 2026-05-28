@@ -164,50 +164,71 @@
     paint();
   }
 
-  // ════════════════════ ① HERO — segmented blocks + brush/zoom ════════════
+  // ════════════════════ ① HERO — segmented blocks + draggable scrubber ════
   const HERO_W = 760, HERO_H = 200, MAXBLOCKS = 14, BLK_H = 9, BLK_GAP = 3, BASE_OFF = 30;
+  const SEG_DEFS = [["n2", "ok", "2xx"], ["n4", "amber", "4xx"], ["n5", "danger", "5xx"]];
   function heroSvg(buckets, max, off) {
     const col = _C(), n = buckets.length || 1;
     const slotW = HERO_W / n, bw = Math.max(6, Math.min(30, slotW - 7));
     const baseY = HERO_H - BASE_OFF;
     const stride = Math.max(1, Math.ceil(n / 12));
-    let bars = "", labels = "", hits = "";
+    let bars = "", labels = "", segHits = "", colHits = "";
     buckets.forEach((b, i) => {
+      const ai = i + (off || 0);              // absolute bucket index
       const cx = i * slotW + slotW / 2, x = cx - bw / 2;
       const blocks = b.total > 0 ? Math.max(1, Math.round(b.total / (max || 1) * MAXBLOCKS)) : 0;
       const g = Math.round(blocks * (b.n2 / (b.total || 1)));
       const a = Math.round(blocks * (b.n4 / (b.total || 1)));
-      let y = baseY;
+      // colored blocks, tagged by status so hover can highlight one band
+      let y = baseY, kg = 0;
       for (let k = 0; k < blocks; k++) {
-        y -= BLK_H; const color = k < g ? col.ok : k < g + a ? col.amber : col.danger;
-        bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${BLK_H - BLK_GAP}" rx="2" fill="${color}"/>`;
+        y -= BLK_H;
+        const st = k < g ? "n2" : k < g + a ? "n4" : "n5";
+        const color = st === "n2" ? col.ok : st === "n4" ? col.amber : col.danger;
+        bars += `<rect class="tf-blk" data-i="${ai}" data-st="${st}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${BLK_H - BLK_GAP}" rx="2" fill="${color}"/>`;
         y -= BLK_GAP;
       }
       if (i % stride === 0) {
         labels += `<text x="${cx.toFixed(1)}" y="${baseY + 13}" text-anchor="middle" style="font:9.5px 'JetBrains Mono',monospace;fill:var(--ink-soft)">${esc(b.label)}</text>`;
         if (b.sub) labels += `<text x="${cx.toFixed(1)}" y="${baseY + 24}" text-anchor="middle" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${esc(b.sub)}</text>`;
       }
-      hits += `<rect class="tf-bar" data-i="${i + (off || 0)}" x="${(i * slotW).toFixed(1)}" y="0" width="${slotW.toFixed(1)}" height="${baseY}" fill="transparent"/>`;
+      // whole-column hit (drills the full bucket) — painted first (under segments)
+      colHits += `<rect class="tf-bar" data-i="${ai}" x="${(i * slotW).toFixed(1)}" y="0" width="${slotW.toFixed(1)}" height="${baseY}" fill="transparent"/>`;
+      // per-status segment hit zones over the bar bands (painted last → win clicks)
+      const blkPx = BLK_H;
+      const bands = [["n2", g], ["n4", a], ["n5", Math.max(0, blocks - g - a)]];
+      let topUsed = 0;
+      bands.forEach(([st, cnt]) => {
+        if (cnt <= 0) return;
+        const yTop = baseY - (topUsed + cnt) * blkPx, hgt = cnt * blkPx;
+        segHits += `<rect class="tf-seg" data-i="${ai}" data-st="${st}" x="${(i * slotW).toFixed(1)}" y="${yTop.toFixed(1)}" width="${slotW.toFixed(1)}" height="${hgt.toFixed(1)}" fill="transparent"/>`;
+        topUsed += cnt;
+      });
     });
     return `<svg class="tf-hero-svg" viewBox="0 0 ${HERO_W} ${HERO_H}" preserveAspectRatio="none" style="height:${HERO_H}px">
-      <line x1="0" y1="${baseY}" x2="${HERO_W}" y2="${baseY}" stroke="var(--paper-edge)" stroke-width="1"/>${bars}${labels}${hits}</svg>`;
+      <line x1="0" y1="${baseY}" x2="${HERO_W}" y2="${baseY}" stroke="var(--paper-edge)" stroke-width="1"/>${bars}${labels}${colHits}${segHits}</svg>`;
   }
-  // brush strip: a thin overview of ALL buckets with a draggable window.
-  const BR_W = 760, BR_H = 34;
+  // scrubber strip: overview of ALL buckets with a grab-to-pan / drag-edge-to-resize window.
+  const BR_W = 760, BR_H = 36;
   function brushSvg(buckets, max, z) {
     const col = _C(), n = buckets.length || 1, sw = BR_W / n;
     let bars = "";
     buckets.forEach((b, i) => {
-      const h = b.total > 0 ? Math.max(2, (b.total / (max || 1)) * (BR_H - 6)) : 1;
+      const h = b.total > 0 ? Math.max(2, (b.total / (max || 1)) * (BR_H - 8)) : 1;
       const er = b.total ? (b.n4 + b.n5) / b.total : 0;
       const fill = b.total === 0 ? "rgba(120,110,90,.14)" : er > 0.1 ? col.danger : er > 0 ? col.amber : col.accent;
       bars += `<rect x="${(i * sw + 1).toFixed(1)}" y="${(BR_H - h).toFixed(1)}" width="${Math.max(1, sw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="1" fill="${fill}" fill-opacity="${b.total ? 0.7 : 1}"/>`;
     });
     const x0 = (z.i0 / n) * BR_W, x1 = ((z.i1 + 1) / n) * BR_W;
-    const win = `<rect class="tf-brush-win" x="${x0.toFixed(1)}" y="0" width="${(x1 - x0).toFixed(1)}" height="${BR_H}" fill="rgba(82,183,136,.14)" stroke="var(--ink)" stroke-width="1.2"/>
-      <rect class="tf-brush-h" data-edge="0" x="${(x0 - 3).toFixed(1)}" y="0" width="6" height="${BR_H}" fill="var(--ink)" fill-opacity=".0" style="cursor:ew-resize"/>
-      <rect class="tf-brush-h" data-edge="1" x="${(x1 - 3).toFixed(1)}" y="0" width="6" height="${BR_H}" fill="var(--ink)" fill-opacity=".0" style="cursor:ew-resize"/>`;
-    return `<svg class="tf-brush-svg" viewBox="0 0 ${BR_W} ${BR_H}" preserveAspectRatio="none" style="height:${BR_H}px;width:100%;cursor:crosshair">${bars}${win}</svg>`;
+    // dim the regions OUTSIDE the window so the scrubber reads as a lens
+    const shade = `<rect x="0" y="0" width="${x0.toFixed(1)}" height="${BR_H}" fill="var(--paper)" fill-opacity=".62" pointer-events="none"/>
+      <rect x="${x1.toFixed(1)}" y="0" width="${(BR_W - x1).toFixed(1)}" height="${BR_H}" fill="var(--paper)" fill-opacity=".62" pointer-events="none"/>`;
+    const gripDots = (gx) => [0.32, 0.5, 0.68].map(f =>
+      `<circle cx="${gx}" cy="${(BR_H * f).toFixed(1)}" r="1.1" fill="var(--paper)"/>`).join("");
+    const win = `<rect class="tf-brush-win" x="${x0.toFixed(1)}" y="0" width="${(x1 - x0).toFixed(1)}" height="${BR_H}" fill="rgba(82,183,136,.10)" stroke="var(--ink)" stroke-width="1.3"/>
+      <g class="tf-brush-h" data-edge="0" style="cursor:ew-resize"><rect x="${(x0 - 4).toFixed(1)}" y="0" width="8" height="${BR_H}" rx="2" fill="var(--ink)"/>${gripDots(x0)}</g>
+      <g class="tf-brush-h" data-edge="1" style="cursor:ew-resize"><rect x="${(x1 - 4).toFixed(1)}" y="0" width="8" height="${BR_H}" rx="2" fill="var(--ink)"/>${gripDots(x1)}</g>`;
+    return `<svg class="tf-brush-svg" viewBox="0 0 ${BR_W} ${BR_H}" preserveAspectRatio="none" style="height:${BR_H}px;width:100%">${bars}${shade}${win}</svg>`;
   }
   function _heroWindow(total) {
     const n = total;
@@ -223,52 +244,106 @@
     const zoomed = z.i0 > 0 || z.i1 < h.buckets.length - 1;
     host.innerHTML =
       `<div class="tf-hero-main">${heroSvg(slice, sliceMax, z.i0)}</div>
-       <div class="tf-brush-wrap"><div class="tf-brush-cap">${zoomed ? `showing ${z.i0 + 1}–${z.i1 + 1} of ${h.buckets.length} · <button class="tf-brush-reset" id="tf-brush-reset">reset zoom</button>` : `drag below to zoom`}</div>${brushSvg(h.buckets, h.max, z)}</div>`;
+       <div class="tf-brush-wrap"><div class="tf-brush-cap">${zoomed ? `showing ${z.i0 + 1}–${z.i1 + 1} of ${h.buckets.length} · <button class="tf-brush-reset" id="tf-brush-reset">reset</button>` : `drag the scrubber to zoom · grab the middle to pan`}</div>${brushSvg(h.buckets, h.max, z)}</div>`;
     _wireHeroMain(host.querySelector(".tf-hero-main"), h.buckets, intro);
-    _wireBrush(host.querySelector(".tf-brush-wrap"), h.buckets, () => heroChart(host, false));
+    _wireBrush(host.querySelector(".tf-brush-wrap"), h.buckets, z, () => heroChart(host, false));
     const rs = host.querySelector("#tf-brush-reset");
     if (rs) rs.addEventListener("click", () => { _zoom = null; heroChart(host, false); });
   }
+  function _segDrill(b, st) {
+    if (!b || !b.total) return;
+    const stLabel = st === "n2" ? "2xx" : st === "n4" ? "4xx" : "5xx";
+    openRequestContainer({
+      sinceMs: b.t_ms, untilMs: b.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN] || 3600e3),
+      label: (b.label + (b.sub ? " " + b.sub : "")) + " · " + stLabel, status: stLabel,
+    });
+  }
   function _wireHeroMain(main, buckets, intro) {
     const svg = main.querySelector("svg"); if (!svg) return;
+    const dimOthers = (ai, st) => svg.querySelectorAll(".tf-blk").forEach(blk => {
+      const on = st == null || (+blk.getAttribute("data-i") === ai && blk.getAttribute("data-st") === st);
+      blk.style.opacity = (st == null) ? "1" : (on ? "1" : "0.22");
+    });
+    // per-status segment: hover highlights just that band, click drills that status
+    svg.querySelectorAll(".tf-seg").forEach(seg => {
+      const ai = +seg.getAttribute("data-i"), st = seg.getAttribute("data-st");
+      seg.style.cursor = "pointer";
+      seg.addEventListener("mousemove", (e) => {
+        const b = buckets[ai]; if (!b) return;
+        const cnt = st === "n2" ? b.n2 : st === "n4" ? b.n4 : b.n5;
+        const stL = st === "n2" ? "2xx" : st === "n4" ? "4xx" : "5xx";
+        tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}${b.sub ? " · " + esc(b.sub) : ""}</b><br>${stL}: ${fmtNum(cnt)} of ${fmtNum(b.total)} req<br><span style="opacity:.7">click → these requests</span>`);
+        dimOthers(ai, st);
+      });
+      seg.addEventListener("mouseleave", () => { tip(false); dimOthers(null); });
+      seg.addEventListener("click", (e) => { e.stopPropagation(); _segDrill(buckets[ai], st); });
+    });
+    // whole-column hit (area above the bar): drills the entire bucket
     svg.querySelectorAll(".tf-bar").forEach(hrect => {
+      const ai = +hrect.getAttribute("data-i");
       hrect.addEventListener("mousemove", (e) => {
-        const b = buckets[+hrect.getAttribute("data-i")]; if (!b) return;
+        const b = buckets[ai]; if (!b) return;
         const errp = b.total ? Math.round(100 * (b.n4 + b.n5) / b.total) : 0;
-        tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}${b.sub ? " · " + esc(b.sub) : ""}</b><br>${fmtNum(b.total)} req · 2xx ${b.n2} · 4xx ${b.n4} · 5xx ${b.n5} · ${errp}% err`);
+        tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}${b.sub ? " · " + esc(b.sub) : ""}</b><br>${fmtNum(b.total)} req · 2xx ${b.n2} · 4xx ${b.n4} · 5xx ${b.n5} · ${errp}% err<br><span style="opacity:.7">click → all requests · click a colour band for one status</span>`);
       });
       hrect.addEventListener("mouseleave", () => tip(false));
       hrect.addEventListener("click", () => {
-        const b = buckets[+hrect.getAttribute("data-i")];
+        const b = buckets[ai];
         if (b && b.total) openRequestContainer({ sinceMs: b.t_ms, untilMs: b.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN] || 3600e3), label: b.label + (b.sub ? " " + b.sub : "") });
       });
     });
-    if (intro && window.APIN && APIN.fx) svg.querySelectorAll("rect[rx]").forEach((r, k) => {
+    if (intro && window.APIN && APIN.fx) svg.querySelectorAll(".tf-blk").forEach((r, k) => {
       try { r.animate([{ transform: "scaleY(0)", transformOrigin: "center bottom" }, { transform: "scaleY(1)", transformOrigin: "center bottom" }], { duration: 320, delay: Math.min(600, k * 4), easing: "cubic-bezier(.22,1,.36,1)", fill: "backwards" }); } catch (_) {}
     });
   }
-  function _wireBrush(wrap, buckets, rerender) {
+  // Real scrubber: grab the middle to PAN (keeps width), drag a handle to RESIZE.
+  function _wireBrush(wrap, buckets, z, rerender) {
     const svg = wrap.querySelector(".tf-brush-svg"); if (!svg) return;
     const n = buckets.length;
     const idxAt = (clientX) => {
       const r = svg.getBoundingClientRect();
+      if (!r.width) return 0;
       return Math.max(0, Math.min(n - 1, Math.floor(((clientX - r.left) / r.width) * n)));
     };
-    let mode = null, anchor = 0;
+    let mode = null, grabIdx = 0, origI0 = z.i0, origI1 = z.i1;
     const onMove = (e) => {
       if (!mode) return;
       const i = idxAt(e.clientX);
-      if (mode === "new") { _zoom = { i0: Math.min(anchor, i), i1: Math.max(anchor, i) }; }
-      else if (mode === "e0") { _zoom = { i0: Math.min(i, _zoom.i1), i1: _zoom.i1 }; }
-      else if (mode === "e1") { _zoom = { i0: _zoom.i0, i1: Math.max(i, _zoom.i0) }; }
+      if (mode === "e0") { _zoom = { i0: Math.min(i, (_zoom || z).i1), i1: (_zoom || z).i1 }; }
+      else if (mode === "e1") { _zoom = { i0: (_zoom || z).i0, i1: Math.max(i, (_zoom || z).i0) }; }
+      else if (mode === "pan") {
+        const w = origI1 - origI0 + 1;
+        let ni0 = origI0 + (i - grabIdx);
+        ni0 = Math.max(0, Math.min(n - w, ni0));
+        _zoom = { i0: ni0, i1: ni0 + w - 1 };
+      }
       rerender();
     };
-    const onUp = () => { mode = null; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    const onUp = () => {
+      mode = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+    };
     svg.addEventListener("mousedown", (e) => {
       const edge = e.target.closest(".tf-brush-h");
-      if (edge) { mode = edge.getAttribute("data-edge") === "0" ? "e0" : "e1"; if (!_zoom) _zoom = { i0: 0, i1: n - 1 }; }
-      else { mode = "new"; anchor = idxAt(e.clientX); _zoom = { i0: anchor, i1: anchor }; }
-      window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp); rerender();
+      const cur = _zoom || z;
+      origI0 = cur.i0; origI1 = cur.i1;
+      if (edge) { mode = edge.getAttribute("data-edge") === "0" ? "e0" : "e1"; _zoom = { i0: cur.i0, i1: cur.i1 }; }
+      else {
+        // grab inside (or anywhere on) the strip → pan from this point
+        mode = "pan"; grabIdx = idxAt(e.clientX);
+        // if click landed outside the current window, recenter window on it first
+        if (grabIdx < cur.i0 || grabIdx > cur.i1) {
+          const w = cur.i1 - cur.i0 + 1;
+          let ni0 = Math.max(0, Math.min(n - w, grabIdx - Math.floor(w / 2)));
+          origI0 = ni0; origI1 = ni0 + w - 1; grabIdx = ni0 + Math.floor(w / 2);
+          _zoom = { i0: origI0, i1: origI1 };
+        }
+      }
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+      rerender();
     });
   }
   function renderHero(intro) {
@@ -379,34 +454,60 @@
     for (let i = 0; i < 6; i++) { const a = Math.PI / 180 * (60 * i - 90); p += (i ? "L" : "M") + (cx + r * Math.cos(a)).toFixed(1) + " " + (cy + r * Math.sin(a)).toFixed(1) + " "; }
     return p + "Z";
   }
-  function hiveSvg(matrix, size) {
+  const _kc = (n) => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
+  function hiveSvg(matrix) {
     const col = _C();
     const cols = [{ k: "n2", lbl: "2xx", c: col.ok }, { k: "n4", lbl: "4xx", c: col.amber }, { k: "n5", lbl: "5xx", c: col.danger }];
     const rows = matrix.filter(m => m.total > 0);
     if (!rows.length) return `<div class="tf-empty">No requests to map yet.</div>`;
     const allMax = Math.max(1, ...rows.flatMap(m => [m.n2, m.n4, m.n5]));
-    const rH = 58, hexR = 22, ox = 64, oy = 30, colW = 70;
-    const W = ox + cols.length * colW + 30, H = oy + rows.length * rH + 10;
-    let body = "", head = "";
-    cols.forEach((c, ci) => { head += `<text x="${ox + ci * colW + (ci % 2 ? rH * 0 : 0)}" y="16" text-anchor="middle" style="font:600 10px 'JetBrains Mono',monospace;fill:${c.c}">${c.lbl}</text>`; });
-    rows.forEach((m, ri) => {
-      const cy = oy + ri * rH + hexR;
-      body += `<text x="${ox - 24}" y="${cy + 4}" text-anchor="end" style="font:600 11px 'JetBrains Mono',monospace;fill:var(--ink)">${esc(m.method)}</text>`;
-      cols.forEach((c, ci) => {
-        const v = m[c.k] || 0;
-        const cx = ox + ci * colW + (ri % 2 ? 14 : 0);   // honeycomb offset on alt rows
-        const r = v > 0 ? Math.max(7, hexR * Math.sqrt(v / allMax)) : 4;
-        const fill = v > 0 ? c.c : "rgba(120,110,90,.10)";
-        body += `<path class="tf-hex" data-m="${esc(m.method)}" data-s="${c.lbl}" data-v="${v}" d="${_hexPath(cx, cy, r)}" fill="${fill}" fill-opacity="${v > 0 ? 0.82 : 1}" stroke="var(--paper)" stroke-width="1.5"/>`;
-        if (v > 0) body += `<text x="${cx}" y="${cy + 3}" text-anchor="middle" pointer-events="none" style="font:600 9px 'JetBrains Mono',monospace;fill:var(--paper)">${v >= 1000 ? (v / 1000).toFixed(1) + "k" : v}</text>`;
-      });
+    const methodMax = Math.max(1, ...rows.map(m => m.total));
+    const stTot = { n2: 0, n4: 0, n5: 0 };
+    rows.forEach(m => { stTot.n2 += m.n2; stTot.n4 += m.n4; stTot.n5 += m.n5; });
+    const rH = 64, hexR = 26, ox = 74, oy = 46, colW = 74;
+    const railX = ox + cols.length * colW + 16, railW = 86;
+    const W = railX + railW + 8, H = oy + rows.length * rH + 20;
+    let head = "", body = "";
+    // column headers (status label + column total)
+    cols.forEach((c, ci) => {
+      const cxh = ox + ci * colW;
+      head += `<text x="${cxh}" y="20" text-anchor="middle" style="font:600 10px 'JetBrains Mono',monospace;fill:${c.c}">${c.lbl}</text>
+        <text x="${cxh}" y="33" text-anchor="middle" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${_kc(stTot[c.k])}</text>`;
     });
-    return `<svg class="tf-hive-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="max-height:${H}px;width:100%">${head}${body}</svg>`;
+    head += `<text x="${railX + railW / 2}" y="20" text-anchor="middle" style="font:600 9px 'JetBrains Mono',monospace;fill:var(--ink-soft)">method total</text>`;
+    rows.forEach((m, ri) => {
+      const cy = oy + ri * rH + hexR, off = (ri % 2 ? 14 : 0);
+      body += `<text x="${ox - 30}" y="${cy + 4}" text-anchor="end" style="font:600 11px 'JetBrains Mono',monospace;fill:var(--ink)">${esc(m.method)}</text>`;
+      cols.forEach((c, ci) => {
+        const v = m[c.k] || 0, cx = ox + ci * colW + off;
+        const r = v > 0 ? Math.max(9, hexR * Math.sqrt(v / allMax)) : 5;
+        const fill = v > 0 ? c.c : "rgba(120,110,90,.08)";
+        body += `<path class="tf-hex" data-m="${esc(m.method)}" data-s="${c.lbl}" data-v="${v}" d="${_hexPath(cx, cy, r)}" fill="${fill}" fill-opacity="${v > 0 ? 0.85 : 1}" stroke="var(--ink)" stroke-width="${v > 0 ? 0.9 : 0.5}" stroke-opacity="${v > 0 ? 0.5 : 0.25}"/>`;
+        if (v > 0) {
+          const pctM = m.total ? Math.round(100 * v / m.total) : 0;
+          body += `<text x="${cx}" y="${cy + (r > 16 ? -1 : 3)}" text-anchor="middle" pointer-events="none" style="font:600 9.5px 'JetBrains Mono',monospace;fill:var(--paper)">${_kc(v)}</text>`;
+          if (r > 16) body += `<text x="${cx}" y="${cy + 10}" text-anchor="middle" pointer-events="none" style="font:7.5px 'JetBrains Mono',monospace;fill:var(--paper);fill-opacity:.88">${pctM}%</text>`;
+        }
+      });
+      // per-method total rail bar
+      const bw = (m.total / methodMax) * railW;
+      body += `<rect x="${railX}" y="${cy - 7}" width="${railW}" height="14" rx="3" fill="rgba(120,110,90,.12)"/>
+        <rect x="${railX}" y="${cy - 7}" width="${bw.toFixed(1)}" height="14" rx="3" fill="var(--ink)" fill-opacity=".5"/>
+        <text x="${railX + railW - 5}" y="${cy + 3.5}" text-anchor="end" style="font:600 9px 'JetBrains Mono',monospace;fill:var(--ink)">${_kc(m.total)}</text>`;
+    });
+    const legend = `<text x="${ox - 30}" y="${H - 5}" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">hex size = volume · % = share of that method · click a cell → its requests</text>`;
+    return `<svg class="tf-hive-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="max-height:${H}px;width:100%">${head}${body}${legend}</svg>`;
   }
   function _wireHive(host) {
-    host.querySelectorAll(".tf-hex").forEach(h => {
-      h.addEventListener("mousemove", (e) => { const v = +h.getAttribute("data-v"); if (!v) return; tip(true, e.clientX, e.clientY, `<b>${esc(h.getAttribute("data-m"))} · ${esc(h.getAttribute("data-s"))}</b><br>${fmtNum(v)} request(s)`); h.style.filter = "brightness(1.12)"; });
-      h.addEventListener("mouseleave", () => { tip(false); h.style.filter = ""; });
+    const hexes = host.querySelectorAll(".tf-hex");
+    hexes.forEach(h => {
+      h.addEventListener("mousemove", (e) => {
+        const v = +h.getAttribute("data-v"); if (!v) return;
+        tip(true, e.clientX, e.clientY, `<b>${esc(h.getAttribute("data-m"))} · ${esc(h.getAttribute("data-s"))}</b><br>${fmtNum(v)} request(s)<br><span style="opacity:.7">click → these requests</span>`);
+        hexes.forEach(o => { o.style.opacity = o === h ? "1" : "0.32"; });
+        h.style.transform = "scale(1.08)"; h.style.transformOrigin = "center"; h.style.transformBox = "fill-box";
+      });
+      h.addEventListener("mouseleave", () => { tip(false); hexes.forEach(o => { o.style.opacity = "1"; o.style.transform = ""; }); });
       h.addEventListener("click", () => {
         const v = +h.getAttribute("data-v"); if (!v || !DATA.hero || !DATA.hero.buckets.length) return;
         const first = DATA.hero.buckets[0], last = DATA.hero.buckets[DATA.hero.buckets.length - 1];
@@ -491,51 +592,52 @@
   }
 
   // ════════════════════ ⑥ BYTES FLOW — mirror area ════════════════════════
-  const BY_W = 760, BY_H = 168, BY_PAD = 22;
-  function bytesSvg(buckets) {
-    const col = _C(), n = buckets.length || 1, mid = BY_H / 2;
-    const maxIn = Math.max(1, ...buckets.map(b => b.bin)), maxOut = Math.max(1, ...buckets.map(b => b.bout));
-    const X = (i) => BY_PAD + (n <= 1 ? (BY_W - 2 * BY_PAD) / 2 : (i / (n - 1)) * (BY_W - 2 * BY_PAD));
-    const upY = (v) => mid - (v / maxIn) * (mid - 14), dnY = (v) => mid + (v / maxOut) * (mid - 14);
-    const inLine = buckets.map((b, i) => `${X(i).toFixed(1)},${upY(b.bin).toFixed(1)}`).join(" ");
-    const outLine = buckets.map((b, i) => `${X(i).toFixed(1)},${dnY(b.bout).toFixed(1)}`).join(" ");
-    const inArea = `${BY_PAD},${mid} ` + inLine + ` ${BY_W - BY_PAD},${mid}`, outArea = `${BY_PAD},${mid} ` + outLine + ` ${BY_W - BY_PAD},${mid}`;
-    // peak markers + independent-axis labels
-    const iMax = buckets.reduce((m, b, i) => b.bin > buckets[m].bin ? i : m, 0);
-    const oMax = buckets.reduce((m, b, i) => b.bout > buckets[m].bout ? i : m, 0);
-    const outLabY = Math.min(dnY(maxOut) + 11, BY_H - 18);
-    const peak = `<text x="${X(iMax).toFixed(1)}" y="${(upY(maxIn) - 4).toFixed(1)}" text-anchor="middle" style="font:8.5px 'JetBrains Mono',monospace;fill:${col.accent}">${fmtBytes(maxIn)}</text>
-      <text x="${X(oMax).toFixed(1)}" y="${outLabY.toFixed(1)}" text-anchor="middle" style="font:8.5px 'JetBrains Mono',monospace;fill:${col.ok}">${fmtBytes(maxOut)}</text>`;
-    const labStride = Math.max(1, Math.ceil(n / 6));
-    let xlab = "";
-    buckets.forEach((b, i) => { if (i % labStride === 0) xlab += `<text x="${X(i).toFixed(1)}" y="${BY_H - 3}" text-anchor="middle" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${esc(b.label)}</text>`; });
-    return `<svg class="tf-bytes-svg" viewBox="0 0 ${BY_W} ${BY_H}" preserveAspectRatio="none" style="height:${BY_H}px">
-      <defs><linearGradient id="tfIn" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="${col.accent}" stop-opacity="0"/><stop offset="1" stop-color="${col.accent}" stop-opacity=".32"/></linearGradient>
-      <linearGradient id="tfOut" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col.ok}" stop-opacity="0"/><stop offset="1" stop-color="${col.ok}" stop-opacity=".32"/></linearGradient></defs>
-      <polygon points="${inArea}" fill="url(#tfIn)"/><polyline points="${inLine}" fill="none" stroke="${col.accent}" stroke-width="1.6"/>
-      <polygon points="${outArea}" fill="url(#tfOut)"/><polyline points="${outLine}" fill="none" stroke="${col.ok}" stroke-width="1.6"/>
-      <line x1="${BY_PAD}" y1="${mid}" x2="${BY_W - BY_PAD}" y2="${mid}" stroke="var(--paper-edge)" stroke-width="1"/>
-      <text x="2" y="14" style="font:8px 'JetBrains Mono',monospace;fill:${col.accent}">in ▲</text>
-      <text x="2" y="${BY_H - 14}" style="font:8px 'JetBrains Mono',monospace;fill:${col.ok}">out ▼</text>
-      ${peak}${xlab}
-      <rect id="tf-bytes-hit" x="0" y="0" width="${BY_W}" height="${BY_H}" fill="transparent"/></svg>`;
+  // Independent-scale sparkbar row: each series scaled to its OWN max so a
+  // tiny series (egress) is still visible next to a huge one (ingress).
+  function _byteSparkbar(buckets, key, color) {
+    const n = buckets.length || 1, W = 520, H = 26, sw = W / n;
+    const max = Math.max(1, ...buckets.map(b => b[key] || 0));
+    const peakI = buckets.reduce((m, b, i) => (b[key] || 0) > (buckets[m][key] || 0) ? i : m, 0);
+    let bars = "";
+    buckets.forEach((b, i) => {
+      const v = b[key] || 0, h = v > 0 ? Math.max(2, (v / max) * (H - 4)) : 0.8;
+      bars += `<rect class="tf-byb" data-i="${i}" data-k="${key}" x="${(i * sw + 0.6).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${Math.max(1, sw - 1.2).toFixed(1)}" height="${h.toFixed(1)}" rx="1" fill="${color}" fill-opacity="${v > 0 ? 0.82 : 1}"/>`;
+    });
+    const pk = `<text x="${(peakI * sw + sw / 2).toFixed(1)}" y="9" text-anchor="middle" style="font:7.5px 'JetBrains Mono',monospace;fill:${color}">${fmtBytes(max)}</text>`;
+    return `<svg class="tf-byspark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px">${bars}${pk}</svg>`;
+  }
+  function transferSummary(by) {
+    const tot = (by.total_in || 0) + (by.total_out || 0) || 1;
+    const inPct = Math.round(100 * (by.total_in || 0) / tot), outPct = 100 - inPct;
+    const col = _C();
+    return `<div class="tf-xfer">
+      <div class="tf-xfer-nums">
+        <div class="tf-xfer-side"><span class="tf-xfer-arrow" style="color:${col.accent}">▲</span><div><div class="tf-xfer-val">${fmtBytes(by.total_in)}</div><div class="tf-xfer-lbl">ingress · ${fmtBytes(by.avg_in)}/req</div></div></div>
+        <div class="tf-xfer-side tf-xfer-out"><div style="text-align:right"><div class="tf-xfer-val">${fmtBytes(by.total_out)}</div><div class="tf-xfer-lbl">egress · ${fmtBytes(by.avg_out)}/req</div></div><span class="tf-xfer-arrow" style="color:${col.ok}">▼</span></div>
+      </div>
+      <div class="tf-xfer-prop" title="ingress ${inPct}% · egress ${outPct}%">
+        <span class="tf-xfer-in" style="width:${inPct}%;background:${col.accent}"></span>
+        <span class="tf-xfer-out2" style="width:${outPct}%;background:${col.ok}"></span>
+      </div>
+      <div class="tf-xfer-proplbl"><span style="color:${col.accent}">in ${inPct}%</span><span>${_ratioStr(by.total_in, by.total_out)}</span><span style="color:${col.ok}">out ${outPct}%</span></div>
+      <div class="tf-byspark-row"><span class="tf-byspark-tag" style="color:${col.accent}">in</span>${_byteSparkbar(by.buckets, "bin", col.accent)}</div>
+      <div class="tf-byspark-row"><span class="tf-byspark-tag" style="color:${col.ok}">out</span>${_byteSparkbar(by.buckets, "bout", col.ok)}</div>
+    </div>`;
   }
   function renderBytes(intro) {
     const host = $("tf-bytes-body"); if (!host || !DATA) return;
     const by = DATA.bytes || { buckets: [] };
     if (!by.buckets.length || (by.total_in === 0 && by.total_out === 0)) { host.innerHTML = `<div class="tf-empty">No payload data in this range.</div>`; return; }
-    host.innerHTML = bytesSvg(by.buckets) +
-      `<div class="tf-bytes-legend"><span style="color:${_C().accent}">▲ in ${fmtBytes(by.total_in)} · ${fmtBytes(by.avg_in)}/req</span><span style="color:${_C().ok}">▼ out ${fmtBytes(by.total_out)} · ${fmtBytes(by.avg_out)}/req</span>${_ratioStr(by.total_in, by.total_out) ? `<span>${_ratioStr(by.total_in, by.total_out)}</span>` : ""}</div>`;
-    const hit = $("tf-bytes-hit");
-    if (hit) {
-      hit.addEventListener("mousemove", (e) => {
-        const r = hit.getBoundingClientRect(); const i = Math.round(((e.clientX - r.left) / r.width) * (by.buckets.length - 1));
-        const b = by.buckets[Math.max(0, Math.min(by.buckets.length - 1, i))]; if (!b) return;
+    host.innerHTML = transferSummary(by);
+    // hover the sparkbars for per-bucket detail
+    host.querySelectorAll(".tf-byb").forEach(bar => {
+      bar.addEventListener("mousemove", (e) => {
+        const b = by.buckets[+bar.getAttribute("data-i")]; if (!b) return;
         tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}${b.sub ? " · " + esc(b.sub) : ""}</b><br>in ${fmtBytes(b.bin)} · out ${fmtBytes(b.bout)}`);
       });
-      hit.addEventListener("mouseleave", () => tip(false));
-    }
-    if (intro && window.APIN && APIN.fx) host.querySelectorAll("polyline,polygon").forEach(p => { try { p.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 420, easing: "ease" }); } catch (_) {} });
+      bar.addEventListener("mouseleave", () => tip(false));
+    });
+    if (intro && window.APIN && APIN.fx) host.querySelectorAll(".tf-byb").forEach((p, k) => { try { p.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: Math.min(400, k * 8), easing: "ease", fill: "backwards" }); } catch (_) {} });
   }
 
   // ════════════════════ LIVE (per-SSE-event, rAF-coalesced) ═══════════════
@@ -629,6 +731,30 @@
       `<div class="tfx-hbar"${i.click ? ' data-click="' + esc(i.click) + '" style="cursor:pointer"' : ""}><span class="tfx-hbar-lbl" title="${esc(i.label)}">${esc(i.label)}</span><span class="tfx-hbar-track"><i style="width:${(i.v / max * 100).toFixed(1)}%;background:${color || "var(--c-accent,#52b788)"}"></i></span><span class="tfx-hbar-val">${esc(i.vl != null ? i.vl : fmtNum(i.v))}</span></div>`).join("")}</div>`;
   };
 
+  function _compositionStrip(buckets) {
+    const col = _C(), n = buckets.length || 1;
+    let s = "";
+    buckets.forEach((b, i) => {
+      if (!b.total) { s += `<rect x="${i}" y="0" width="0.9" height="100" fill="rgba(120,110,90,.10)"/>`; return; }
+      const g = 100 * b.n2 / b.total, a = 100 * b.n4 / b.total;
+      s += `<rect x="${i}" y="${(100 - g).toFixed(1)}" width="0.9" height="${g.toFixed(1)}" fill="${col.ok}"/>`;
+      s += `<rect x="${i}" y="${(100 - g - a).toFixed(1)}" width="0.9" height="${a.toFixed(1)}" fill="${col.amber}"/>`;
+      s += `<rect x="${i}" y="0" width="0.9" height="${(100 - g - a).toFixed(1)}" fill="${col.danger}"/>`;
+    });
+    return `<svg viewBox="0 0 ${n} 100" preserveAspectRatio="none" style="width:100%;height:42px;border-radius:4px">${s}</svg>`;
+  }
+  function _readingInsight(buckets, s) {
+    const act = buckets.filter(b => b.total > 0);
+    const tot = act.reduce((a, b) => a + b.total, 0) || 1;
+    if (!act.length) return "No traffic in this window yet.";
+    const sorted = act.slice().sort((a, b) => b.total - a.total);
+    const k = Math.min(3, sorted.length);
+    const topShare = Math.round(100 * sorted.slice(0, k).reduce((a, b) => a + b.total, 0) / tot);
+    const worst = act.slice().filter(b => b.total >= 5).sort((a, b) => (b.n4 + b.n5) / b.total - (a.n4 + a.n5) / a.total)[0];
+    let txt = `${topShare}% of ${GRAN_LABEL[GRAN].replace("last ", "")} volume landed in the busiest ${k} ${GRAN === "hour" ? "hour(s)" : "bucket(s)"}.`;
+    if (worst) { const ep = Math.round(100 * (worst.n4 + worst.n5) / worst.total); if (ep >= 20) txt += ` Errors peaked at ${ep}% on ${esc(worst.label)}${worst.sub ? " " + esc(worst.sub) : ""}.`; }
+    return txt;
+  }
   function expandHero(panel) {
     panel.innerHTML =
       `<div class="tfx-controls">
@@ -636,13 +762,28 @@
         <div class="ov-range" id="tfx-ov"><button data-ov="none" aria-pressed="true">bars</button><button data-ov="err">+ error %</button></div>
       </div>
       <div id="tfx-hero"></div>
-      <div class="tfx-legend"><span><i class="rdot s-2xx"></i> 2xx</span><span><i class="rdot s-4xx"></i> 4xx</span><span><i class="rdot s-5xx"></i> 5xx</span><span style="margin-left:auto;font-style:italic">drag the strip to zoom · click a bar → requests</span></div>
-      ${_sec("at a glance")}<div id="tfx-hero-stats" class="tfx-facts"></div>`;
+      <div class="tfx-legend"><span><i class="rdot s-2xx"></i> 2xx</span><span><i class="rdot s-4xx"></i> 4xx</span><span><i class="rdot s-5xx"></i> 5xx</span><span style="margin-left:auto;font-style:italic">drag the scrubber to zoom · click a colour band → that status</span></div>
+      ${_sec("reading this window")}<p class="tfx-insight" id="tfx-hero-insight"></p>
+      ${_sec("composition over time")}<div id="tfx-hero-comp"></div>
+      ${_sec("top buckets · click → requests")}<div id="tfx-hero-tb"></div>
+      ${_sec("throughput")}<div id="tfx-hero-stats" class="tfx-facts"></div>`;
     let ov = "none";
     const paint = () => {
       const host = $("tfx-hero"); heroChart(host, false);
       if (ov === "err") _overlayErr(host.querySelector(".tf-hero-main"));
-      const s = DATA.stats || {};
+      const s = DATA.stats || {}, buckets = (DATA.hero || { buckets: [] }).buckets;
+      $("tfx-hero-insight").innerHTML = _readingInsight(buckets, s);
+      $("tfx-hero-comp").innerHTML = _compositionStrip(buckets);
+      // top buckets table
+      const ranked = buckets.map((b, i) => ({ b, i })).filter(x => x.b.total > 0).sort((a, b) => b.b.total - a.b.total).slice(0, 8);
+      $("tfx-hero-tb").innerHTML = ranked.length
+        ? `<div class="tfx-tb"><div class="tfx-tb-row tfx-tb-head"><span>#</span><span>bucket</span><span>reqs</span><span>2xx</span><span>4xx</span><span>5xx</span><span>err%</span></div>`
+          + ranked.map((x, k) => `<div class="tfx-tb-row" data-i="${x.i}"><span>${k + 1}</span><span class="tfx-tb-lbl">${esc(x.b.label)}${x.b.sub ? " " + esc(x.b.sub) : ""}</span><span>${fmtNum(x.b.total)}</span><span>${x.b.n2}</span><span>${x.b.n4}</span><span>${x.b.n5}</span><span>${x.b.total ? Math.round(100 * (x.b.n4 + x.b.n5) / x.b.total) : 0}%</span></div>`).join("")
+          + `</div>`
+        : `<div class="tf-empty">no data</div>`;
+      $("tfx-hero-tb").querySelectorAll(".tfx-tb-row[data-i]").forEach(row => row.addEventListener("click", () => {
+        const x = buckets[+row.getAttribute("data-i")]; if (x && x.total) openRequestContainer({ sinceMs: x.t_ms, untilMs: x.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: x.label + (x.sub ? " " + x.sub : "") });
+      }));
       $("tfx-hero-stats").innerHTML =
         `<span>total <b>${fmtNum(s.total)}</b></span><span>busiest <b>${esc(s.busiest_label)}</b> (${fmtNum(s.busiest_count)})</span><span>peak <b>${fmtNum(s.peak_per_min)}</b>/min</span><span>errors <b>${s.error_pct}%</b></span>`;
     };
@@ -668,47 +809,100 @@
   }
 
   // KPI: Total → status split donut + requests-over-time + facts
+  // fetch a window's requests once (small windows) for client-side breakdowns
+  function _fetchWindow(sinceMs, untilMs) {
+    return api(`/api/account/keys/${encodeURIComponent(PID)}/requests?since=${encodeURIComponent(_utcStr(sinceMs))}&until=${encodeURIComponent(_utcStr(untilMs))}&limit=200`)
+      .then(({ body }) => (body && body.data && body.data.items) || []);
+  }
+  // minute histogram SVG (colour by error rate) — used by Peak deep-dive
+  function _minHist(mins, merr) {
+    const col = _C(), max = Math.max(1, ...mins);
+    return `<svg viewBox="0 0 600 96" preserveAspectRatio="none" style="width:100%;height:96px">
+      ${mins.map((v, i) => { const x = (i / mins.length) * 600, w = 600 / mins.length - 1.5, hh = v ? Math.max(2, v / max * 80) : 0; const er = v ? merr[i] / v : 0; const f = v === 0 ? "rgba(120,110,90,.12)" : er > 0.1 ? col.danger : er > 0 ? col.amber : col.accent; return `<rect x="${x.toFixed(1)}" y="${(86 - hh).toFixed(1)}" width="${w.toFixed(1)}" height="${hh ? hh.toFixed(1) : 1}" rx="1" fill="${f}"><title>:${String(i).padStart(2, "0")} · ${v} req</title></rect>`; }).join("")}
+      <line x1="0" y1="86" x2="600" y2="86" stroke="var(--paper-edge)"/></svg>`;
+  }
+  // KPI: Total → status donut + method mix + over-time + insight
   function expandKpiTotal(panel) {
     const paint = () => {
-      const s = DATA.stats || {}, h = DATA.hero || { buckets: [] };
+      const col = _C(), s = DATA.stats || {}, h = DATA.hero || { buckets: [] };
       const n2 = h.buckets.reduce((a, b) => a + b.n2, 0), n4 = h.buckets.reduce((a, b) => a + b.n4, 0), n5 = h.buckets.reduce((a, b) => a + b.n5, 0);
+      const meth = (DATA.matrix || []).slice().sort((a, b) => b.total - a.total);
+      const grand = meth.reduce((a, m) => a + m.total, 0) || 1;
+      const getShare = Math.round(100 * ((meth.find(m => m.method === "GET") || {}).total || 0) / grand);
+      const writeShare = Math.round(100 * meth.filter(m => ["POST", "PUT", "PATCH", "DELETE"].includes(m.method)).reduce((a, m) => a + m.total, 0) / grand);
+      const insight = getShare >= 60 ? `Read-heavy key — ${getShare}% of calls are GET; writes are ${writeShare}%.`
+        : writeShare >= 60 ? `Write-heavy key — ${writeShare}% are writes; ${getShare}% GET.`
+        : `Mixed workload — ${getShare}% GET, ${writeShare}% writes.`;
       panel.innerHTML =
         `<div class="tfx-bignum"><span class="apin-odometer" id="tfx-tot-num">${fmtNum(s.total)}</span><span class="tfx-bignum-lbl">requests · ${GRAN_LABEL[GRAN]}</span></div>
-         ${_sec("status mix")}<div class="tfx-split">${_donut([{ l: "2xx", v: n2, c: _C().ok }, { l: "4xx", v: n4, c: _C().amber }, { l: "5xx", v: n5, c: _C().danger }])}<div class="tfx-facts" style="flex-direction:column;gap:6px"><span><i class="rdot s-2xx"></i> 2xx <b>${fmtNum(n2)}</b></span><span><i class="rdot s-4xx"></i> 4xx <b>${fmtNum(n4)}</b></span><span><i class="rdot s-5xx"></i> 5xx <b>${fmtNum(n5)}</b></span><span>error rate <b>${s.error_pct}%</b></span></div></div>
-         ${_sec("over time")}<div id="tfx-tot-hero"></div>`;
+         ${_sec("status mix")}<div class="tfx-split">${_donut([{ l: "2xx", v: n2, c: col.ok }, { l: "4xx", v: n4, c: col.amber }, { l: "5xx", v: n5, c: col.danger }])}<div class="tfx-facts" style="flex-direction:column;gap:6px"><span><i class="rdot s-2xx"></i> 2xx <b>${fmtNum(n2)}</b> · ${Math.round(100 * n2 / (s.total || 1))}%</span><span><i class="rdot s-4xx"></i> 4xx <b>${fmtNum(n4)}</b> · ${Math.round(100 * n4 / (s.total || 1))}%</span><span><i class="rdot s-5xx"></i> 5xx <b>${fmtNum(n5)}</b> · ${Math.round(100 * n5 / (s.total || 1))}%</span><span>error rate <b>${s.error_pct}%</b></span></div></div>
+         ${_sec("method mix")}${meth.length ? _hbars(meth.map(m => ({ label: m.method, v: m.total, vl: fmtNum(m.total) + " · " + Math.round(100 * m.total / grand) + "%" })), col.accent) : `<div class="tf-empty">no data</div>`}
+         ${_sec("over time")}<div id="tfx-tot-hero"></div>
+         ${_sec("insight")}<p class="tfx-insight">${insight}</p>`;
       const o = $("tfx-tot-num"); if (window.APIN && APIN.odometer) APIN.odometer.roll(o, fmtNum(s.total));
       heroChart($("tfx-tot-hero"), false);
     };
     paint(); _openExpand = { kind: "kpiTotal", update: paint };
   }
-  // KPI: Peak/min → busiest hour rank + clock + facts
+  // KPI: Peak/min → peak-minute callout + per-minute histogram + verdict + busiest hours
   function expandKpiPeak(panel) {
-    const paint = () => {
-      const s = DATA.stats || {}, c = DATA.clock || { hours: [] };
-      const ranked = (c.hours || []).filter(h => h.n > 0).sort((a, b) => b.n - a.n).slice(0, 6)
-        .map(h => ({ label: String(h.h).padStart(2, "0") + ":00", v: h.n, click: "h" + h.h }));
-      panel.innerHTML =
-        `<div class="tfx-bignum"><span id="tfx-peak-num">${fmtNum(s.peak_per_min)}</span><span class="tfx-bignum-lbl">peak requests / minute</span></div>
-         <div class="tfx-facts"><span>busiest bucket <b>${esc(s.busiest_label)}</b> (${fmtNum(s.busiest_count)})</span><span>busiest hour <b>${c.busiest_h != null ? String(c.busiest_h).padStart(2, "0") + ":00" : "—"}</b></span></div>
-         ${_sec("busiest hours (click → requests)")}${ranked.length ? _hbars(ranked, _C().accent) : `<div class="tf-empty">no data</div>`}`;
-      panel.querySelectorAll(".tfx-hbar[data-click]").forEach(b => b.addEventListener("click", () => { const hh = +b.getAttribute("data-click").slice(1); const w = _hourWindow(hh); openRequestContainer({ sinceMs: w.sinceMs, untilMs: w.untilMs, label: String(hh).padStart(2, "0") + ":00" }); }));
-    };
-    paint(); _openExpand = { kind: "kpiPeak", update: paint };
+    const s = DATA.stats || {}, c = DATA.clock || { hours: [] };
+    const ranked = (c.hours || []).filter(h => h.n > 0).sort((a, b) => b.n - a.n).slice(0, 6)
+      .map(h => ({ label: String(h.h).padStart(2, "0") + ":00", v: h.n, click: "h" + h.h }));
+    panel.innerHTML =
+      `<div class="tfx-bignum"><span>${fmtNum(s.peak_per_min)}</span><span class="tfx-bignum-lbl">peak requests in a single minute</span></div>
+       <div class="tfx-facts"><span>busiest hour <b>${c.busiest_h != null ? String(c.busiest_h).padStart(2, "0") + ":00" : "—"}</b></span><span>busiest bucket <b>${esc(s.busiest_label)}</b> (${fmtNum(s.busiest_count)})</span></div>
+       ${_sec("per-minute · busiest hour")}<div id="tfx-peak-min" class="tf-empty">loading…</div>
+       ${_sec("busiest hours · click → requests")}${ranked.length ? _hbars(ranked, _C().accent) : `<div class="tf-empty">no data</div>`}
+       ${_sec("verdict")}<p class="tfx-insight" id="tfx-peak-verdict">…</p>`;
+    panel.querySelectorAll(".tfx-hbar[data-click]").forEach(b => b.addEventListener("click", () => { const hh = +b.getAttribute("data-click").slice(1); const w = _hourWindow(hh); openRequestContainer({ sinceMs: w.sinceMs, untilMs: w.untilMs, label: String(hh).padStart(2, "0") + ":00" }); }));
+    if (c.busiest_h != null) {
+      const w = _hourWindow(c.busiest_h);
+      _fetchWindow(w.sinceMs, w.untilMs).then(rows => {
+        const mins = new Array(60).fill(0), merr = new Array(60).fill(0);
+        rows.forEach(r => { const d = new Date((r.timestamp || "").replace(" ", "T") + "Z"); if (isNaN(d)) return; const m = d.getMinutes(); mins[m]++; if ((+r.status_code || 0) >= 400) merr[m]++; });
+        const host = $("tfx-peak-min"); if (host) { host.className = ""; host.innerHTML = _minHist(mins, merr); }
+        const active = mins.filter(v => v > 0).sort((a, b) => a - b);
+        const median = active.length ? active[Math.floor(active.length / 2)] : 0;
+        const burst = median ? (s.peak_per_min / median).toFixed(1) : "—";
+        const v = $("tfx-peak-verdict");
+        if (v) v.innerHTML = median >= 1 && s.peak_per_min / median > 4
+          ? `<b>Spiky</b> — peak ${fmtNum(s.peak_per_min)}/min is ${burst}× the median active minute (${median}/min). Bursty traffic.`
+          : `<b>Steady</b> — peak ${fmtNum(s.peak_per_min)}/min vs ${median}/min median active minute (${burst}×).`;
+      });
+    } else { const v = $("tfx-peak-verdict"); if (v) v.textContent = "Not enough data yet."; }
+    _openExpand = { kind: "kpiPeak", update: null };
   }
-  // KPI: Busiest → top buckets ranked, click → request container
+  // KPI: Busiest → anatomy + top endpoints/methods (client-side) + top buckets + insight
   function expandKpiBusy(panel) {
-    const paint = () => {
-      const h = DATA.hero || { buckets: [] };
-      const ranked = h.buckets.map((b, i) => ({ b, i })).filter(x => x.b.total > 0).sort((a, b) => b.b.total - a.b.total).slice(0, 10)
-        .map(x => ({ label: x.b.label + (x.b.sub ? " " + x.b.sub : ""), v: x.b.total, click: String(x.i) }));
-      panel.innerHTML =
-        `<div class="tfx-bignum"><span>${esc((DATA.stats || {}).busiest_label || "—")}</span><span class="tfx-bignum-lbl">busiest ${GRAN === "hour" ? "hour" : "bucket"} · ${fmtNum((DATA.stats || {}).busiest_count || 0)} requests</span></div>
-         ${_sec("top buckets (click → requests)")}${ranked.length ? _hbars(ranked, _C().accent) : `<div class="tf-empty">no data</div>`}`;
-      panel.querySelectorAll(".tfx-hbar[data-click]").forEach(b => b.addEventListener("click", () => { const i = +b.getAttribute("data-click"); const bb = h.buckets[i]; if (bb) openRequestContainer({ sinceMs: bb.t_ms, untilMs: bb.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: bb.label + (bb.sub ? " " + bb.sub : "") }); }));
-    };
-    paint(); _openExpand = { kind: "kpiBusy", update: paint };
+    const col = _C(), h = DATA.hero || { buckets: [] }, s = DATA.stats || {};
+    const ranked = h.buckets.map((b, i) => ({ b, i })).filter(x => x.b.total > 0).sort((a, b) => b.b.total - a.b.total);
+    const top = ranked.slice(0, 10).map(x => ({ label: x.b.label + (x.b.sub ? " " + x.b.sub : ""), v: x.b.total, click: String(x.i) }));
+    const totals = ranked.map(x => x.b.total);
+    const median = totals.length ? totals.slice().sort((a, b) => a - b)[Math.floor(totals.length / 2)] : 0;
+    const mult = median ? ((s.busiest_count || 0) / median).toFixed(1) : "—";
+    const bb = ranked.length ? ranked[0].b : null;
+    panel.innerHTML =
+      `<div class="tfx-bignum"><span>${esc(s.busiest_label || "—")}</span><span class="tfx-bignum-lbl">busiest ${GRAN === "hour" ? "hour" : "bucket"} · ${fmtNum(s.busiest_count || 0)} requests</span></div>
+       ${bb ? `${_sec("anatomy")}<div class="tfx-facts"><span><i class="rdot s-2xx"></i> 2xx <b>${fmtNum(bb.n2)}</b></span><span><i class="rdot s-4xx"></i> 4xx <b>${fmtNum(bb.n4)}</b></span><span><i class="rdot s-5xx"></i> 5xx <b>${fmtNum(bb.n5)}</b></span><span>errors <b>${bb.total ? Math.round(100 * (bb.n4 + bb.n5) / bb.total) : 0}%</b></span></div>` : ""}
+       ${_sec("top endpoints · busiest bucket")}<div id="tfx-busy-ep" class="tf-empty">loading…</div>
+       ${_sec("top methods · busiest bucket")}<div id="tfx-busy-meth" class="tf-empty">loading…</div>
+       ${_sec("top buckets · click → requests")}${top.length ? _hbars(top, col.accent) : `<div class="tf-empty">no data</div>`}
+       ${_sec("insight")}<p class="tfx-insight">Busiest ${GRAN === "hour" ? "hour" : "bucket"} ran <b>${fmtNum(s.busiest_count || 0)}</b> requests — ${mult}× the median active ${GRAN === "hour" ? "hour" : "bucket"} (${fmtNum(median)}).</p>`;
+    panel.querySelectorAll(".tfx-hbar[data-click]").forEach(b => b.addEventListener("click", () => { const i = +b.getAttribute("data-click"); const x = h.buckets[i]; if (x) openRequestContainer({ sinceMs: x.t_ms, untilMs: x.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: x.label + (x.sub ? " " + x.sub : "") }); }));
+    if (bb) {
+      _fetchWindow(bb.t_ms, bb.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN])).then(rows => {
+        const eps = {}, mts = {};
+        rows.forEach(r => { eps[r.path || "?"] = (eps[r.path || "?"] || 0) + 1; mts[(r.method || "?").toUpperCase()] = (mts[(r.method || "?").toUpperCase()] || 0) + 1; });
+        const epItems = Object.entries(eps).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => ({ label: k, v }));
+        const mtItems = Object.entries(mts).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: k, v }));
+        const e1 = $("tfx-busy-ep"); if (e1) { e1.className = ""; e1.innerHTML = epItems.length ? _hbars(epItems, col.accent) : `<div class="tf-empty">no data</div>`; }
+        const e2 = $("tfx-busy-meth"); if (e2) { e2.className = ""; e2.innerHTML = mtItems.length ? _hbars(mtItems, col.soft) : `<div class="tf-empty">no data</div>`; }
+      });
+    }
+    _openExpand = { kind: "kpiBusy", update: null };
   }
-  // KPI: Data → bytes mirror + by-endpoint + ratio (shared with bytes expand)
+  // KPI: Data → full bytes deep-dive (shared)
   function expandKpiData(panel) { expandBytes(panel); }
 
   // tiny donut primitive
@@ -724,6 +918,7 @@
       `<div class="ov-range" id="tfx-calmode" style="margin-bottom:10px"><button data-m="volume" aria-pressed="true">volume</button><button data-m="error">error rate</button></div>
        <div id="tfx-cal" style="overflow-x:auto"></div>
        <div class="tfx-facts" id="tfx-calstats"></div>
+       ${_sec("active days · click → requests")}<div id="tfx-cal-table"></div>
        ${_sec("by weekday (click → requests)")}<div id="tfx-wkprofile"></div>
        ${_sec("by month")}<div id="tfx-moprofile"></div>`;
     let mode = "volume";
@@ -738,6 +933,17 @@
       for (let i = 0; ; i++) { const dt = new Date(today); dt.setDate(dt.getDate() - i); const k = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`; const r = days.find(d => d.date === k); if (r && r.n > 0) streak++; else break; }
       const tot = active.reduce((a, d) => a + d.n, 0);
       $("tfx-calstats").innerHTML = `<span>${active.length} active day(s)</span><span>current streak <b>${streak}d</b></span><span>busiest <b>${busiest ? esc(busiest.date) : "—"}</b> (${busiest ? fmtNum(busiest.n) : 0})</span><span>total <b>${fmtNum(tot)}</b></span>`;
+      // active-days table (most recent first), row → that day's requests
+      const at = active.slice().sort((a, b) => a.date < b.date ? 1 : -1).slice(0, 14);
+      $("tfx-cal-table").innerHTML = at.length
+        ? `<div class="tfx-tb tfx-tb-3"><div class="tfx-tb-row tfx-tb-head"><span>date</span><span>reqs</span><span>err%</span></div>`
+          + at.map(d => `<div class="tfx-tb-row tfx-cal-trow" data-d="${esc(d.date)}"><span class="tfx-tb-lbl">${esc(d.date)}</span><span>${fmtNum(d.n)}</span><span>${d.n ? Math.round(100 * d.e / d.n) : 0}%</span></div>`).join("")
+          + `</div>`
+        : `<div class="tf-empty">no active days</div>`;
+      $("tfx-cal-table").querySelectorAll(".tfx-cal-trow").forEach(row => row.addEventListener("click", () => {
+        const dstr = row.getAttribute("data-d"); const ms = new Date(dstr + "T00:00:00").getTime();
+        openRequestContainer({ sinceMs: ms, untilMs: ms + 86400e3, label: dstr });
+      }));
       // weekday profile (clickable → that weekday's most-recent day window)
       const wk = [0, 0, 0, 0, 0, 0, 0], wkLast = [null, null, null, null, null, null, null];
       days.forEach(d => { const dt = new Date(d.date + "T00:00:00"); const wi = (dt.getDay() + 6) % 7; wk[wi] += d.n; if (!wkLast[wi] || d.date > wkLast[wi]) wkLast[wi] = d.date; });
@@ -758,33 +964,82 @@
 
   function expandHive(panel) {
     const paint = () => {
+      const col = _C();
       const rows = (DATA.matrix || []).filter(m => m.total > 0);
       const grand = rows.reduce((a, m) => a + m.total, 0) || 1;
+      const succ = (m) => m.total ? Math.round(100 * m.n2 / m.total) : 0;
+      // per-method table (total · 2xx · 4xx · 5xx · success% · share)
+      const trows = rows.map(m => {
+        const s = succ(m), sCls = s >= 80 ? "ok" : s >= 50 ? "amber" : "danger";
+        return `<div class="tfx-hv-row" data-m="${esc(m.method)}"><span class="meth ${_methClass(m.method)}">${esc(m.method)}</span>
+          <span class="tfx-hv-n">${fmtNum(m.total)}</span><span class="tfx-hv-n" style="color:${col.ok}">${fmtNum(m.n2)}</span>
+          <span class="tfx-hv-n" style="color:${col.amber}">${fmtNum(m.n4)}</span><span class="tfx-hv-n" style="color:${col.danger}">${fmtNum(m.n5)}</span>
+          <span class="tfx-hv-succ tfx-hv-${sCls}">${s}%</span><span class="tfx-hv-n">${Math.round(100 * m.total / grand)}%</span></div>`;
+      }).join("");
+      // insight: worst + best by success rate (require a few requests)
+      const meaningful = rows.filter(m => m.total >= 3);
+      const worst = meaningful.slice().sort((a, b) => succ(a) - succ(b))[0];
+      const best = meaningful.slice().sort((a, b) => succ(b) - succ(a))[0];
+      let insight = "Not enough traffic to assess per-method health yet.";
+      if (worst && best && worst !== best) {
+        insight = `<b>${esc(best.method)}</b> is the healthiest at ${succ(best)}% success. `;
+        if (succ(worst) === 0) insight += `<b>${esc(worst.method)}</b> never succeeds — all ${fmtNum(worst.total)} calls returned 4xx/5xx (bad path or missing scope?).`;
+        else insight += `<b>${esc(worst.method)}</b> is the weakest at ${succ(worst)}% success.`;
+      } else if (best) insight = `<b>${esc(best.method)}</b> runs at ${succ(best)}% success.`;
       panel.innerHTML =
         `<div id="tfx-hive"></div>
-         ${_sec("by method")}${_hbars(rows.map(m => ({ label: m.method, v: m.total, vl: fmtNum(m.total) + " · " + Math.round(100 * m.total / grand) + "%", click: "m" + m.method })), _C().accent)}
-         ${_sec("error share by method")}${_hbars(rows.map(m => ({ label: m.method, v: m.n4 + m.n5, vl: (m.total ? Math.round(100 * (m.n4 + m.n5) / m.total) : 0) + "%" })), _C().danger)}
-         <div class="tfx-legend" style="margin-top:10px"><span style="font-style:italic">hex size = volume · click a cell or bar → requests for that method</span></div>`;
-      $("tfx-hive").innerHTML = hiveSvg(DATA.matrix || [], 0);
+         ${_sec("per-method breakdown · click a row for its requests")}
+         <div class="tfx-hv-row tfx-hv-head"><span>method</span><span class="tfx-hv-n">total</span><span class="tfx-hv-n">2xx</span><span class="tfx-hv-n">4xx</span><span class="tfx-hv-n">5xx</span><span class="tfx-hv-succ">success</span><span class="tfx-hv-n">share</span></div>
+         ${trows || `<div class="tf-empty">no data</div>`}
+         ${_sec("insight")}<p class="tfx-insight">${insight}</p>`;
+      $("tfx-hive").innerHTML = hiveSvg(DATA.matrix || []);
       _wireHive($("tfx-hive"));
-      panel.querySelectorAll(".tfx-hbar[data-click]").forEach(b => b.addEventListener("click", () => {
-        const m = b.getAttribute("data-click").slice(1); const h = DATA.hero || { buckets: [] }; if (!h.buckets.length) return;
+      panel.querySelectorAll(".tfx-hv-row[data-m]").forEach(b => b.addEventListener("click", () => {
+        const m = b.getAttribute("data-m"); const h = DATA.hero || { buckets: [] }; if (!h.buckets.length) return;
         openRequestContainer({ sinceMs: h.buckets[0].t_ms, untilMs: h.buckets[h.buckets.length - 1].t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: m + " · all", method: m });
       }));
     };
     paint(); _openExpand = { kind: "hive", update: paint };
   }
 
+  // weekday × hour heatmap (7 rows Mon–Sun × 24 cols) — consumes DATA.clock.wkhr
+  function _wkhrHeatmap(m) {
+    const col = _C(), WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const max = Math.max(1, ...m.flat());
+    const cell = 13, gap = 2, ox = 30, oy = 14, W = ox + 24 * (cell + gap), H = oy + 7 * (cell + gap) + 4;
+    let cells = "", lbls = "";
+    WD.forEach((d, r) => { lbls += `<text x="0" y="${oy + r * (cell + gap) + cell - 2}" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${d}</text>`; });
+    [0, 6, 12, 18, 23].forEach(hh => { lbls += `<text x="${ox + hh * (cell + gap) + cell / 2}" y="10" text-anchor="middle" style="font:7px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${hh}</text>`; });
+    for (let r = 0; r < 7; r++) for (let h = 0; h < 24; h++) {
+      const v = (m[r] && m[r][h]) || 0, x = ox + h * (cell + gap), y = oy + r * (cell + gap);
+      const op = v ? 0.2 + 0.8 * Math.min(1, v / max) : 1, fill = v ? col.accent : "rgba(120,110,90,.10)";
+      cells += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" fill="${fill}" fill-opacity="${op.toFixed(2)}"><title>${WD[r]} ${String(h).padStart(2, "0")}:00 · ${v} req</title></rect>`;
+    }
+    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMinYMid meet" style="max-height:${H}px;width:100%">${lbls}${cells}</svg>`;
+  }
   function expandClock(panel) {
     panel.innerHTML =
       `<div class="tfx-controls"><div class="ov-range" id="tfx-clkmode"><button data-m="volume" aria-pressed="true">volume</button><button data-m="error">error rate</button></div><span class="tfx-clk-tz">device-local · ${esc((window.APIN && APIN.time) ? APIN.time.zone : "")}</span></div>
        <div class="tfx-clk-grid"><div id="tfx-clock"></div><div id="tfx-clkdetail" class="tfx-clk-detail"></div></div>`;
     let mode = "volume";
     const overview = () => {
-      const c = DATA.clock || {}; const quiet = (c.hours || []).filter(h => h.n > 0).reduce((m, h) => h.n < (m ? m.n : 1e9) ? h : m, null);
-      const biz = (c.hours || []).slice(9, 17).reduce((s, h) => s + h.n, 0); const tot = (c.hours || []).reduce((s, h) => s + h.n, 0);
+      const c = DATA.clock || {}, hours = c.hours || [];
+      const quiet = hours.filter(h => h.n > 0).reduce((m, h) => h.n < (m ? m.n : 1e9) ? h : m, null);
+      const biz = hours.slice(9, 17).reduce((s, h) => s + h.n, 0), tot = hours.reduce((s, h) => s + h.n, 0);
+      const bizPct = tot ? Math.round(100 * biz / tot) : 0;
+      const topHours = hours.filter(h => h.n > 0).slice().sort((a, b) => b.n - a.n).slice(0, 5);
+      const wkhr = c.wkhr;   // [7][24] from backend (T15)
+      const insight = c.busiest_h != null
+        ? `Traffic clusters around <b>${String(c.busiest_h).padStart(2, "0")}:00</b> — ${bizPct >= 60 ? "mostly business hours" : bizPct <= 30 ? "mostly off-hours" : "spread across the day"} (${bizPct}% within 9–17).`
+        : "Rhythm emerges as traffic accrues.";
       $("tfx-clkdetail").innerHTML =
-        `<div class="tfx-facts" style="flex-direction:column;gap:7px"><span>busiest hour <b>${c.busiest_h != null ? String(c.busiest_h).padStart(2, "0") + ":00" : "—"}</b></span><span>quietest active <b>${quiet ? String(quiet.h).padStart(2, "0") + ":00" : "—"}</b></span><span>business hrs (9–17) <b>${tot ? Math.round(100 * biz / tot) : 0}%</b></span><span>total <b>${fmtNum(tot)}</b></span></div><p class="tfx-clk-hint">click an hour wedge for its 60-minute breakdown.</p>`;
+        `<div class="tfx-facts" style="flex-direction:column;gap:7px"><span>busiest hour <b>${c.busiest_h != null ? String(c.busiest_h).padStart(2, "0") + ":00" : "—"}</b></span><span>quietest active <b>${quiet ? String(quiet.h).padStart(2, "0") + ":00" : "—"}</b></span><span>business hrs (9–17) <b>${bizPct}%</b></span><span>total <b>${fmtNum(tot)}</b></span></div>
+         ${_sec("top hours · click → requests")}${topHours.length ? _hbars(topHours.map(h => ({ label: String(h.h).padStart(2, "0") + ":00", v: h.n, click: "h" + h.h })), _C().accent) : `<div class="tf-empty">no data</div>`}
+         ${wkhr ? `${_sec("weekday × hour")}<div id="tfx-wkhr"></div>` : ""}
+         ${_sec("insight")}<p class="tfx-insight">${insight}</p>
+         <p class="tfx-clk-hint">click an hour wedge for its 60-minute breakdown.</p>`;
+      $("tfx-clkdetail").querySelectorAll(".tfx-hbar[data-click]").forEach(b => b.addEventListener("click", () => { const hh = +b.getAttribute("data-click").slice(1); const w = _hourWindow(hh); openRequestContainer({ sinceMs: w.sinceMs, untilMs: w.untilMs, label: String(hh).padStart(2, "0") + ":00" }); }));
+      if (wkhr && $("tfx-wkhr")) $("tfx-wkhr").innerHTML = _wkhrHeatmap(wkhr);
     };
     const detailHour = (hh) => {
       const h = (DATA.clock.hours || [])[hh]; if (!h) return;
@@ -823,16 +1078,36 @@
   function expandBytes(panel) {
     const paint = () => {
       const by = DATA.bytes || { buckets: [], by_endpoint: [] };
-      const epOutMax = Math.max(1, ...(by.by_endpoint || []).map(e => e.bout));
-      const epInMax = Math.max(1, ...(by.by_endpoint || []).map(e => e.bin));
+      const col = _C();
+      const eps = (by.by_endpoint || []).slice();
+      const epInMax = Math.max(1, ...eps.map(e => e.bin)), epOutMax = Math.max(1, ...eps.map(e => e.bout));
+      const rows = eps.length ? eps.map(e =>
+        `<div class="tfx-ep2"><span class="tfx-ep2-path" title="${esc(e.path)}">${esc(e.path)}</span>
+          <span class="tfx-ep2-bar"><i style="width:${(e.bin / epInMax * 100).toFixed(1)}%;background:${col.accent}"></i></span><span class="tfx-ep2-v" style="color:${col.accent}">${fmtBytes(e.bin)}</span>
+          <span class="tfx-ep2-bar"><i style="width:${(e.bout / epOutMax * 100).toFixed(1)}%;background:${col.ok}"></i></span><span class="tfx-ep2-v" style="color:${col.ok}">${fmtBytes(e.bout)}</span></div>`).join("")
+        : `<div class="tf-empty">no endpoint data</div>`;
+      const topIn = eps.slice().sort((a, b) => b.bin - a.bin)[0];
+      const topOut = eps.slice().sort((a, b) => b.bout - a.bout)[0];
+      const inPctTop = by.total_in ? Math.round(100 * ((topIn || {}).bin || 0) / by.total_in) : 0;
+      const outPctTop = by.total_out ? Math.round(100 * ((topOut || {}).bout || 0) / by.total_out) : 0;
+      const lg = by.largest;   // backend (T15): {id,method,path,bin,bout,ts}
+      const pct = by.pct;      // backend (T15): {in_p50,in_p95,out_p50}
       panel.innerHTML =
-        `<div id="tfx-bytes"></div>
-         <div class="tfx-facts"><span style="color:${_C().accent}">▲ in <b>${fmtBytes(by.total_in)}</b> · ${fmtBytes(by.avg_in)}/req</span><span style="color:${_C().ok}">▼ out <b>${fmtBytes(by.total_out)}</b> · ${fmtBytes(by.avg_out)}/req</span>${_ratioStr(by.total_in, by.total_out) ? `<span><b>${_ratioStr(by.total_in, by.total_out)}</b></span>` : ""}</div>
-         ${_sec("out by endpoint")}${_hbars((by.by_endpoint || []).map(e => ({ label: e.path, v: e.bout, vl: fmtBytes(e.bout) })), _C().ok)}
-         ${_sec("in by endpoint")}${_hbars((by.by_endpoint || []).map(e => ({ label: e.path, v: e.bin, vl: fmtBytes(e.bin) })), _C().accent)}`;
-      $("tfx-bytes").innerHTML = by.buckets && by.buckets.length ? bytesSvg(by.buckets) : `<div class="tf-empty">no payload data</div>`;
-      const hit = $("tf-bytes-hit");
-      if (hit) { hit.addEventListener("mousemove", (e) => { const r = hit.getBoundingClientRect(); const i = Math.round(((e.clientX - r.left) / r.width) * (by.buckets.length - 1)); const b = by.buckets[Math.max(0, Math.min(by.buckets.length - 1, i))]; if (b) tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}</b><br>in ${fmtBytes(b.bin)} · out ${fmtBytes(b.bout)}`); }); hit.addEventListener("mouseleave", () => tip(false)); }
+        `<div class="tfx-facts"><span style="color:${col.accent}">▲ in <b>${fmtBytes(by.total_in)}</b> · ${fmtBytes(by.avg_in)}/req</span><span style="color:${col.ok}">▼ out <b>${fmtBytes(by.total_out)}</b> · ${fmtBytes(by.avg_out)}/req</span>${_ratioStr(by.total_in, by.total_out) ? `<span><b>${_ratioStr(by.total_in, by.total_out)}</b></span>` : ""}</div>
+         ${_sec("over time · independent scales")}
+         <div class="tf-byspark-row"><span class="tf-byspark-tag" style="color:${col.accent}">in</span>${_byteSparkbar(by.buckets, "bin", col.accent)}</div>
+         <div class="tf-byspark-row"><span class="tf-byspark-tag" style="color:${col.ok}">out</span>${_byteSparkbar(by.buckets, "bout", col.ok)}</div>
+         ${_sec("where bytes go · per endpoint")}
+         <div class="tfx-ep2 tfx-ep2-head"><span>endpoint</span><span>ingress</span><span></span><span>egress</span><span></span></div>${rows}
+         ${lg ? `${_sec("largest single request")}<div class="tfx-largest"><b>${esc(lg.method || "")} ${esc(lg.path || "")}</b> · in ${fmtBytes(lg.bin)} · out ${fmtBytes(lg.bout)} · ${esc(_local(lg.ts || ""))}<button class="tfx-drill-btn" id="tfx-lg-open">open request →</button></div>` : ""}
+         ${pct ? `${_sec("payload sizes")}<div class="tfx-facts"><span>in p50 <b>${fmtBytes(pct.in_p50)}</b></span><span>in p95 <b>${fmtBytes(pct.in_p95)}</b></span><span>out p50 <b>${fmtBytes(pct.out_p50)}</b></span></div>` : ""}
+         ${_sec("insight")}<p class="tfx-insight">${(topIn || topOut) ? `<b>${esc((topIn || {}).path || "—")}</b> drives ${inPctTop}% of ingress; <b>${esc((topOut || {}).path || "—")}</b> dominates egress (${outPctTop}% of out).` : "Not enough payload data yet."}</p>`;
+      const lo = $("tfx-lg-open");
+      if (lo && lg) lo.addEventListener("click", () => { if (window.APIN && APIN.keyDetail && APIN.keyDetail.openRequest) APIN.keyDetail.openRequest(lg.id); });
+      panel.querySelectorAll(".tf-byb").forEach(bar => {
+        bar.addEventListener("mousemove", (e) => { const b = by.buckets[+bar.getAttribute("data-i")]; if (!b) return; tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}</b><br>in ${fmtBytes(b.bin)} · out ${fmtBytes(b.bout)}`); });
+        bar.addEventListener("mouseleave", () => tip(false));
+      });
     };
     paint(); _openExpand = { kind: "bytes", update: paint };
   }

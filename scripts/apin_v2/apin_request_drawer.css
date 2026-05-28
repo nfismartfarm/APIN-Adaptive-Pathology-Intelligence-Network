@@ -1,0 +1,417 @@
+/* apin_request_drawer.css — shared request-drawer styles (extracted from console_usage.html).
+   Loaded by both the Usage page and the per-key detail page so the drawer renders identically. */
+.reqd-section{background:var(--paper-deep);border:1px solid var(--paper-edge);
+  border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.reqd-section h4{font-family:'Fraunces',serif;font-weight:500;font-size:13.5px;
+  text-transform:uppercase;letter-spacing:0.08em;color:var(--ink-soft);
+  margin-bottom:10px;display:flex;align-items:center;gap:7px}
+.reqd-section h4 .icon{width:14px;height:14px}
+.reqd-row{display:grid;grid-template-columns:120px 1fr;gap:8px;font-size:12.5px;
+  padding:4px 0;font-family:'JetBrains Mono',monospace}
+.reqd-row dt{color:var(--ink-soft);text-transform:uppercase;font-size:10.5px;
+  letter-spacing:0.05em;padding-top:2px}
+.reqd-row dd{color:var(--ink);word-break:break-all}
+.reqd-row dd code{background:var(--paper);padding:2px 7px;border-radius:4px;
+  border:1px solid var(--paper-edge)}
+.reqd-status-bar{display:flex;align-items:center;gap:12px;font-family:'Fraunces',serif;
+  font-size:22px;margin-bottom:14px}
+.reqd-status-bar .stat{font-size:11.5px;font-weight:600;font-family:'JetBrains Mono',monospace;
+  padding:4px 11px;border-radius:11px}
+.reqd-status-bar .meth{font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;
+  padding:3px 9px;border-radius:9px}
+.reqd-status-bar .path{font-family:'JetBrains Mono',monospace;font-size:14px;
+  color:var(--ink);background:var(--paper-deep);padding:4px 10px;border-radius:6px;
+  border:1px solid var(--paper-edge);flex:1;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.reqd-latency-bar{height:10px;border-radius:5px;background:var(--paper-deep);
+  position:relative;overflow:hidden;margin:8px 0 4px}
+.reqd-latency-bar .fill{height:100%;background:linear-gradient(90deg, var(--green), var(--ochre), var(--crimson));
+  border-radius:5px;transition:width .4s}
+.reqd-latency-bar .lbl{position:absolute;right:8px;top:-1px;font-size:10px;
+  color:var(--ink);font-family:'JetBrains Mono',monospace;font-weight:600;
+  line-height:12px}
+
+/* 9.N.7.f · Real-baseline tags + comparison row */
+.reqd-lat-tag-row{margin-top:8px}
+.reqd-lat-tag{display:inline-block;padding:3px 9px;border-radius:11px;
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:500;
+  letter-spacing:0.02em}
+.reqd-lat-tag.good{background:rgba(47,111,62,0.12);color:var(--c-ok, #2f6f3e)}
+.reqd-lat-tag.warn{background:rgba(212,150,32,0.14);color:var(--c-amber, #8b621b)}
+.reqd-lat-tag.mute{background:var(--paper);color:var(--ink-soft);
+  border:1px solid var(--paper-edge)}
+.reqd-lat-baseline{display:flex;flex-wrap:wrap;gap:18px;margin-top:8px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-soft)}
+.reqd-lat-baseline b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.reqd-lat-baseline .reqd-lat-sample{font-style:italic;opacity:0.75}
+.reqd-lat-mute{font-style:italic}
+.reqd-mute{color:var(--ink-soft);font-size:11.5px;font-style:italic}
+
+/* ─────────────────────────────────────────────────────────────────────
+   9.N.8 · Request-detail drawer · Pass 2 sections.
+   All cards follow the same shell: 1px paper-edge border, paper-deep
+   background, 14×16 padding, 14px margin between cards.
+───────────────────────────────────────────────────────────────────── */
+
+/* Section heading — keep h4 + icon + optional inline meta on one line. */
+.reqd-section h4 .reqd-tl-total{margin-left:auto;font-family:'JetBrains Mono',monospace;
+  font-size:11px;color:var(--ink-soft);font-weight:400}
+.reqd-section h4 .reqd-mute{margin-left:6px}
+.reqd-section h4{display:flex;align-items:center;gap:8px}
+
+/* ── Timeline waterfall ───────────────────────────────────────────── */
+.reqd-tl-row{display:grid;grid-template-columns:84px 1fr 130px;gap:10px;
+  align-items:center;padding:5px 0;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink-soft)}
+.reqd-tl-label{color:var(--ink);font-variant-numeric:tabular-nums}
+.reqd-tl-bar{height:8px;background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:2px;overflow:hidden;position:relative}
+.reqd-tl-fill{height:100%;background:linear-gradient(90deg, var(--ink-soft), var(--ink));
+  border-radius:2px;transition:width 360ms cubic-bezier(0.22,1,0.36,1)}
+.reqd-tl-row.is-hot .reqd-tl-fill{background:linear-gradient(90deg, var(--c-amber), #c4711a)}
+.reqd-tl-val{text-align:right;font-variant-numeric:tabular-nums}
+.reqd-tl-val b{color:var(--ink);font-weight:600}
+.reqd-tl-hot{color:var(--c-amber);font-family:'Fraunces',serif;font-style:italic;
+  font-size:11px;margin-left:6px}
+
+/* ── Payload section ──────────────────────────────────────────────── */
+.reqd-payload-section h4{position:relative}
+.reqd-payload-modes{margin-left:auto;display:inline-flex;border:1px solid var(--paper-edge);
+  background:var(--paper);border-radius:5px;overflow:hidden}
+.reqd-payload-modes button{padding:4px 9px;font-size:10.5px;color:var(--ink-soft);
+  font-family:'JetBrains Mono',monospace;background:transparent;border:0;
+  border-right:1px solid var(--paper-edge);cursor:pointer;
+  transition:background 120ms cubic-bezier(0.22,1,0.36,1),color 120ms}
+.reqd-payload-modes button:last-child{border-right:0}
+.reqd-payload-modes button:hover{background:var(--paper-deep);color:var(--ink)}
+.reqd-payload-modes button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+
+.reqd-pl-block{margin-top:12px}
+.reqd-pl-block:first-of-type{margin-top:8px}
+.reqd-pl-toggle{display:flex;align-items:center;gap:6px;background:transparent;
+  border:0;padding:4px 0;cursor:pointer;width:100%;text-align:left;
+  font-family:'Fraunces',serif;font-style:italic;font-size:13px;color:var(--ink);
+  transition:color 120ms}
+.reqd-pl-toggle:hover{color:var(--c-ok)}
+.reqd-pl-chev{font-size:10px;color:var(--ink-soft);width:10px;display:inline-block}
+.reqd-pl-content{padding-left:14px;margin-top:4px}
+
+.reqd-headers-list{display:grid;grid-template-columns:160px 1fr;gap:4px 12px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink);
+  word-break:break-all}
+.reqd-headers-list dt{color:var(--ink-soft);text-transform:none;font-weight:500}
+.reqd-headers-list dd{color:var(--ink)}
+
+.reqd-pl-strip{display:flex;gap:10px;align-items:center;padding:6px 10px;
+  background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:5px 5px 0 0;font-family:'JetBrains Mono',monospace;
+  font-size:10.5px;color:var(--ink-soft)}
+.reqd-pl-ctype{color:var(--ink);font-weight:500}
+.reqd-pl-trunc{font-style:italic;color:var(--c-amber);margin-left:auto}
+
+.reqd-pl-body{background:var(--paper);border:1px solid var(--paper-edge);
+  border-top:0;border-radius:0 0 5px 5px;overflow:hidden}
+.reqd-pl-pre{margin:0;padding:10px 12px;font-family:'JetBrains Mono',monospace;
+  font-size:11.5px;line-height:1.5;color:var(--ink);
+  white-space:pre-wrap;word-break:break-word;max-height:280px;overflow:auto}
+.reqd-pl-pre code{background:transparent;padding:0;border-radius:0}
+.reqd-pl-binary{display:flex;align-items:center;gap:10px;padding:14px;
+  font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-soft)}
+.reqd-pl-bin-icon{width:18px;height:18px;color:var(--ink-soft);fill:none;
+  stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.reqd-pl-multipart{padding:10px 12px}
+
+/* 9.N.8e · Structured multipart parts list. Replaces the mojibake text
+   preview with a proper list of parts (name · filename · type · size).
+   Image parts get a hoverable filename that pops a thumbnail. */
+.reqd-pl-mp{padding:8px 0}
+.reqd-mp-list{display:flex;flex-direction:column;gap:6px;padding:0 12px}
+.reqd-mp-row{display:flex;align-items:flex-start;gap:10px;padding:9px 11px;
+  background:var(--paper-deep);border:1px solid var(--paper-edge);
+  border-radius:5px;transition:border-color 140ms cubic-bezier(0.22,1,0.36,1)}
+.reqd-mp-row:hover{border-color:var(--ink-soft)}
+.reqd-mp-icon{width:18px;height:18px;flex-shrink:0;color:var(--ink-soft);fill:none;
+  stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round;
+  margin-top:1px}
+.reqd-mp-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.reqd-mp-line1{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink)}
+.reqd-mp-name{font-weight:600;color:var(--ink)}
+.reqd-mp-fname{color:var(--ink-soft);font-style:italic;font-family:'Fraunces',serif;
+  font-size:13px}
+.reqd-mp-fname-img{cursor:pointer;color:var(--c-ok);
+  text-decoration:underline;text-decoration-style:dotted;
+  text-underline-offset:3px;text-decoration-color:var(--c-ok);
+  transition:color 120ms}
+.reqd-mp-fname-img:hover{color:var(--c-ok)}
+.reqd-mp-line2{display:flex;gap:12px;align-items:baseline;
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-soft)}
+.reqd-mp-ctype{color:var(--ink)}
+.reqd-mp-size{font-variant-numeric:tabular-nums}
+.reqd-mp-hint{margin-left:auto;font-style:italic;color:var(--ink-soft);opacity:0.75}
+
+/* Inline image preview (for direct image/* response bodies, not multipart) */
+.reqd-pl-image{padding:14px;text-align:center}
+.reqd-img-inline{max-width:100%;max-height:280px;border:1px solid var(--paper-edge);
+  border-radius:4px;display:block;margin:0 auto 8px}
+
+/* Floating image-preview popover. Anchored to cursor. Body-attached so
+   it can escape any clipped/overflow:hidden ancestor. */
+.reqd-img-popover{position:fixed;z-index:9999;pointer-events:none;
+  background:var(--paper);border:1px solid var(--ink-soft);
+  box-shadow:0 8px 24px rgba(0,0,0,0.18);
+  padding:6px;border-radius:4px;
+  opacity:0;transition:opacity 140ms ease-out;
+  max-width:280px}
+.reqd-img-popover img{display:block;max-width:240px;max-height:240px;
+  border-radius:2px;background:var(--paper-deep)}
+.reqd-img-popover-meta{margin-top:6px;font-family:'JetBrains Mono',monospace;
+  font-size:10.5px}
+.reqd-img-popover-fname{color:var(--ink);font-weight:600}
+.reqd-img-popover-sub{color:var(--ink-soft);margin-top:1px}
+
+/* Summary mode — richer layout */
+.reqd-pl-summary{margin-top:12px;padding:14px 16px;background:var(--paper);
+  border:1px solid var(--paper-edge);border-radius:6px}
+.reqd-pl-summary-title{font-family:'Fraunces',serif;font-style:italic;
+  font-size:14px;color:var(--ink);margin-bottom:10px}
+.reqd-pl-summary-grid{margin-bottom:10px}
+.reqd-pl-summary-subhead{font-family:'JetBrains Mono',monospace;
+  text-transform:uppercase;letter-spacing:0.04em;font-size:10.5px;
+  color:var(--ink-soft);margin-top:12px;margin-bottom:6px;
+  padding-bottom:4px;border-bottom:1px dashed var(--paper-edge)}
+.reqd-pl-summary-parts{list-style:none;margin:0;padding:0;
+  display:flex;flex-direction:column;gap:4px}
+.reqd-pl-summary-parts li{display:flex;align-items:center;gap:8px;
+  padding:4px 0;font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--ink-soft)}
+.reqd-pl-summary-pname{font-weight:600;color:var(--ink);min-width:80px}
+.reqd-pl-summary-pfile{color:var(--ink-soft);font-style:italic;
+  font-family:'Fraunces',serif;font-size:12px;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reqd-pl-summary-ptype{color:var(--ink)}
+.reqd-pl-summary-psize{font-variant-numeric:tabular-nums;color:var(--ink-soft);
+  min-width:60px;text-align:right}
+.reqd-pl-summary-resp{display:grid;grid-template-columns:170px 1fr;gap:4px 12px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink);
+  word-break:break-word}
+.reqd-pl-summary-resp dt{color:var(--ink-soft);font-weight:500}
+.reqd-pl-summary-resp dd{color:var(--ink)}
+.reqd-pl-summary-str{color:var(--ink);font-style:normal}
+.reqd-pl-summary-num{color:var(--c-info, #2d6a96);font-variant-numeric:tabular-nums}
+.reqd-pl-summary-bool{color:var(--c-amber, #d49620);font-weight:500}
+.reqd-pl-summary-null{color:var(--ink-soft);font-style:italic}
+.reqd-pl-summary-arr,.reqd-pl-summary-obj{color:var(--ink-soft);font-family:'JetBrains Mono',monospace}
+
+/* Export section: code wrapper holds the copy-btn ABOVE the line-numbered
+   code (which is its own scrollable container). */
+.reqd-export-codewrap{position:relative;margin-top:10px}
+.reqd-export-codewrap .copy-btn{position:absolute;top:8px;right:8px;
+  font-size:10.5px;background:var(--paper);color:var(--ink-soft);
+  border:1px solid var(--paper-edge);padding:4px 10px;border-radius:4px;
+  cursor:pointer;font-family:'JetBrains Mono',monospace;z-index:5;
+  transition:background 120ms,color 120ms,border-color 120ms}
+.reqd-export-codewrap .copy-btn:hover{background:var(--ink);color:var(--paper);
+  border-color:var(--ink)}
+.reqd-export-codewrap .copy-btn.copied{background:var(--c-ok);color:#fff;
+  border-color:var(--c-ok)}
+
+/* ─────────────────────────────────────────────────────────────────────
+   9.N.8e · Recent requests · live toggle + refresh button + sortable headers
+───────────────────────────────────────────────────────────────────── */
+
+.recent-actions{display:inline-flex;gap:8px;align-items:center;margin-left:auto}
+
+/* Live toggle — small pill with a colored dot that pulses when on */
+.recent-live-toggle{display:inline-flex;align-items:center;gap:6px;
+  padding:5px 10px;background:var(--paper);
+  border:1px solid var(--paper-edge);border-radius:14px;cursor:pointer;
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-soft);
+  text-transform:uppercase;letter-spacing:0.04em;
+  transition:background 140ms cubic-bezier(0.22,1,0.36,1),
+             color 140ms,border-color 140ms}
+.recent-live-toggle:hover{border-color:var(--ink-soft);color:var(--ink)}
+.recent-live-toggle[data-on="true"]{background:var(--paper-deep);
+  border-color:var(--c-ok);color:var(--c-ok)}
+.recent-live-dot{width:7px;height:7px;border-radius:50%;
+  background:var(--ink-soft);display:inline-block;flex-shrink:0;
+  transition:background 200ms}
+.recent-live-toggle[data-on="true"] .recent-live-dot{background:var(--c-ok);
+  animation:recent-live-pulse 1.6s ease-in-out infinite}
+@keyframes recent-live-pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(47,111,62,0.45);opacity:1}
+  50%{box-shadow:0 0 0 5px rgba(47,111,62,0);opacity:0.55}
+}
+
+/* Refresh button — handdrawn icon in a tight square */
+.recent-refresh-btn{display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;background:var(--paper);
+  border:1px solid var(--paper-edge);border-radius:6px;cursor:pointer;
+  color:var(--ink-soft);padding:0;
+  transition:background 140ms cubic-bezier(0.22,1,0.36,1),
+             color 140ms,border-color 140ms,transform 280ms}
+.recent-refresh-btn svg{width:14px;height:14px;fill:none;stroke:currentColor;
+  stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.recent-refresh-btn:hover{border-color:var(--ink);color:var(--ink);
+  background:var(--paper-deep)}
+.recent-refresh-btn:active{transform:scale(0.92)}
+.recent-refresh-btn.is-spinning svg{
+  animation:recent-refresh-spin 700ms cubic-bezier(0.22,1,0.36,1)}
+@keyframes recent-refresh-spin{
+  from{transform:rotate(0)} to{transform:rotate(360deg)}
+}
+
+/* Sortable headers — cursor pointer + sort indicator chevron */
+#recent-tbl thead th[data-sort-key]{cursor:pointer;user-select:none;
+  position:relative;padding-right:18px;
+  transition:color 140ms,background 140ms}
+#recent-tbl thead th[data-sort-key]:hover{color:var(--ink);background:var(--paper-deep)}
+#recent-tbl thead th[data-sort-key]::after{content:'';position:absolute;
+  right:6px;top:50%;transform:translateY(-50%);
+  width:0;height:0;
+  border-left:3px solid transparent;border-right:3px solid transparent;
+  opacity:0;transition:opacity 140ms}
+#recent-tbl thead th[data-sort-key]:hover::after{opacity:0.35;
+  border-top:4px solid currentColor}
+#recent-tbl thead th[data-sort-active="asc"]::after{opacity:1;
+  border-bottom:4px solid currentColor;border-top:none;color:var(--ink)}
+#recent-tbl thead th[data-sort-active="desc"]::after{opacity:1;
+  border-top:4px solid currentColor;border-bottom:none;color:var(--ink)}
+#recent-tbl thead th[data-sort-active]{color:var(--ink);font-weight:600}
+
+/* Live-row entry animation — when a new request slides in at the top
+   via SSE, do a brief paper-deep highlight that fades, plus translateY. */
+@keyframes recent-row-arrive{
+  0%   {background:var(--paper-deep);opacity:0;transform:translateY(-6px)}
+  10%  {opacity:1}
+  100% {background:transparent;opacity:1;transform:translateY(0)}
+}
+tr.recent-row-fresh{animation:recent-row-arrive 600ms cubic-bezier(0.22,1,0.36,1)}
+
+/* ── Burst context ───────────────────────────────────────────────── */
+.reqd-bc-summary{font-family:'Fraunces',serif;font-style:italic;font-size:13px;
+  color:var(--ink);margin-bottom:8px}
+.reqd-bc-marker{display:flex;gap:2px;height:18px;margin-bottom:14px;
+  padding:4px 6px;background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:4px}
+.reqd-bc-bar{display:inline-block;width:5px;background:var(--ink-soft);
+  border-radius:1px;opacity:0.4;cursor:default;transition:opacity 120ms}
+.reqd-bc-bar.is-current{background:var(--c-ok);opacity:1;transform:scaleY(1.15)}
+.reqd-bc-bar:hover{opacity:0.85}
+.reqd-bc-neighbours-label{font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.02em;
+  margin-bottom:4px}
+.reqd-bc-list{display:flex;flex-direction:column;gap:1px;
+  background:var(--paper);border:1px solid var(--paper-edge);border-radius:5px;
+  overflow:hidden}
+.reqd-bc-row{display:grid;grid-template-columns:12px 90px 38px 1fr 48px 56px;gap:8px;
+  align-items:center;padding:6px 10px;font-family:'JetBrains Mono',monospace;
+  font-size:11px;color:var(--ink);transition:background 120ms cubic-bezier(0.22,1,0.36,1)}
+.reqd-bc-row:hover{background:var(--paper-deep)}
+.reqd-bc-row.is-current{background:var(--paper-deep);border-left:2px solid var(--c-ok);
+  padding-left:8px}
+.reqd-bc-arrow{color:var(--c-ok);font-weight:bold;text-align:center}
+.reqd-bc-ts{color:var(--ink-soft);font-variant-numeric:tabular-nums}
+.reqd-bc-path{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reqd-bc-lat{text-align:right;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+
+/* ── Endpoint health mini-sparklines ─────────────────────────────── */
+/* 9.N.8e · grid uses minmax(0,1fr) so the sparkline column can shrink
+   below its intrinsic content width — without this, a 20-cell unicode
+   line at 14px overflows the column track and pushes the totals off
+   the right edge of the section. */
+.reqd-hc-row{display:grid;grid-template-columns:74px minmax(0,1fr) auto;
+  gap:10px;align-items:center;padding:5px 0;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink-soft)}
+.reqd-hc-label{color:var(--ink-soft);text-transform:uppercase;font-size:10.5px;
+  letter-spacing:0.02em}
+/* Sparkline: SVG-based for pixel-accurate width. The host fills the 1fr
+   column and the inline-svg auto-scales to fit. */
+.reqd-hc-spark{display:block;width:100%;height:22px;min-width:0}
+.reqd-hc-spark svg{display:block;width:100%;height:100%;overflow:visible}
+.reqd-hc-cell{cursor:pointer;transition:opacity 120ms}
+.reqd-hc-cell rect{transition:fill 120ms,transform 120ms;transform-origin:bottom}
+.reqd-hc-cell:hover rect{fill:var(--c-ok);transform:scaleY(1.15)}
+.reqd-hc-row[data-metric="errors"] .reqd-hc-cell:hover rect{fill:var(--c-danger)}
+.reqd-hc-totals{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums;
+  font-weight:500;white-space:nowrap;min-width:90px}
+.reqd-hc-summary{margin-top:10px;padding-top:8px;
+  border-top:1px dashed var(--paper-edge);font-family:'JetBrains Mono',monospace;
+  font-size:10.5px;text-align:center}
+.reqd-hc-tip{position:absolute;background:var(--paper);border:1px solid var(--ink-soft);
+  padding:8px 11px;font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--ink);box-shadow:0 4px 12px rgba(0,0,0,0.12);pointer-events:none;
+  z-index:50;line-height:1.5;min-width:130px;
+  transform:translate(-50%,-100%);
+  transition:opacity 120ms ease-out}
+.reqd-hc-tip-time{font-weight:600;color:var(--ink);margin-bottom:2px}
+.reqd-hc-tip-lat{color:var(--ink-soft);font-size:10.5px;margin-top:2px}
+.reqd-section{position:relative}   /* anchor for absolute tooltip */
+
+/* ── Export section ──────────────────────────────────────────────── */
+.reqd-export-row-label{font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.02em;
+  margin-top:10px;margin-bottom:5px}
+.reqd-export-row-label:first-of-type{margin-top:4px}
+.reqd-export-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
+.reqd-chip{display:inline-flex;align-items:center;padding:5px 11px;
+  background:var(--paper);border:1px solid var(--paper-edge);
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-soft);
+  border-radius:14px;cursor:pointer;
+  transition:border-color 140ms cubic-bezier(0.22,1,0.36,1),color 140ms,background 140ms}
+.reqd-chip:hover{border-color:var(--ink);color:var(--ink);background:var(--paper-deep)}
+.reqd-chip:active{transform:translateY(1px)}
+
+/* Source card with hand-drawn icon */
+.reqd-source{display:flex;align-items:center;gap:14px;padding:12px 14px;
+  background:linear-gradient(135deg, var(--paper) 0%, var(--paper-deep) 100%);
+  border:1px solid var(--paper-edge);border-radius:10px}
+.reqd-source .source-icon{width:42px;height:42px;flex-shrink:0;
+  border-radius:50%;background:var(--paper);border:1.5px solid var(--paper-edge);
+  display:flex;align-items:center;justify-content:center;color:var(--ink)}
+.reqd-source .source-icon .icon{width:22px;height:22px}
+.reqd-source .source-info{flex:1;min-width:0}
+.reqd-source .source-name{font-family:'Fraunces',serif;font-size:16px;font-weight:500;color:var(--ink)}
+.reqd-source .source-sub{font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--ink-soft);margin-top:3px;word-break:break-all}
+
+/* Code-block toggle (curl / python / node tabs) */
+.reqd-code-tabs{display:flex;gap:0;background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:6px;padding:3px;width:fit-content;font-family:'JetBrains Mono',monospace}
+.reqd-code-tabs button{padding:5px 12px;font-size:11.5px;color:var(--ink-soft);
+  border:0;background:transparent;border-radius:4px;cursor:pointer}
+.reqd-code-tabs button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+/* 9.N.8e · Code block — light theme with gutter line numbers.
+   Previous design was dark (--ink bg) which made syn-kw / syn-fn / syn-url
+   tokens invisible (they're colored with --ink, same as bg). Stripe and
+   Twilio and Geeks for Geeks all use a soft cream/paper code block on
+   light pages — that's what we do too. The line-number gutter is rendered
+   via CSS counter on .reqd-code-line elements. */
+.reqd-code{background:var(--paper-deep);color:var(--ink);
+  border:1px solid var(--paper-edge);border-radius:6px;
+  padding:0;margin-top:10px;position:relative;overflow:hidden;
+  font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.55}
+.reqd-code-scroll{max-height:340px;overflow:auto;padding:12px 14px 12px 12px}
+.reqd-code .copy-btn{position:absolute;top:8px;right:8px;font-size:10.5px;
+  background:var(--paper);color:var(--ink-soft);border:1px solid var(--paper-edge);
+  padding:4px 10px;border-radius:4px;cursor:pointer;
+  font-family:'JetBrains Mono',monospace;z-index:5;
+  transition:background 120ms cubic-bezier(0.22,1,0.36,1),color 120ms,border-color 120ms}
+.reqd-code .copy-btn:hover{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.reqd-code .copy-btn.copied{background:var(--c-ok);color:#fff;border-color:var(--c-ok)}
+
+/* Numbered line wrapper — each line is one .reqd-code-line with a
+   pseudo-element gutter showing the line number. CSS counters give us
+   automatic numbering without polluting the textContent. */
+.reqd-code pre{margin:0;padding:0;font-family:'JetBrains Mono',monospace;
+  font-size:12px;line-height:1.55;color:var(--ink);
+  white-space:pre;counter-reset:lineno}
+.reqd-code-line{display:block;padding-left:44px;position:relative;
+  border-left:0;min-height:18px;white-space:pre}
+.reqd-code-line::before{counter-increment:lineno;content:counter(lineno);
+  position:absolute;left:0;width:32px;text-align:right;
+  color:var(--ink-soft);opacity:0.55;font-variant-numeric:tabular-nums;
+  user-select:none;pointer-events:none;font-size:10.5px;line-height:1.55;top:0;
+  padding-right:6px;border-right:1px solid var(--paper-edge)}
+.reqd-code-line:hover{background:rgba(0,0,0,0.022)}
+.reqd-code-line:hover::before{opacity:1;color:var(--ink)}

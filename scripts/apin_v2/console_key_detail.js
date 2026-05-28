@@ -260,7 +260,15 @@
       // 9.N.T · expose filterRequests so Traffic-tab drills land on a time slice.
       window.APIN = window.APIN || {};
       window.APIN.keyDetail = Object.assign(window.APIN.keyDetail || {}, {
-        openRequest: openRequestDetail,
+        openRequest: function (rid) {
+          // 9.N.T9 · Prefer the shared full drawer (payload+image, burst,
+          // health, export) — identical to the Usage page. Fall back to the
+          // local lightweight drawer only if the shared module didn't load.
+          if (window.APIN && APIN.requestDrawer && APIN.requestDrawer.open) {
+            return APIN.requestDrawer.open(rid);
+          }
+          return openRequestDetail(rid);
+        },
         filterRequests: function (since, until) {
           reqTimeFilter = (since && until) ? { since: since, until: until } : null;
           setActiveTab('requests');
@@ -386,6 +394,15 @@
     if (m) m.classList.remove('show');
   }
   async function openRequestDetail(rid) {
+    // 9.N.T9 · Single source of truth: delegate to the shared full drawer
+    // (payload+image, stage waterfall, burst neighbours, endpoint health,
+    // export) — identical to the Usage page. Every caller on this page
+    // (Requests tab, Traffic container, Overview ribbon) lands here, so this
+    // one guard upgrades them all. Falls back to the legacy inline drawer
+    // below only if the shared module failed to load.
+    if (window.APIN && APIN.requestDrawer && APIN.requestDrawer.open) {
+      return APIN.requestDrawer.open(rid);
+    }
     openReqd();
     $('reqd-title').textContent = 'Request #' + rid;
     $('reqd-sub').textContent = 'loading…';

@@ -6388,6 +6388,8 @@ def _add_account_console_routes(app):
         "apin_splash.js",          # 9.N.8h — splash overlay dismiss logic
         "console_key_overview.js", # 9.N.9 — per-key bento Overview widgets
         "console_key_traffic.js",  # 9.N.T — per-key Traffic tab widgets
+        "apin_request_drawer.js",  # 9.N.T9 — shared request-detail drawer
+        "apin_request_drawer.css", # 9.N.T9 — shared drawer styles
     }
     _STATIC_JS_CACHE: dict[str, dict] = {}
 
@@ -6415,9 +6417,10 @@ def _add_account_console_routes(app):
                     "ETag": cache["etag"],
                     "Cache-Control": "public, max-age=0, must-revalidate",
                 })
+            _media = "text/css" if filename.endswith(".css") else "application/javascript"
             return Response(
                 content=cache["body"],
-                media_type="application/javascript",
+                media_type=_media,
                 headers={
                     "Cache-Control": "public, max-age=0, must-revalidate",
                     "ETag": cache["etag"],

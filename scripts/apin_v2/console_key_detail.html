@@ -1084,11 +1084,58 @@ a:hover{color:var(--green-deep)}
 .tf-brush-wrap{padding:2px 2px 6px;}
 .tf-brush-cap{font:9px 'JetBrains Mono',monospace;color:var(--ink-mute);margin:4px 0 3px;text-align:right;}
 .tf-brush-reset{background:none;border:none;color:var(--c-accent,#52b788);cursor:pointer;font:inherit;text-decoration:underline;padding:0;}
+.tf-brush-svg{cursor:grab;}
+.tf-brush-svg:active{cursor:grabbing;}
 .tf-brush-win{cursor:grab;}
+.tf-blk{transition:opacity .12s ease;}
+.tf-seg{cursor:pointer;}
+/* bytes flow — transfer summary */
+.tf-xfer{padding:10px 14px 12px;display:flex;flex-direction:column;gap:9px;}
+.tf-xfer-nums{display:flex;justify-content:space-between;gap:14px;}
+.tf-xfer-side{display:flex;align-items:center;gap:8px;}
+.tf-xfer-side.tf-xfer-out{justify-content:flex-end;}
+.tf-xfer-arrow{font-size:16px;line-height:1;}
+.tf-xfer-val{font:600 19px/1.05 'Fraunces',serif;color:var(--ink);}
+.tf-xfer-lbl{font:9.5px 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:2px;}
+.tf-xfer-prop{display:flex;height:12px;border-radius:6px;overflow:hidden;background:rgba(120,110,90,.12);}
+.tf-xfer-prop span{display:block;height:100%;transition:width .4s cubic-bezier(.22,1,.36,1);}
+.tf-xfer-proplbl{display:flex;justify-content:space-between;font:9.5px 'JetBrains Mono',monospace;color:var(--ink-soft);}
+.tf-byspark-row{display:flex;align-items:center;gap:8px;}
+.tf-byspark-tag{font:600 9px 'JetBrains Mono',monospace;width:20px;flex-shrink:0;text-transform:uppercase;}
+.tf-byb{transition:opacity .12s ease;}
+/* bytes expand — per-endpoint two-bar rows */
+.tfx-ep2{display:grid;grid-template-columns:160px 1fr 70px 1fr 70px;gap:8px;align-items:center;font:11px 'JetBrains Mono',monospace;margin:4px 0;}
+.tfx-ep2-head{color:var(--ink-mute);font-weight:600;border-bottom:1px solid var(--paper-edge);padding-bottom:5px;}
+.tfx-ep2-path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-soft);}
+.tfx-ep2-bar{height:11px;background:rgba(120,110,90,.14);border-radius:3px;overflow:hidden;display:block;}
+.tfx-ep2-bar i{display:block;height:100%;border-radius:3px;transition:width .35s cubic-bezier(.22,1,.36,1);}
+.tfx-ep2-v{text-align:right;}
+.tfx-largest{font:12px 'JetBrains Mono',monospace;color:var(--ink-soft);display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.tfx-largest b{color:var(--ink);}
+.tfx-insight{font:13px/1.6 'Fraunces',serif;color:var(--ink-soft);margin:2px 0 4px;}
+.tfx-insight b{color:var(--ink);font-style:italic;}
+/* hive expand — per-method table */
+.tfx-hv-row{display:grid;grid-template-columns:70px 1fr 1fr 1fr 1fr 72px 60px;gap:8px;align-items:center;font:11.5px 'JetBrains Mono',monospace;padding:5px 4px;border-bottom:1px solid rgba(120,110,90,.12);cursor:pointer;}
+.tfx-hv-row:hover{background:rgba(82,183,136,.08);}
+.tfx-hv-head{color:var(--ink-mute);font-weight:600;cursor:default;border-bottom:1px solid var(--paper-edge);}
+.tfx-hv-head:hover{background:none;}
+.tfx-hv-n{text-align:right;color:var(--ink);}
+.tfx-hv-succ{text-align:right;font-weight:600;}
+.tfx-hv-ok{color:var(--c-ok);}.tfx-hv-amber{color:var(--c-amber);}.tfx-hv-danger{color:var(--c-danger);}
+/* generic expand table (hero top-buckets, calendar active-days) */
+.tfx-tb{font:11.5px 'JetBrains Mono',monospace;}
+.tfx-tb-row{display:grid;grid-template-columns:28px 1fr 60px 50px 50px 50px 52px;gap:8px;align-items:center;padding:5px 4px;border-bottom:1px solid rgba(120,110,90,.12);cursor:pointer;}
+.tfx-tb-row>span:not(.tfx-tb-lbl){text-align:right;color:var(--ink);}
+.tfx-tb-3 .tfx-tb-row{grid-template-columns:1fr 80px 60px;}
+.tfx-tb-row:hover{background:rgba(82,183,136,.08);}
+.tfx-tb-head{color:var(--ink-mute);font-weight:600;cursor:default;border-bottom:1px solid var(--paper-edge);}
+.tfx-tb-head:hover{background:none;}
+.tfx-tb-lbl{color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;}
 /* KPI tiles */
 .tf-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
 @media (max-width:760px){.tf-kpis{grid-template-columns:repeat(2,1fr);}}
 .tf-kpi{position:relative;padding:15px 16px 14px;display:flex;flex-direction:column;gap:3px;}
+.tf-kpi .ov-expand{position:absolute;top:8px;right:8px;}
 .tf-kpi-head{display:flex;align-items:center;gap:6px;font:600 9.5px/1 'JetBrains Mono',monospace;
   letter-spacing:.06em;text-transform:uppercase;color:var(--ink-mute);}
 .tf-kpi-head .icon{width:12px;height:12px;color:var(--ink-soft);}
@@ -1172,13 +1219,15 @@ a:hover{color:var(--green-deep)}
   pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:280px;opacity:0;transition:opacity .1s;}
 .ov-tip.show{opacity:1;}
 </style>
+<link rel="stylesheet" href="/static/apin_request_drawer.css?v=9t9">
 <script src="/static/odometer.js"></script>
 <script src="/static/apin_charts.js"></script>
 <script src="/static/apin_lightbox.js"></script>
 <script src="/static/apin_live_stream.js"></script>
 <script src="/static/apin_syntax.js"></script>
+<script src="/static/apin_request_drawer.js?v=9t9"></script>
 <script src="/static/console_key_overview.js?v=9n9h"></script>
-<script src="/static/console_key_traffic.js?v=9nt6"></script>
-<script src="/static/console_key_detail.js?v=9nt5"></script>
+<script src="/static/console_key_traffic.js?v=9nu3"></script>
+<script src="/static/console_key_detail.js?v=9nt7"></script>
 </body>
 </html>
