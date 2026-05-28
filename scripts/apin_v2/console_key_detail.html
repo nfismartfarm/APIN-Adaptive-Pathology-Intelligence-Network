@@ -505,15 +505,22 @@ a:hover{color:var(--green-deep)}
           <button class="ov-expand" data-tfx="hero" aria-label="Expand requests over time"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
         <div class="ov-card-body" id="tf-hero-body"><div class="ov-skel ov-skel-chart"></div></div>
         <div class="tf-hero-foot"><span><i class="rdot s-2xx"></i>2xx</span><span><i class="rdot s-4xx"></i>4xx</span><span><i class="rdot s-5xx"></i>5xx</span>
-          <span class="ov-ribbon-hint">click a bar → requests at that time</span></div>
+          <span class="ov-ribbon-hint">drag the strip to zoom · click a bar → requests</span></div>
       </div>
-      <!-- STATS RAIL -->
-      <div class="tf-statsrail" id="tf-stats"><div class="ov-skel ov-skel-text"></div></div>
-      <!-- CALENDAR -->
-      <div class="ov-card tf-cal" id="tf-cal">
-        <div class="ov-card-head"><h3><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg> Activity calendar</h3>
-          <button class="ov-expand" data-tfx="calendar" aria-label="Expand activity calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
-        <div class="ov-card-body" id="tf-cal-body"><div class="ov-skel ov-skel-chart"></div></div>
+      <!-- KPI TILES (rendered by console_key_traffic.js) -->
+      <div class="tf-kpis" id="tf-kpis"><div class="ov-skel ov-skel-text"></div></div>
+      <!-- CALENDAR + HIVE -->
+      <div class="tf-row2">
+        <div class="ov-card tf-cal" id="tf-cal">
+          <div class="ov-card-head"><h3><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg> Activity calendar</h3>
+            <button class="ov-expand" data-tfx="calendar" aria-label="Expand activity calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
+          <div class="ov-card-body" id="tf-cal-body"><div class="ov-skel ov-skel-chart"></div></div>
+        </div>
+        <div class="ov-card tf-hive" id="tf-hive">
+          <div class="ov-card-head"><h3><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg> Method &times; status hive</h3>
+            <button class="ov-expand" data-tfx="hive" aria-label="Expand method status hive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
+          <div class="ov-card-body" id="tf-hive-body"><div class="ov-skel ov-skel-chart"></div></div>
+        </div>
       </div>
       <!-- CLOCK + BYTES -->
       <div class="tf-row">
@@ -1065,29 +1072,99 @@ a:hover{color:var(--green-deep)}
 /* ── 9.N.T · Traffic tab (wide stack) ─────────────────────────────────── */
 .tf-stack{display:flex;flex-direction:column;gap:16px;}
 #tf-stack.ov-loading{opacity:.55;transition:opacity .15s ease;}
+.tf-empty{padding:30px 16px;text-align:center;font:italic 13px 'Fraunces',serif;color:var(--ink-mute);}
 .tf-hero-foot{display:flex;gap:14px;align-items:center;padding:8px 16px 14px;
   font:10.5px/1 'JetBrains Mono',monospace;color:var(--ink-mute);}
 .tf-hero-foot .rdot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle;}
 .tf-hero-foot .rdot.s-2xx{background:var(--c-ok);}.tf-hero-foot .rdot.s-4xx{background:var(--c-amber);}.tf-hero-foot .rdot.s-5xx{background:var(--c-danger);}
 .tf-hero-foot .ov-ribbon-hint{margin-left:auto;font-style:italic;}
 .tf-hero-body{padding:6px 12px 0;}
-/* stats rail */
-.tf-statsrail{display:flex;flex-wrap:wrap;gap:10px 26px;align-items:baseline;
-  background:var(--paper);border:1px solid var(--paper-edge);border-radius:12px;padding:13px 18px;}
-.tf-stat{display:flex;flex-direction:column;cursor:default;}
-.tf-stat.clickable{cursor:pointer;}
-.tf-stat-val{font:600 20px/1 'Fraunces',serif;color:var(--ink);}
-.tf-stat-lbl{font:600 9.5px/1.4 'JetBrains Mono',monospace;color:var(--ink-mute);
-  letter-spacing:.06em;text-transform:uppercase;margin-top:3px;}
-.tf-stat.clickable:hover .tf-stat-val{color:var(--c-accent,#52b788);}
+.tf-hero-main{position:relative;}
+/* brush / zoom strip */
+.tf-brush-wrap{padding:2px 2px 6px;}
+.tf-brush-cap{font:9px 'JetBrains Mono',monospace;color:var(--ink-mute);margin:4px 0 3px;text-align:right;}
+.tf-brush-reset{background:none;border:none;color:var(--c-accent,#52b788);cursor:pointer;font:inherit;text-decoration:underline;padding:0;}
+.tf-brush-win{cursor:grab;}
+/* KPI tiles */
+.tf-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+@media (max-width:760px){.tf-kpis{grid-template-columns:repeat(2,1fr);}}
+.tf-kpi{position:relative;padding:15px 16px 14px;display:flex;flex-direction:column;gap:3px;}
+.tf-kpi-head{display:flex;align-items:center;gap:6px;font:600 9.5px/1 'JetBrains Mono',monospace;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--ink-mute);}
+.tf-kpi-head .icon{width:12px;height:12px;color:var(--ink-soft);}
+.tf-kpi-val{font:600 26px/1.1 'Fraunces',serif;color:var(--ink);word-break:break-word;}
+.tf-kpi-sub{font:10.5px/1.3 'JetBrains Mono',monospace;color:var(--ink-soft);}
+/* calendar + hive row */
+.tf-row2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+@media (max-width:760px){.tf-row2{grid-template-columns:1fr;}}
+.tf-cal-body,.tf-hive-body{overflow-x:auto;}
+.tf-hex{cursor:pointer;transition:filter .12s;}
 /* clock + bytes row */
-.tf-row{display:grid;grid-template-columns:340px 1fr;gap:16px;}
+.tf-row{display:grid;grid-template-columns:minmax(300px,1fr) 1fr;gap:16px;}
 @media (max-width:760px){.tf-row{grid-template-columns:1fr;}}
-.tf-clock-svg, .tf-cal-svg, .tf-hero-svg, .tf-bytes-svg{display:block;width:100%;}
+.tf-clock-svg, .tf-cal-svg, .tf-hive-svg, .tf-hero-svg, .tf-bytes-svg{display:block;width:100%;}
 .tf-clock-wrap{display:flex;justify-content:center;align-items:center;padding:6px;}
-.tf-cal-cell{transition:opacity .12s;}
+.tf-clock-hint,.tf-bytes-legend{font:10px 'JetBrains Mono',monospace;color:var(--ink-mute);padding:6px 10px 2px;text-align:center;}
+.tf-bytes-legend{display:flex;justify-content:space-between;gap:14px;}
+.tf-cal-cell{transition:opacity .12s;cursor:pointer;}
 .tf-wedge{transition:opacity .12s;cursor:pointer;}
 .tf-bar{cursor:pointer;}
+
+/* request container (drill target inside lightbox) */
+.tf-rc{display:flex;flex-direction:column;gap:12px;}
+.tf-rc-bar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;}
+.tf-rc-chips{display:flex;flex-wrap:wrap;gap:5px;}
+.tf-chip{font:600 10.5px 'JetBrains Mono',monospace;background:var(--paper);border:1px solid var(--paper-edge);
+  border-radius:20px;padding:3px 11px;cursor:pointer;color:var(--ink-soft);transition:all .12s;}
+.tf-chip[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink);}
+.tf-chip-2xx[aria-pressed="true"]{background:var(--c-ok);border-color:var(--c-ok);}
+.tf-chip-4xx[aria-pressed="true"]{background:var(--c-amber);border-color:var(--c-amber);}
+.tf-chip-5xx[aria-pressed="true"]{background:var(--c-danger);border-color:var(--c-danger);}
+.tf-rc-search{flex:1;min-width:140px;font:11px 'JetBrains Mono',monospace;padding:5px 10px;
+  border:1px solid var(--paper-edge);border-radius:7px;background:var(--paper);color:var(--ink);}
+.tf-rc-meta{font:11px 'JetBrains Mono',monospace;color:var(--ink-soft);}
+.tf-rc-tablewrap{max-height:54vh;overflow-y:auto;border:1px solid var(--paper-edge);border-radius:8px;}
+.tf-rc-table{width:100%;border-collapse:collapse;font:11.5px 'JetBrains Mono',monospace;}
+.tf-rc-table thead th{position:sticky;top:0;background:var(--paper-deep,#e9e2d1);text-align:left;
+  padding:7px 10px;font-weight:600;color:var(--ink-soft);border-bottom:1px solid var(--paper-edge);}
+.tf-rc-row{cursor:pointer;border-bottom:1px solid rgba(120,110,90,.12);}
+.tf-rc-row:hover{background:rgba(82,183,136,.08);}
+.tf-rc-row td{padding:6px 10px;vertical-align:middle;}
+.tf-rc-path{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* request drawer must layer ABOVE the lightbox (z 9000) when opened from a container */
+#reqd{z-index:9600 !important;}#reqd-mask{z-index:9595 !important;}
+
+/* expanded-state primitives (shared across Traffic lightboxes) */
+.tfx-controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font:12px 'JetBrains Mono',monospace;}
+.tfx-sec{font:500 italic 11px 'Fraunces',serif;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-soft);
+  margin:18px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--paper-edge);}
+.tfx-legend{display:flex;gap:16px;align-items:center;font:10.5px 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:6px;}
+.tfx-legend .rdot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:middle;}
+.tfx-legend .rdot.s-2xx{background:var(--c-ok);}.tfx-legend .rdot.s-4xx{background:var(--c-amber);}.tfx-legend .rdot.s-5xx{background:var(--c-danger);}
+.tfx-facts{display:flex;flex-wrap:wrap;gap:8px 22px;font:12px 'JetBrains Mono',monospace;color:var(--ink-soft);}
+.tfx-facts b{color:var(--ink);}.tfx-facts .rdot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;}
+.tfx-facts .rdot.s-2xx{background:var(--c-ok);}.tfx-facts .rdot.s-4xx{background:var(--c-amber);}.tfx-facts .rdot.s-5xx{background:var(--c-danger);}
+.tfx-bignum{display:flex;flex-direction:column;gap:2px;margin-bottom:6px;}
+.tfx-bignum>span:first-child{font:600 34px/1 'Fraunces',serif;color:var(--ink);}
+.tfx-bignum-lbl{font:11px 'JetBrains Mono',monospace;color:var(--ink-mute);}
+.tfx-split{display:flex;gap:24px;align-items:center;flex-wrap:wrap;}
+.tfx-hbars{display:flex;flex-direction:column;gap:6px;}
+.tfx-hbar{display:grid;grid-template-columns:120px 1fr 92px;gap:10px;align-items:center;font:11px 'JetBrains Mono',monospace;}
+.tfx-hbar-lbl{color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tfx-hbar-track{height:13px;background:rgba(120,110,90,.14);border-radius:3px;overflow:hidden;display:block;}
+.tfx-hbar-track i{display:block;height:100%;border-radius:3px;transition:width .35s cubic-bezier(.22,1,.36,1);}
+.tfx-hbar-val{text-align:right;color:var(--ink);}
+.tfx-hbar[data-click]:hover .tfx-hbar-lbl{color:var(--c-accent,#52b788);}
+.tfx-clk-grid{display:grid;grid-template-columns:340px 1fr;gap:20px;align-items:start;}
+@media (max-width:680px){.tfx-clk-grid{grid-template-columns:1fr;}}
+.tfx-clk-detail{font:12px/1.7 'JetBrains Mono',monospace;color:var(--ink-soft);}
+.tfx-clk-tz{margin-left:auto;font:10px 'JetBrains Mono',monospace;color:var(--ink-mute);}
+.tfx-clk-hint,.tfx-clk-detail .tfx-clk-hint{font-style:italic;color:var(--ink-mute);margin-top:10px;}
+.tfx-hour-head{display:flex;align-items:center;justify-content:space-between;font:600 14px 'Fraunces',serif;color:var(--ink);margin-bottom:8px;}
+.tfx-back,.tfx-drill-btn{background:none;border:1px solid var(--paper-edge);border-radius:7px;padding:4px 10px;
+  cursor:pointer;font:11px 'JetBrains Mono',monospace;color:var(--ink);}
+.tfx-drill-btn{margin-top:12px;color:var(--c-accent,#52b788);border-color:var(--c-accent,#52b788);}
+.tfx-back:hover,.tfx-drill-btn:hover{background:var(--paper-deep,#e9e2d1);}
 
 /* mini tooltip */
 .ov-tip{position:fixed;z-index:99998;background:var(--ink);color:var(--paper);
@@ -1101,7 +1178,7 @@ a:hover{color:var(--green-deep)}
 <script src="/static/apin_live_stream.js"></script>
 <script src="/static/apin_syntax.js"></script>
 <script src="/static/console_key_overview.js?v=9n9h"></script>
-<script src="/static/console_key_traffic.js?v=9nt2"></script>
-<script src="/static/console_key_detail.js?v=9nt1"></script>
+<script src="/static/console_key_traffic.js?v=9nt6"></script>
+<script src="/static/console_key_detail.js?v=9nt5"></script>
 </body>
 </html>

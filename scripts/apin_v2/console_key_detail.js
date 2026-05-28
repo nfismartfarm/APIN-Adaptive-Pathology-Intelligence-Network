@@ -1098,6 +1098,34 @@
     }
   });
 
+  // ─── Cross-module surface (exposed UNCONDITIONALLY) ───────────────────
+  // 9.N.T · The Traffic tab's request container calls APIN.keyDetail.openRequest
+  // and .filterRequests. These must exist even if the user lands directly on
+  // #traffic (i.e. loadOverview() never ran). Define them at module scope.
+  window.APIN = window.APIN || {};
+  window.APIN.keyDetail = Object.assign(window.APIN.keyDetail || {}, {
+    openRequest: openRequestDetail,
+    filterRequests: function (since, until) {
+      reqTimeFilter = (since && until) ? { since: since, until: until } : null;
+      setActiveTab('requests');
+      var pane = document.getElementById('pane-requests');
+      var banner = document.getElementById('req-time-banner');
+      if (reqTimeFilter && pane) {
+        if (!banner) {
+          banner = document.createElement('div');
+          banner.id = 'req-time-banner';
+          banner.style.cssText = "display:flex;align-items:center;gap:10px;background:rgba(120,110,90,.08);border:1px solid var(--paper-edge);border-radius:8px;padding:8px 12px;margin-bottom:12px;font:12px 'JetBrains Mono',monospace;color:var(--ink-soft)";
+          pane.insertBefore(banner, pane.firstChild);
+        }
+        var fmt = (window.APIN && APIN.time) ? APIN.time.local : function (s) { return s; };
+        banner.innerHTML = 'filtered: ' + fmt(since) + ' &rarr; ' + fmt(until) +
+          ' <button id="req-clear-filter" style="margin-left:auto;background:none;border:1px solid var(--paper-edge);border-radius:6px;padding:3px 9px;cursor:pointer;font:inherit;color:var(--ink)">clear</button>';
+        var cb = document.getElementById('req-clear-filter');
+        if (cb) cb.addEventListener('click', function () { reqTimeFilter = null; banner.remove(); loadRequests({ reset: true }); });
+      } else if (banner) { banner.remove(); }
+    },
+  });
+
   // ─── Boot ────────────────────────────────────────────────────────────
   (async function boot() {
     // Bind tab links FIRST so click works even before /keys fetch returns.

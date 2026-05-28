@@ -1175,6 +1175,11 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
             ("SELECT minute_ts, requests FROM api_key_usage_minute "
              "WHERE key_id=? AND minute_ts>=? ORDER BY requests DESC LIMIT 1",
              (public_id, cut_min)),
+            # method × status-bucket matrix (the honeycomb hive)
+            ("SELECT method, "
+             "CASE WHEN status_code>=500 THEN 5 WHEN status_code>=400 THEN 4 ELSE 2 END AS sb, "
+             "COUNT(*) AS n FROM api_key_request_log WHERE key_id=? AND timestamp>=? "
+             "GROUP BY method, sb", (public_id, cut)),
             ("SELECT public_id, name FROM api_keys WHERE user_id=? AND deleted_at IS NULL",
              (user_id,)),
         ]
@@ -1186,29 +1191,35 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
                 res = [_rows(s, a) for s, a in READS]
         else:
             res = [_rows(s, a) for s, a in READS]
-        bucket_rows, cal_rows, clock_rows, ep_rows, peak_rows, key_rows = res
+        bucket_rows, cal_rows, clock_rows, ep_rows, peak_rows, matrix_rows, key_rows = res
 
         key = next((r for r in key_rows if r.get("public_id") == public_id), None)
         if key is None:
             return {"not_found": True, "public_id": public_id, "granularity": granularity}
         out["key"] = {"name": key.get("name")}
 
-        # ── ordered local bucket keys + labels for the hero/bytes time axis ──
-        keys, labels, tms = [], [], []
+        # ── ordered local bucket keys + two-line labels (main + sub) ──
+        keys, labels, subs, tms = [], [], [], []
         MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        dur_ms = {"hour": 3600_000, "day": 86400_000,
+                  "week": 7 * 86400_000, "month": 31 * 86400_000}[granularity]
         if granularity == "hour":
             base = now_local.replace(minute=0, second=0, microsecond=0)
             for i in range(nb - 1, -1, -1):
                 d = base - _td(hours=i)
                 keys.append(d.strftime("%Y-%m-%d %H"))
-                labels.append(f"{(d.hour % 12) or 12}{'a' if d.hour < 12 else 'p'}")
+                h12 = (d.hour % 12) or 12
+                labels.append(f"{h12} {'AM' if d.hour < 12 else 'PM'}")
+                subs.append(WD[d.weekday()] if d.hour == 0 else "")
                 tms.append(_utc_ms(d))
         elif granularity == "day":
             base = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
             for i in range(nb - 1, -1, -1):
                 d = base - _td(days=i)
-                keys.append(d.strftime("%Y-%m-%d")); labels.append(f"{d.month}/{d.day}")
+                keys.append(d.strftime("%Y-%m-%d"))
+                labels.append(f"{d.month}/{d.day}"); subs.append(WD[d.weekday()])
                 tms.append(_utc_ms(d))
         elif granularity == "month":
             seq = []
@@ -1220,16 +1231,21 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
                 seq.append((yy, mm))
             seq.reverse()
             for yy, mm in seq:
-                keys.append(f"{yy:04d}-{mm:02d}"); labels.append(MON[mm - 1])
+                keys.append(f"{yy:04d}-{mm:02d}")
+                labels.append(MON[mm - 1]); subs.append(str(yy) if mm == 1 else "")
                 tms.append(_utc_ms(_dt(yy, mm, 1)))
         else:  # week — SQL returns local daily keys; fold into 12 Monday-weeks
             base = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
             monday = base - _td(days=base.weekday())
             for i in range(nb - 1, -1, -1):
                 wk = monday - _td(weeks=i)
-                keys.append(wk.strftime("%Y-%m-%d")); labels.append(f"{wk.month}/{wk.day}")
+                wke = wk + _td(days=6)
+                keys.append(wk.strftime("%Y-%m-%d"))
+                labels.append(f"{MON[wk.month-1]} {wk.day}–{wke.day}")
+                subs.append(f"wk {nb - i}")
                 tms.append(_utc_ms(wk))
         idx = {k: i for i, k in enumerate(keys)}
+        out["bucket_ms"] = dur_ms
 
         def _wk_key(daykey):
             try:
@@ -1251,11 +1267,22 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
             n5a[i] += int(r.get("n5") or 0)
             bina[i] += int(r.get("bin") or 0); bouta[i] += int(r.get("bout") or 0)
 
-        hero = [{"label": labels[i], "t_ms": tms[i], "n2": n2a[i], "n4": n4a[i],
-                 "n5": n5a[i], "total": n2a[i] + n4a[i] + n5a[i]} for i in range(nb)]
+        hero = [{"label": labels[i], "sub": subs[i], "t_ms": tms[i], "n2": n2a[i],
+                 "n4": n4a[i], "n5": n5a[i], "total": n2a[i] + n4a[i] + n5a[i]}
+                for i in range(nb)]
         out["hero"] = {"buckets": hero, "max": max((h["total"] for h in hero), default=0)}
 
-        bytes_buckets = [{"label": labels[i], "t_ms": tms[i], "bin": bina[i], "bout": bouta[i]}
+        # method × status-bucket matrix (honeycomb hive)
+        mtx = {}
+        for r in matrix_rows:
+            m = (r.get("method") or "?").upper()
+            sbk = "n" + str(r.get("sb") or 2)
+            mtx.setdefault(m, {"n2": 0, "n4": 0, "n5": 0})[sbk] += int(r.get("n") or 0)
+        out["matrix"] = [{"method": m, "n2": v["n2"], "n4": v["n4"], "n5": v["n5"],
+                          "total": v["n2"] + v["n4"] + v["n5"]}
+                         for m, v in sorted(mtx.items(), key=lambda kv: -(kv[1]["n2"] + kv[1]["n4"] + kv[1]["n5"]))]
+
+        bytes_buckets = [{"label": labels[i], "sub": subs[i], "t_ms": tms[i], "bin": bina[i], "bout": bouta[i]}
                          for i in range(nb)]
         total_in, total_out = sum(bina), sum(bouta)
         total_req = sum(h["total"] for h in hero)
