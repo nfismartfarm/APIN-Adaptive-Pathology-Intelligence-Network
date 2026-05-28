@@ -808,7 +808,7 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
             if len(ips) == 1:
                 insights.append({"tone": "info",
                                  "text": "All traffic from a single IP — likely one integration."})
-            elif ip_baseline > 0 and len(ips) > max(3, ip_baseline * 3):
+            elif len(ips) > 8 and (ip_baseline <= 0 or len(ips) > ip_baseline * 4):
                 insights.append({"tone": "warn",
                                  "text": f"IP fan-out: {len(ips)} distinct IPs (baseline ~{ip_baseline:.0f}) — verify the key isn't shared."})
         out["insights"] = insights[:6]

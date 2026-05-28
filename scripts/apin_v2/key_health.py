@@ -315,8 +315,12 @@ def _hygiene_pillar(created_at: Optional[str], expires_at: Optional[str],
         penalties.append({"name": "over_permissioned", "points": -20,
                           "detail": "has write scope but only reads"})
 
-    # IP fan-out: distinct IPs this window vs baseline (leak heuristic)
-    if ip_baseline > 0 and distinct_ips > max(3, ip_baseline * 3):
+    # IP fan-out: distinct IPs this window vs baseline (leak heuristic).
+    # Threshold raised to >8 AND >4× baseline so proxy/load-balancer mesh
+    # IPs (HF presents traffic from multiple internal 10.16.x.x hops even
+    # from one origin) don't false-trigger a "leak" flag. Only a genuine
+    # large, sudden fan-out is penalised.
+    if distinct_ips > 8 and (ip_baseline <= 0 or distinct_ips > ip_baseline * 4):
         score -= 30
         penalties.append({"name": "ip_fan_out", "points": -30,
                           "detail": f"{distinct_ips} IPs (baseline ~{ip_baseline:.0f})"})
