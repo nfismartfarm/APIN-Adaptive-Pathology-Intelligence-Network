@@ -70,9 +70,17 @@
       if (el) el.innerHTML = `<div style="font:italic 12.5px/1.5 'Fraunces',serif;color:var(--c-danger,#b3402f);padding:14px 4px">${esc(msg)}</div>`;
     });
   }
+  let _refreshSeq = 0;
   async function refresh() {
     if (!PID) return;
-    const { ok, body } = await api(`/api/account/keys/${encodeURIComponent(PID)}/overview?window=${RANGE}`);
+    // Tag this fetch with the window it was issued for + a sequence number.
+    // When the user toggles windows, an older (slower) in-flight response must
+    // NOT overwrite a newer one — that race is what briefly showed the 1h
+    // numbers while the 7d fetch was still loading.
+    const myRange = RANGE;
+    const mySeq = ++_refreshSeq;
+    const { ok, body } = await api(`/api/account/keys/${encodeURIComponent(PID)}/overview?window=${myRange}`);
+    if (mySeq !== _refreshSeq || myRange !== RANGE) return;   // superseded — discard
     if (!ok || !body || body.ok === false) {
       const detail = (body && body.error && body.error.message) || (body && body.detail) || "could not load overview data";
       _showError(detail);
@@ -82,6 +90,7 @@
     const d = body.data || body;
     DATA = d;
     _liveReqCount = d.kpis && d.kpis.requests ? d.kpis.requests.value : null;  // re-sync live counter
+    const _b = $("ov-bento"); if (_b) _b.classList.remove("ov-loading");
     renderHealth(d.health);
     renderKpis(d.kpis);
     renderRibbon(d.ribbon);
@@ -1135,10 +1144,17 @@
       if (b.getAttribute("data-range") === RANGE) b.setAttribute("aria-pressed", "true");
       else b.removeAttribute("aria-pressed");
       b.addEventListener("click", () => {
+        if (b.getAttribute("data-range") === RANGE) return;
         RANGE = b.getAttribute("data-range");
         try { sessionStorage.setItem("ov_range", RANGE); } catch (_) {}
-        document.querySelectorAll(".ov-range button").forEach(x => x.removeAttribute("aria-pressed"));
+        document.querySelectorAll(".ov-range button[data-range]").forEach(x => x.removeAttribute("aria-pressed"));
         b.setAttribute("aria-pressed", "true");
+        // Switching windows: stop live increments (they were seeded from the
+        // OLD window's count) until the new window's data lands, cancel any
+        // pending debounced live-refresh, and dim the bento as a loading cue.
+        _liveReqCount = null;
+        if (_liveRefreshTimer) { clearTimeout(_liveRefreshTimer); _liveRefreshTimer = null; }
+        const _b = $("ov-bento"); if (_b) _b.classList.add("ov-loading");
         refresh();
       });
     });
@@ -1185,9 +1201,10 @@
         canvas._rows = _ribbonRows;
         drawRibbon(canvas, _ribbonRows);
       }
-      // Instant feedback: roll the requests counter +1 (slot-machine).
-      if (DATA && DATA.kpis && DATA.kpis.requests) {
-        if (_liveReqCount == null) _liveReqCount = DATA.kpis.requests.value || 0;
+      // Instant feedback: roll the requests counter +1 (slot-machine). Only
+      // when _liveReqCount is seeded (it's nulled during a window switch so we
+      // never display the previous window's count + 1 before the new data lands).
+      if (DATA && DATA.kpis && DATA.kpis.requests && _liveReqCount != null) {
         _liveReqCount += 1;
         setKpi("requests", fmtNum(_liveReqCount), DATA.kpis.requests.delta_pct, false, { odo: true });
       }

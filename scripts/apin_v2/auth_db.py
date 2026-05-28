@@ -382,6 +382,26 @@ class _ShimConn:
                     raise
         return _ShimCursor(rs)
 
+    def batch_read(self, stmts):
+        """Pipeline multiple read statements in ONE HTTP round-trip and return
+        a list of _ShimCursor (same surface as execute()). `stmts` is a list of
+        (sql, params) tuples. Used by the per-key Overview to collapse ~7
+        sequential Turso round-trips (≈5 s) into one (≈1 s). Read-only by
+        convention — writes stay on execute() so they aren't bundled into a
+        single atomic batch with the reads."""
+        norm = []
+        for s in stmts:
+            if isinstance(s, (tuple, list)) and len(s) == 2:
+                sql, params = s
+                args = [bytes(p) if isinstance(p, memoryview) else p
+                        for p in (params or ())]
+                norm.append((sql, args))
+            else:
+                norm.append((str(s), []))
+        with self._lock:
+            results = self._client.batch(norm)
+        return [_ShimCursor(rs) for rs in results]
+
     def executescript(self, script):
         stmts = _split_sql(script)
         with self._lock:

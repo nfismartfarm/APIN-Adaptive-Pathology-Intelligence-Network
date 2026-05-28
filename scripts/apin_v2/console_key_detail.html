@@ -982,6 +982,11 @@ a:hover{color:var(--green-deep)}
 .apin-odometer-static{display:inline-block;line-height:1;}
 .apin-odometer-digit.is-spinning .apin-odometer-digit-col{filter:blur(.6px);}
 
+/* 9.N.9 — loading cue while a window-toggle re-fetch is in flight. Old data
+   stays visible (no-flash) but dims slightly so the switch feels responsive. */
+#ov-bento.ov-loading{opacity:.55;transition:opacity .15s ease;}
+#ov-bento.ov-loading .ov-range{opacity:1;}
+
 /* spark-grid */
 .ov-spark-row{display:grid;grid-template-columns:1fr 90px auto;gap:10px;align-items:center;
   padding:9px 16px;border-bottom:1px solid var(--paper-edge);cursor:pointer;transition:background .12s;}
@@ -1013,7 +1018,7 @@ a:hover{color:var(--green-deep)}
 <script src="/static/apin_lightbox.js"></script>
 <script src="/static/apin_live_stream.js"></script>
 <script src="/static/apin_syntax.js"></script>
-<script src="/static/console_key_overview.js?v=9n9g"></script>
+<script src="/static/console_key_overview.js?v=9n9h"></script>
 <script src="/static/console_key_detail.js"></script>
 </body>
 </html>

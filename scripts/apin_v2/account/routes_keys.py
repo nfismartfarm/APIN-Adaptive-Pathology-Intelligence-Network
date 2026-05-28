@@ -713,16 +713,43 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
                 log.warning("overview query failed: %s", e)
                 return []
 
-        # ── Pull window rows (status, latency, path, method, ip) ──────────
-        cur_rows = _rows(
-            "SELECT timestamp, method, path, status_code, latency_ms, ip, "
-            "       bytes_in, bytes_out, error_code "
-            "FROM api_key_request_log WHERE key_id = ? AND timestamp >= ? "
-            "ORDER BY id", (public_id, cut_cur))
-        prev_rows = _rows(
-            "SELECT status_code, latency_ms FROM api_key_request_log "
-            "WHERE key_id = ? AND timestamp >= ? AND timestamp < ?",
-            (public_id, cut_prev, cut_cur))
+        # ── One pipelined round-trip for every window read. The Turso HTTP
+        #    shim bills one remote request per statement, so the previous ~7
+        #    sequential reads cost ~5 s; batched they cost ~1 s. Falls back to
+        #    sequential for the plain-sqlite backend (no batch_read). ──
+        cut_min = cut_cur[:16]   # api_key_usage_minute.minute_ts is 'YYYY-MM-DD HH:MM'
+        _READS = [
+            ("SELECT timestamp, method, path, status_code, latency_ms, ip, "
+             "bytes_in, bytes_out, error_code FROM api_key_request_log "
+             "WHERE key_id = ? AND timestamp >= ? ORDER BY id", (public_id, cut_cur)),
+            ("SELECT status_code, latency_ms FROM api_key_request_log "
+             "WHERE key_id = ? AND timestamp >= ? AND timestamp < ?",
+             (public_id, cut_prev, cut_cur)),
+            ("SELECT minute_ts, rate_limited FROM api_key_usage_minute "
+             "WHERE key_id = ? AND minute_ts >= ? ORDER BY minute_ts", (public_id, cut_min)),
+            ("SELECT DISTINCT ip FROM api_key_request_log WHERE key_id = ? "
+             "AND timestamp >= ? AND timestamp < ? AND ip IS NOT NULL",
+             (public_id, cut_prev, cut_cur)),
+            ("SELECT id, timestamp, method, path, status_code, latency_ms "
+             "FROM api_key_request_log WHERE key_id = ? ORDER BY id DESC LIMIT 240",
+             (public_id,)),
+            ("SELECT public_id, name FROM api_keys WHERE user_id = ? AND deleted_at IS NULL",
+             (user_id,)),
+            ("SELECT day, composite FROM api_key_health_snapshot WHERE key_id = ? "
+             "ORDER BY day DESC LIMIT 30", (public_id,)),
+        ]
+        if hasattr(c, "batch_read"):
+            try:
+                _curs = c.batch_read(_READS)
+                _res = [[dict(r) for r in cur.fetchall()] for cur in _curs]
+            except Exception as e:
+                log.warning("overview batch failed, sequential fallback: %s", e)
+                _res = [_rows(sql, args) for sql, args in _READS]
+        else:
+            _res = [_rows(sql, args) for sql, args in _READS]
+        (cur_rows, prev_rows, um_rows, prev_ip_rows,
+         ribbon_rows, key_rows, snap_rows) = _res
+        out["ribbon"] = list(reversed(ribbon_rows))
 
         # ── Status buckets ───────────────────────────────────────────────
         def _bucket(rows):
@@ -788,28 +815,13 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
         p50_prev = _pct(prev_lat, 0.50)
         p95_prev = _pct(prev_lat, 0.95)
 
-        # ── usage_minute: rate-limited count in window ───────────────────
-        um = _rows(
-            "SELECT SUM(rate_limited) AS rl, SUM(quota_blocked) AS qb "
-            "FROM api_key_usage_minute WHERE key_id = ? AND minute_ts >= ?",
-            (public_id, cut_cur[:16]))  # minute_ts is 'YYYY-MM-DD HH:MM'
-        rate_limited = int((um[0].get("rl") if um else 0) or 0)
-
-        # rate-limit events timeline — per-minute buckets that saw a throttle
-        # (RATE-LIMIT KPI expand). Empty list => the "0 events, healthy" state.
-        rl_event_rows = _rows(
-            "SELECT minute_ts, rate_limited FROM api_key_usage_minute "
-            "WHERE key_id = ? AND minute_ts >= ? AND rate_limited > 0 "
-            "ORDER BY minute_ts", (public_id, cut_cur[:16]))
+        # ── rate-limit: total + per-minute events timeline (from um_rows) ──
+        rate_limited = sum(int(r.get("rate_limited") or 0) for r in um_rows)
         out["rate_limit_events"] = [
             {"minute": r["minute_ts"], "count": int(r["rate_limited"] or 0)}
-            for r in rl_event_rows][:240]
+            for r in um_rows if int(r.get("rate_limited") or 0) > 0][:240]
 
         # ── IP baseline (distinct IPs in the prev window) ────────────────
-        prev_ip_rows = _rows(
-            "SELECT DISTINCT ip FROM api_key_request_log "
-            "WHERE key_id = ? AND timestamp >= ? AND timestamp < ? AND ip IS NOT NULL",
-            (public_id, cut_prev, cut_cur))
         ip_baseline = float(len(prev_ip_rows))
 
         # ── HEALTH SCORE ─────────────────────────────────────────────────
@@ -847,14 +859,9 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
             "rate_limited":{"value": rate_limited, "prev": None, "delta_pct": None},
         }
 
-        # ── Request ribbon: last 240 (newest last for left→right flow).
-        #    Bento shows the most-recent 120; expanded view shows all 240
-        #    with a brush-scrubber to pan. ──
-        ribbon = _rows(
-            "SELECT id, timestamp, method, path, status_code, latency_ms "
-            "FROM api_key_request_log WHERE key_id = ? "
-            "ORDER BY id DESC LIMIT 240", (public_id,))
-        out["ribbon"] = list(reversed(ribbon))
+        # ── Request ribbon (last 240) already fetched in the batch above and
+        #    stored in out["ribbon"]; bento shows the most-recent 120, expanded
+        #    shows all 240 with a brush-scrubber. ──
 
         # ── Spark-grid: top-6 endpoints, per-bucket counts ──────────────
         path_counter = _Counter(r.get("path") for r in cur_rows if r.get("path"))
@@ -974,14 +981,16 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
         }
 
         # ── Account average + similar keys (cross-key, cosine) ───────────
-        try:
-            klist = auth_db.list_console_api_keys(user_id=user_id, limit=100).get("items", [])
-        except Exception:
-            klist = []
-        id_name = {k["public_id"]: k.get("name") for k in klist}
-        other_ids = [k["public_id"] for k in klist]
-        acct_total, keys_with_traffic, similar = 0, 0, []
-        acct_vec = {k: 0.0 for k in _PERSONALITY_DIMS}
+        # key_rows came from the batched read. For a single-key account the
+        # account == this key (reuse pv / cur_rows; no extra cross-key query).
+        # Only when there ARE peer keys do we spend one more round-trip to pull
+        # their rows for the average + cosine-similarity ranking.
+        id_name = {r["public_id"]: r.get("name") for r in key_rows}
+        other_ids = [r["public_id"] for r in key_rows if r["public_id"] != public_id]
+        acct_vec = dict(pv)
+        acct_total = total
+        keys_with_traffic = 1 if total else 0
+        similar = []
         if other_ids:
             ph = ",".join("?" for _ in other_ids)
             arows = _rows(
@@ -991,12 +1000,14 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
             by_key: dict = {}
             for r in arows:
                 by_key.setdefault(r["key_id"], []).append(r)
-            acct_total = len(arows)
-            keys_with_traffic = sum(1 for v in by_key.values() if v)
-            if arows:
-                acct_vec = _personality_vector(arows)
+            # account aggregate spans THIS key (cur_rows) + every peer
+            acct_total = total + len(arows)
+            keys_with_traffic = (1 if total else 0) + sum(1 for v in by_key.values() if v)
+            combined = list(cur_rows) + arows
+            if combined:
+                acct_vec = _personality_vector(combined)
             for kid, rws in by_key.items():
-                if kid == public_id or not rws:
+                if not rws:
                     continue
                 similar.append({"public_id": kid, "name": id_name.get(kid) or kid,
                                 "match": round(_cosine(pv, _personality_vector(rws)) * 100)})
@@ -1011,12 +1022,14 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
             "this_vs_avg": round(total / avg_per_key, 2) if avg_per_key else None,
         }
 
-        # ── 30-day composite-health trend (lazy daily snapshot) ──────────
-        try:
-            # Snapshot today's composite on any window that has a real score
-            # (last write per day wins). Gating on 24h-only left the trend
-            # permanently empty for keys whose traffic has aged past 24h.
-            if health.get("composite") is not None:
+        # ── 30-day composite-health trend ────────────────────────────────
+        # Read came from the batch (snap_rows). Write today's snapshot only on
+        # the canonical 24h window so 1h/7d toggles stay on the fast single
+        # round-trip; the daily point still accrues whenever 24h is viewed.
+        health["trend"] = list(reversed(
+            [{"day": r["day"], "composite": r["composite"]} for r in (snap_rows or [])]))
+        if window == "24h" and health.get("composite") is not None:
+            try:
                 P = health.get("pillars", {})
                 c.execute(
                     "INSERT OR REPLACE INTO api_key_health_snapshot"
@@ -1030,14 +1043,13 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
                      total, now.isoformat()))
                 try: c.commit()
                 except Exception: pass
-            trows = _rows(
-                "SELECT day, composite FROM api_key_health_snapshot "
-                "WHERE key_id = ? ORDER BY day DESC LIMIT 30", (public_id,))
-            health["trend"] = list(reversed(
-                [{"day": r["day"], "composite": r["composite"]} for r in trows]))
-        except Exception as e:
-            log.warning("health snapshot/trend failed: %s", e)
-            health.setdefault("trend", [])
+                # reflect today's point immediately (the batch read predates it)
+                _today = now.strftime("%Y-%m-%d")
+                _tr = [t for t in health["trend"] if t["day"] != _today]
+                _tr.append({"day": _today, "composite": health.get("composite")})
+                health["trend"] = _tr
+            except Exception as e:
+                log.warning("health snapshot write failed: %s", e)
 
         # ── Insights (narrated, key-scoped) ──────────────────────────────
         insights = []
