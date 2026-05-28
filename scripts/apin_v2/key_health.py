@@ -306,8 +306,13 @@ def _hygiene_pillar(created_at: Optional[str], expires_at: Optional[str],
                 penalties.append({"name": "ageing_key", "points": -pen,
                                   "detail": f"{age_days:.0f}d old"})
 
-    # Scope-vs-usage: has write scope but only ever read (GET/HEAD)
-    sc = (scopes or "").lower()
+    # Scope-vs-usage: has write scope but only ever read (GET/HEAD).
+    # `scopes` may arrive as a list (get_console_api_key deserialises the
+    # JSON column) OR a raw string — normalise both to a lowercased string.
+    if isinstance(scopes, (list, tuple, set)):
+        sc = " ".join(str(x) for x in scopes).lower()
+    else:
+        sc = (scopes or "").lower()
     has_write = ("write" in sc or "predict:write" in sc)
     only_read = observed_methods.issubset({"GET", "HEAD", "OPTIONS"}) if observed_methods else False
     if has_write and only_read and observed_methods:

@@ -63,18 +63,31 @@
   }
 
   // ── data fetch + dispatch ────────────────────────────────────────────
+  function _showError(msg) {
+    // Replace skeletons with a visible error rather than spinning forever.
+    [["ov-health-body", "gauge"], ["ov-personality-body", ""], ["ov-sparkgrid-body", ""], ["ov-insights-body", ""]].forEach(([id]) => {
+      const el = $(id);
+      if (el) el.innerHTML = `<div style="font:italic 12.5px/1.5 'Fraunces',serif;color:var(--c-danger,#b3402f);padding:14px 4px">${esc(msg)}</div>`;
+    });
+  }
   async function refresh() {
     if (!PID) return;
     const { ok, body } = await api(`/api/account/keys/${encodeURIComponent(PID)}/overview?window=${RANGE}`);
-    if (!ok || !body) return;
-    DATA = body;
-    _liveReqCount = body.kpis && body.kpis.requests ? body.kpis.requests.value : null;  // re-sync live counter
-    renderHealth(body.health);
-    renderKpis(body.kpis);
-    renderRibbon(body.ribbon);
-    renderPersonality(body.personality);
-    renderSparkGrid(body.spark_grid);
-    renderInsights(body.insights);
+    if (!ok || !body || body.ok === false) {
+      const detail = (body && body.error && body.error.message) || (body && body.detail) || "could not load overview data";
+      _showError(detail);
+      return;
+    }
+    // @api_endpoint wraps the route's return in {ok, data:{...}} — unwrap.
+    const d = body.data || body;
+    DATA = d;
+    _liveReqCount = d.kpis && d.kpis.requests ? d.kpis.requests.value : null;  // re-sync live counter
+    renderHealth(d.health);
+    renderKpis(d.kpis);
+    renderRibbon(d.ribbon);
+    renderPersonality(d.personality);
+    renderSparkGrid(d.spark_grid);
+    renderInsights(d.insights);
   }
 
   // ════════════════════ WIDGET 1 · HEALTH SCORE ════════════════════════
