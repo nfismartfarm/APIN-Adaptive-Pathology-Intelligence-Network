@@ -970,6 +970,18 @@ a:hover{color:var(--green-deep)}
   cursor:help;border:1px solid var(--paper-edge);}
 .ov-pbar-fill{height:100%;border-radius:4px;background:var(--c-accent,#52b788);transition:width .6s cubic-bezier(.4,0,.2,1);}
 
+/* 9.N.9 — odometer (slot-machine) CSS contract for the KPI numbers.
+   See scripts/apin_v2/odometer.js header. Missing here before, which made
+   the digit reels overflow and garble; this restores the rolling animation. */
+.apin-odometer{display:inline-flex;line-height:1;font-variant-numeric:tabular-nums;}
+.apin-odometer-digit{width:.62em;height:1em;overflow:hidden;display:inline-block;}
+.apin-odometer-digit-col{display:flex;flex-direction:column;
+  transition:transform .42s cubic-bezier(.22,1,.36,1);}
+.apin-odometer-digit-col>span{height:1em;line-height:1;display:flex;
+  align-items:center;justify-content:center;}
+.apin-odometer-static{display:inline-block;line-height:1;}
+.apin-odometer-digit.is-spinning .apin-odometer-digit-col{filter:blur(.6px);}
+
 /* spark-grid */
 .ov-spark-row{display:grid;grid-template-columns:1fr 90px auto;gap:10px;align-items:center;
   padding:9px 16px;border-bottom:1px solid var(--paper-edge);cursor:pointer;transition:background .12s;}
@@ -1001,7 +1013,7 @@ a:hover{color:var(--green-deep)}
 <script src="/static/apin_lightbox.js"></script>
 <script src="/static/apin_live_stream.js"></script>
 <script src="/static/apin_syntax.js"></script>
-<script src="/static/console_key_overview.js?v=9n9f"></script>
+<script src="/static/console_key_overview.js?v=9n9g"></script>
 <script src="/static/console_key_detail.js"></script>
 </body>
 </html>

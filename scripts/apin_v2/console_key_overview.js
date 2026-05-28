@@ -656,26 +656,33 @@
   // ════════════════════ WIDGET 3 · KPI TILES ═══════════════════════════
   function renderKpis(k) {
     if (!k) return;
-    setKpi("requests", fmtNum(k.requests.value), k.requests.delta_pct, false);
-    setKpi("success_rate", k.success_rate.value == null ? "—" : k.success_rate.value + "%", k.success_rate.delta_pct, false);
-    setKpi("p50_ms", k.p50_ms.value == null ? "—" : fmtMs(k.p50_ms.value), k.p50_ms.delta_pct, true);
-    setKpi("rate_limited", fmtNum(k.rate_limited.value), null, true);
+    // requests + rate-limited: pure-integer COUNTERS → slot-machine odometer.
+    setKpi("requests", fmtNum(k.requests.value), k.requests.delta_pct, false, { odo: true });
+    setKpi("rate_limited", fmtNum(k.rate_limited.value), null, true, { odo: true });
+    // success% + p50: decimals/units → smooth count-up (reads better than reels).
+    setKpi("success_rate", k.success_rate.value == null ? "—" : k.success_rate.value + "%",
+           k.success_rate.delta_pct, false, { num: k.success_rate.value, fmt: (v) => v.toFixed(1) + "%" });
+    setKpi("p50_ms", k.p50_ms.value == null ? "—" : fmtMs(k.p50_ms.value),
+           k.p50_ms.delta_pct, true, { num: k.p50_ms.value, fmt: fmtMs });
   }
-  function setKpi(name, valStr, delta, goodIfDown) {
+  function setKpi(name, valStr, delta, goodIfDown, opts) {
+    opts = opts || {};
     const tile = document.querySelector(`.ov-kpi[data-kpi="${name}"]`);
     if (!tile) return;
     const numEl = tile.querySelector("[data-num]"), dEl = tile.querySelector("[data-delta]");
     if (numEl) {
-      // Pure-integer values (requests, rate-limited) count-up cleanly via the
-      // per-element rAF (odometer needs a CSS contract absent on this page and
-      // garbled the gauge). Mixed strings ("96.4%", "287ms") cross-fade.
-      const intVal = /^[\d,]+$/.test(valStr) ? Number(valStr.replace(/,/g, "")) : null;
-      if (intVal != null) {
-        countUp(numEl, intVal, { fmt: (v) => Math.round(v).toLocaleString() });
-      } else if (window.APIN && APIN.fx && APIN.fx.fadeReplace && numEl.textContent !== valStr && numEl.textContent !== "·") {
-        APIN.fx.fadeReplace(numEl, () => { numEl.textContent = valStr; });
-        numEl._cuVal = null;
-      } else { numEl.textContent = valStr; numEl._cuVal = null; }
+      if (opts.odo && /\d/.test(valStr) && window.APIN && APIN.odometer) {
+        // slot-machine: digit reels roll; commas stay static
+        numEl.classList.add("apin-odometer");
+        APIN.odometer.roll(numEl, valStr);
+      } else if (opts.num != null && opts.fmt) {
+        // smooth count-up on the raw number, formatted each frame (keeps unit)
+        numEl.classList.remove("apin-odometer"); numEl._odo = null;
+        countUp(numEl, opts.num, { fmt: opts.fmt });
+      } else {
+        numEl.classList.remove("apin-odometer"); numEl._odo = null; numEl._cuVal = null;
+        numEl.textContent = valStr;
+      }
     }
     if (dEl) {
       if (delta == null) { dEl.textContent = ""; dEl.className = "ov-kpi-delta neutral"; }
@@ -1178,17 +1185,28 @@
         canvas._rows = _ribbonRows;
         drawRibbon(canvas, _ribbonRows);
       }
-      // Bump the requests KPI live (poll reconciles the rest within 15s).
+      // Instant feedback: roll the requests counter +1 (slot-machine).
       if (DATA && DATA.kpis && DATA.kpis.requests) {
         if (_liveReqCount == null) _liveReqCount = DATA.kpis.requests.value || 0;
         _liveReqCount += 1;
-        setKpi("requests", fmtNum(_liveReqCount), DATA.kpis.requests.delta_pct, false);
+        setKpi("requests", fmtNum(_liveReqCount), DATA.kpis.requests.delta_pct, false, { odo: true });
       }
       // cross-link: flash matching spark-grid row
       Bus.emit("hover:endpoint", ev.path);
       setTimeout(() => Bus.emit("hover:endpoint", null), 600);
+      // Real-time reactiveness: debounce a full re-fetch ~1.1s after the last
+      // event so the gauge, success-rate, p50, personality, insights and
+      // top-endpoints all re-render with their own animations (arc tween,
+      // odometer roll, bar transitions) — no manual refresh needed. Bursts
+      // collapse into one refetch; lone requests refresh almost immediately.
+      _scheduleLiveRefresh();
     };
     _es.onerror = () => { /* EventSource auto-reconnects */ };
+  }
+  let _liveRefreshTimer = null;
+  function _scheduleLiveRefresh() {
+    if (_liveRefreshTimer) clearTimeout(_liveRefreshTimer);
+    _liveRefreshTimer = setTimeout(() => { if (LIVE && _active) refresh(); }, 1100);
   }
   function stopSSE() { if (_es) { try { _es.close(); } catch (_) {} _es = null; } }
 
