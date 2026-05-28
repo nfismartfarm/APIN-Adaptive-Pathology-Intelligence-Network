@@ -685,11 +685,13 @@ def _cosine(a: dict, b: dict) -> float:
     return dot / (na * nb)
 
 
-def _build_key_overview(user_id: int, public_id: str, key: dict,
-                        window: str) -> dict:
+def _build_key_overview(user_id: int, public_id: str, window: str) -> dict:
     """Gather all overview data in one DB pass + compute the health score.
-    Runs inside asyncio.to_thread (blocking DB I/O)."""
+    Runs inside asyncio.to_thread (blocking DB I/O). The key row is fetched
+    inside the same batched read (no separate ownership round-trip); a missing
+    key returns {"not_found": True} for the route to translate to a 404."""
     import time as _t
+    import json as _json
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
     from collections import Counter as _Counter
     from scripts.apin_v2 import key_health as _kh
@@ -699,11 +701,7 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
     cut_cur  = (now - _td(minutes=win_min)).strftime("%Y-%m-%d %H:%M:%S.%f")
     cut_prev = (now - _td(minutes=win_min * 2)).strftime("%Y-%m-%d %H:%M:%S.%f")
 
-    out = {"public_id": public_id, "window": window,
-           "key": {"name": key.get("name"), "environment": key.get("environment"),
-                   "status": key.get("status"), "token_prefix": key.get("token_prefix"),
-                   "created_at": key.get("created_at"), "expires_at": key.get("expires_at"),
-                   "scopes": key.get("scopes"), "last_used_at": key.get("last_used_at")}}
+    out = {"public_id": public_id, "window": window}
 
     with auth_db.get_conn() as c:
         def _rows(sql, args=()):
@@ -733,8 +731,9 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
             ("SELECT id, timestamp, method, path, status_code, latency_ms "
              "FROM api_key_request_log WHERE key_id = ? ORDER BY id DESC LIMIT 240",
              (public_id,)),
-            ("SELECT public_id, name FROM api_keys WHERE user_id = ? AND deleted_at IS NULL",
-             (user_id,)),
+            ("SELECT public_id, name, environment, status, last_four, created_at, "
+             "expires_at, scopes, last_used_at, quota_per_day FROM api_keys "
+             "WHERE user_id = ? AND deleted_at IS NULL", (user_id,)),
             ("SELECT day, composite FROM api_key_health_snapshot WHERE key_id = ? "
              "ORDER BY day DESC LIMIT 30", (public_id,)),
         ]
@@ -749,6 +748,26 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
             _res = [_rows(sql, args) for sql, args in _READS]
         (cur_rows, prev_rows, um_rows, prev_ip_rows,
          ribbon_rows, key_rows, snap_rows) = _res
+
+        # ── Resolve THIS key from key_rows (no separate ownership round-trip).
+        #    user_id scoping is in the query, so a missing row == not-this-
+        #    user's key → 404. ──
+        key = next((r for r in key_rows if r.get("public_id") == public_id), None)
+        if key is None:
+            return {"not_found": True, "public_id": public_id, "window": window}
+        # scopes is a JSON column — parse to a list (health hygiene tolerates
+        # both, but the UI + out["key"] want the list form).
+        try:
+            _scopes = _json.loads(key.get("scopes")) if key.get("scopes") else []
+            if not isinstance(_scopes, list):
+                _scopes = []
+        except Exception:
+            _scopes = []
+        key["scopes"] = _scopes
+        out["key"] = {"name": key.get("name"), "environment": key.get("environment"),
+                      "status": key.get("status"), "token_prefix": key.get("last_four"),
+                      "created_at": key.get("created_at"), "expires_at": key.get("expires_at"),
+                      "scopes": _scopes, "last_used_at": key.get("last_used_at")}
         out["ribbon"] = list(reversed(ribbon_rows))
 
         # ── Status buckets ───────────────────────────────────────────────
@@ -1088,12 +1107,13 @@ async def get_key_overview(request: Request, public_id: str,
     """9.N.9 · One-shot overview payload for the bento Overview tab."""
     import asyncio as _aio
     user = _get_session_user(request)
-    key = auth_db.get_console_api_key(user_id=int(user["id"]), public_id=public_id)
-    if key is None:
-        raise ApiError("not_found", f"key {public_id!r} not found.")
     if window not in _WINDOW_MINUTES:
         window = "24h"
-    data = await _aio.to_thread(_build_key_overview, int(user["id"]), public_id, key, window)
+    # Ownership + existence are resolved inside the batched read (the key row
+    # is fetched alongside the window data — no separate lookup round-trip).
+    data = await _aio.to_thread(_build_key_overview, int(user["id"]), public_id, window)
+    if data.get("not_found"):
+        raise ApiError("not_found", f"key {public_id!r} not found.")
     return data
 
 
