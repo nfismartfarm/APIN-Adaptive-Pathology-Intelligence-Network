@@ -31,7 +31,7 @@
   const csrf = csrfMeta ? csrfMeta.content : '';
   const pidMeta = document.querySelector('meta[name="key-public-id"]');
   const PID = pidMeta ? pidMeta.content : '';
-  const TABS = ['overview', 'usage', 'requests', 'audit', 'settings'];
+  const TABS = ['overview', 'traffic', 'usage', 'requests', 'audit', 'settings'];
   const DEFAULT_TAB = 'overview';
 
   // ─── helpers ──────────────────────────────────────────────────────────
@@ -199,7 +199,10 @@
     loadActiveTab();
   }
   function loadActiveTab() {
+    // Stop the Traffic live loop (SSE + clock rAF) whenever we leave the tab.
+    if (activeTab !== 'traffic' && window.APIN && APIN.keyTraffic) APIN.keyTraffic.deactivate();
     if (activeTab === 'overview')  loadOverview();
+    else if (activeTab === 'traffic') { if (window.APIN && APIN.keyTraffic) APIN.keyTraffic.activate(PID); }
     else if (activeTab === 'usage')    loadUsageTab();
     else if (activeTab === 'requests') loadRequests({ reset: true });
     else if (activeTab === 'audit')    loadAudit();
@@ -253,9 +256,31 @@
     // (its old element IDs — kt-requests, spark-wrap, etc. — no longer
     // exist in the DOM, so running it would throw).
     if (document.getElementById('ov-bento')) {
-      // 9.N.9(a) · expose the request drawer so the ribbon can open it
+      // 9.N.9(a) · expose the request drawer so the ribbon can open it.
+      // 9.N.T · expose filterRequests so Traffic-tab drills land on a time slice.
       window.APIN = window.APIN || {};
-      window.APIN.keyDetail = window.APIN.keyDetail || { openRequest: openRequestDetail };
+      window.APIN.keyDetail = Object.assign(window.APIN.keyDetail || {}, {
+        openRequest: openRequestDetail,
+        filterRequests: function (since, until) {
+          reqTimeFilter = (since && until) ? { since: since, until: until } : null;
+          setActiveTab('requests');
+          var pane = document.getElementById('pane-requests');
+          var banner = document.getElementById('req-time-banner');
+          if (reqTimeFilter && pane) {
+            if (!banner) {
+              banner = document.createElement('div');
+              banner.id = 'req-time-banner';
+              banner.style.cssText = "display:flex;align-items:center;gap:10px;background:rgba(120,110,90,.08);border:1px solid var(--paper-edge);border-radius:8px;padding:8px 12px;margin-bottom:12px;font:12px 'JetBrains Mono',monospace;color:var(--ink-soft)";
+              pane.insertBefore(banner, pane.firstChild);
+            }
+            var fmt = (window.APIN && APIN.time) ? APIN.time.local : function (s) { return s; };
+            banner.innerHTML = 'filtered: ' + fmt(since) + ' → ' + fmt(until) +
+              ' <button id="req-clear-filter" style="margin-left:auto;background:none;border:1px solid var(--paper-edge);border-radius:6px;padding:3px 9px;cursor:pointer;font:inherit;color:var(--ink)">clear</button>';
+            var cb = document.getElementById('req-clear-filter');
+            if (cb) cb.addEventListener('click', function () { reqTimeFilter = null; banner.remove(); loadRequests({ reset: true }); });
+          } else if (banner) { banner.remove(); }
+        },
+      });
       if (window.APIN && window.APIN.keyOverview)
         window.APIN.keyOverview.activate(PID);
       return;
@@ -797,9 +822,11 @@
 
   // ─── Requests tab (paginated raw log) ─────────────────────────────────
   let reqLastQuery = null;
+  let reqTimeFilter = null;   // {since, until} set by Traffic-tab drills
   function reqQueryString({ append } = {}) {
     const p = new URLSearchParams();
     p.set('limit', '50');
+    if (reqTimeFilter) { p.set('since', reqTimeFilter.since); p.set('until', reqTimeFilter.until); }
     const q = $('req-q') ? $('req-q').value.trim() : '';
     const m = $('req-method') ? $('req-method').value : '';
     const s = $('req-status') ? $('req-status').value : '';

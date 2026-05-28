@@ -6387,6 +6387,7 @@ def _add_account_console_routes(app):
         "apin_scrubber.js",        # Phase 9.N.11 — time scrubber slider
         "apin_splash.js",          # 9.N.8h — splash overlay dismiss logic
         "console_key_overview.js", # 9.N.9 — per-key bento Overview widgets
+        "console_key_traffic.js",  # 9.N.T — per-key Traffic tab widgets
     }
     _STATIC_JS_CACHE: dict[str, dict] = {}
 

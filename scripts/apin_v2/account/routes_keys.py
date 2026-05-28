@@ -1100,6 +1100,214 @@ def _build_key_overview(user_id: int, public_id: str, window: str) -> dict:
     return out
 
 
+# ════════════════════════════════════════════════════════════════════════
+# 9.N.T · TRAFFIC tab — hero (status-stacked over time), stats rail, GitHub
+# calendar, traffic clock (local hour-of-day), bytes-flow mirror. One batched
+# round-trip. Buckets are computed in the VIEWER's timezone (tz_off minutes)
+# by shifting the UTC timestamp inside SQLite — storage stays UTC.
+# ════════════════════════════════════════════════════════════════════════
+_TRAFFIC_GRAN = {
+    "hour":  {"win_min": 24 * 60,        "sub": 13, "n": 24},
+    "day":   {"win_min": 30 * 24 * 60,   "sub": 10, "n": 30},
+    "week":  {"win_min": 12 * 7 * 24 * 60, "sub": 10, "n": 12},  # daily rows → 12 weeks
+    "month": {"win_min": 372 * 24 * 60,  "sub": 7,  "n": 12},
+}
+
+
+def _build_key_traffic(user_id: int, public_id: str, granularity: str,
+                       tz_off: int) -> dict:
+    """All Traffic-tab data in one batched read. tz_off = viewer UTC offset in
+    minutes (IST → 330); used to bucket hero/calendar/clock in local time."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    if granularity not in _TRAFFIC_GRAN:
+        granularity = "hour"
+    cfg = _TRAFFIC_GRAN[granularity]
+    sub, nb, win_min = cfg["sub"], cfg["n"], cfg["win_min"]
+    try:
+        tz_off = int(tz_off)
+    except Exception:
+        tz_off = 0
+    tz_off = max(-840, min(840, tz_off))          # clamp ±14h
+    modifier = f"{tz_off:+d} minutes"             # SQLite datetime() modifier
+    now = _dt.now(_tz.utc)
+    now_local = now + _td(minutes=tz_off)
+    cut     = (now - _td(minutes=win_min)).strftime("%Y-%m-%d %H:%M:%S.%f")
+    cut_min = (now - _td(minutes=win_min)).strftime("%Y-%m-%d %H:%M")
+    cut_cal = (now - _td(days=371)).strftime("%Y-%m-%d %H:%M:%S.%f")
+    out = {"public_id": public_id, "granularity": granularity, "tz_off": tz_off}
+
+    def _utc_ms(local_naive):
+        # local wall-clock (naive) → real UTC epoch ms
+        return int((local_naive.replace(tzinfo=_tz.utc).timestamp() - tz_off * 60) * 1000)
+
+    with auth_db.get_conn() as c:
+        def _rows(sql, args=()):
+            try:
+                return [dict(r) for r in c.execute(sql, args).fetchall()]
+            except Exception as e:
+                log.warning("traffic query failed: %s", e)
+                return []
+        # tz-shifted bucket expressions (strip microseconds first so datetime()
+        # parses reliably, then apply the viewer offset, then slice the key).
+        bexpr = f"substr(datetime(substr(timestamp,1,19), ?), 1, {sub})"
+        dexpr = "substr(datetime(substr(timestamp,1,19), ?), 1, 10)"
+        hexpr = "substr(datetime(substr(timestamp,1,19), ?), 12, 2)"
+        READS = [
+            (f"SELECT {bexpr} AS b, "
+             "SUM(CASE WHEN status_code>=200 AND status_code<400 THEN 1 ELSE 0 END) AS n2, "
+             "SUM(CASE WHEN status_code>=400 AND status_code<500 THEN 1 ELSE 0 END) AS n4, "
+             "SUM(CASE WHEN status_code>=500 THEN 1 ELSE 0 END) AS n5, "
+             "SUM(COALESCE(bytes_in,0)) AS bin, SUM(COALESCE(bytes_out,0)) AS bout, COUNT(*) AS n "
+             "FROM api_key_request_log WHERE key_id=? AND timestamp>=? GROUP BY b ORDER BY b",
+             (modifier, public_id, cut)),
+            (f"SELECT {dexpr} AS d, COUNT(*) AS n, "
+             "SUM(CASE WHEN status_code>=400 THEN 1 ELSE 0 END) AS e "
+             "FROM api_key_request_log WHERE key_id=? AND timestamp>=? GROUP BY d ORDER BY d",
+             (modifier, public_id, cut_cal)),
+            (f"SELECT {hexpr} AS h, COUNT(*) AS n, "
+             "SUM(CASE WHEN status_code>=400 THEN 1 ELSE 0 END) AS e "
+             "FROM api_key_request_log WHERE key_id=? AND timestamp>=? GROUP BY h ORDER BY h",
+             (modifier, public_id, cut)),
+            ("SELECT path, SUM(COALESCE(bytes_out,0)) AS bout, "
+             "SUM(COALESCE(bytes_in,0)) AS bin, COUNT(*) AS n "
+             "FROM api_key_request_log WHERE key_id=? AND timestamp>=? "
+             "GROUP BY path ORDER BY bout DESC LIMIT 12", (public_id, cut)),
+            ("SELECT minute_ts, requests FROM api_key_usage_minute "
+             "WHERE key_id=? AND minute_ts>=? ORDER BY requests DESC LIMIT 1",
+             (public_id, cut_min)),
+            ("SELECT public_id, name FROM api_keys WHERE user_id=? AND deleted_at IS NULL",
+             (user_id,)),
+        ]
+        if hasattr(c, "batch_read"):
+            try:
+                res = [[dict(r) for r in cur.fetchall()] for cur in c.batch_read(READS)]
+            except Exception as e:
+                log.warning("traffic batch failed, sequential: %s", e)
+                res = [_rows(s, a) for s, a in READS]
+        else:
+            res = [_rows(s, a) for s, a in READS]
+        bucket_rows, cal_rows, clock_rows, ep_rows, peak_rows, key_rows = res
+
+        key = next((r for r in key_rows if r.get("public_id") == public_id), None)
+        if key is None:
+            return {"not_found": True, "public_id": public_id, "granularity": granularity}
+        out["key"] = {"name": key.get("name")}
+
+        # ── ordered local bucket keys + labels for the hero/bytes time axis ──
+        keys, labels, tms = [], [], []
+        MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        if granularity == "hour":
+            base = now_local.replace(minute=0, second=0, microsecond=0)
+            for i in range(nb - 1, -1, -1):
+                d = base - _td(hours=i)
+                keys.append(d.strftime("%Y-%m-%d %H"))
+                labels.append(f"{(d.hour % 12) or 12}{'a' if d.hour < 12 else 'p'}")
+                tms.append(_utc_ms(d))
+        elif granularity == "day":
+            base = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+            for i in range(nb - 1, -1, -1):
+                d = base - _td(days=i)
+                keys.append(d.strftime("%Y-%m-%d")); labels.append(f"{d.month}/{d.day}")
+                tms.append(_utc_ms(d))
+        elif granularity == "month":
+            seq = []
+            y, m = now_local.year, now_local.month
+            for i in range(nb):
+                mm, yy = m - i, y
+                while mm <= 0:
+                    mm += 12; yy -= 1
+                seq.append((yy, mm))
+            seq.reverse()
+            for yy, mm in seq:
+                keys.append(f"{yy:04d}-{mm:02d}"); labels.append(MON[mm - 1])
+                tms.append(_utc_ms(_dt(yy, mm, 1)))
+        else:  # week — SQL returns local daily keys; fold into 12 Monday-weeks
+            base = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+            monday = base - _td(days=base.weekday())
+            for i in range(nb - 1, -1, -1):
+                wk = monday - _td(weeks=i)
+                keys.append(wk.strftime("%Y-%m-%d")); labels.append(f"{wk.month}/{wk.day}")
+                tms.append(_utc_ms(wk))
+        idx = {k: i for i, k in enumerate(keys)}
+
+        def _wk_key(daykey):
+            try:
+                dd = _dt.strptime(daykey, "%Y-%m-%d")
+                return (dd - _td(days=dd.weekday())).strftime("%Y-%m-%d")
+            except Exception:
+                return None
+
+        n2a = [0] * nb; n4a = [0] * nb; n5a = [0] * nb
+        bina = [0] * nb; bouta = [0] * nb
+        for r in bucket_rows:
+            b = r.get("b")
+            if granularity == "week":
+                b = _wk_key(b)
+            i = idx.get(b)
+            if i is None:
+                continue
+            n2a[i] += int(r.get("n2") or 0); n4a[i] += int(r.get("n4") or 0)
+            n5a[i] += int(r.get("n5") or 0)
+            bina[i] += int(r.get("bin") or 0); bouta[i] += int(r.get("bout") or 0)
+
+        hero = [{"label": labels[i], "t_ms": tms[i], "n2": n2a[i], "n4": n4a[i],
+                 "n5": n5a[i], "total": n2a[i] + n4a[i] + n5a[i]} for i in range(nb)]
+        out["hero"] = {"buckets": hero, "max": max((h["total"] for h in hero), default=0)}
+
+        bytes_buckets = [{"label": labels[i], "t_ms": tms[i], "bin": bina[i], "bout": bouta[i]}
+                         for i in range(nb)]
+        total_in, total_out = sum(bina), sum(bouta)
+        total_req = sum(h["total"] for h in hero)
+        out["bytes"] = {
+            "buckets": bytes_buckets, "total_in": total_in, "total_out": total_out,
+            "avg_in": round(total_in / total_req) if total_req else 0,
+            "avg_out": round(total_out / total_req) if total_req else 0,
+            "ratio": round(total_out / total_in, 1) if total_in else None,
+            "by_endpoint": [{"path": r["path"], "bout": int(r.get("bout") or 0),
+                             "bin": int(r.get("bin") or 0), "n": int(r.get("n") or 0)}
+                            for r in ep_rows],
+        }
+
+        n2t, n4t, n5t = sum(n2a), sum(n4a), sum(n5a)
+        tot = n2t + n4t + n5t
+        busiest_i = max(range(nb), key=lambda i: hero[i]["total"]) if nb else 0
+        out["stats"] = {
+            "total": tot,
+            "error_pct": round(100 * (n4t + n5t) / tot, 1) if tot else 0,
+            "busiest_label": hero[busiest_i]["label"] if tot else "—",
+            "busiest_count": hero[busiest_i]["total"] if tot else 0,
+            "peak_per_min": int(peak_rows[0].get("requests") or 0) if peak_rows else 0,
+        }
+
+        # ── clock: 24 local hours ──
+        ch = [0] * 24; ce = [0] * 24
+        for r in clock_rows:
+            try:
+                h = int(r.get("h"))
+            except Exception:
+                continue
+            if 0 <= h < 24:
+                ch[h] = int(r.get("n") or 0); ce[h] = int(r.get("e") or 0)
+        out["clock"] = {
+            "hours": [{"h": h, "n": ch[h], "e": ce[h],
+                       "err_pct": round(100 * ce[h] / ch[h], 1) if ch[h] else 0}
+                      for h in range(24)],
+            "max": max(ch) if ch else 0,
+            "busiest_h": (max(range(24), key=lambda h: ch[h]) if any(ch) else None),
+            "now_h": now_local.hour, "now_min": now_local.minute,
+        }
+
+        # ── calendar: last ~52 weeks, daily (local dates) ──
+        out["calendar"] = {
+            "days": [{"date": r["d"], "n": int(r.get("n") or 0), "e": int(r.get("e") or 0)}
+                     for r in cal_rows if r.get("d")],
+            "max": max((int(r.get("n") or 0) for r in cal_rows), default=0),
+        }
+
+    return out
+
+
 @router.get("/{public_id}/overview")
 @api_endpoint("/api/account/keys/{public_id}/overview")
 async def get_key_overview(request: Request, public_id: str,
@@ -1117,17 +1325,41 @@ async def get_key_overview(request: Request, public_id: str,
     return data
 
 
+@router.get("/{public_id}/traffic")
+@api_endpoint("/api/account/keys/{public_id}/traffic")
+async def get_key_traffic(request: Request, public_id: str,
+                          granularity: str = Query("hour"),
+                          tz_off: int = Query(0)):
+    """9.N.T · One-shot Traffic-tab payload (hero / stats / calendar / clock /
+    bytes). tz_off = viewer UTC offset in minutes so buckets render in local
+    time."""
+    import asyncio as _aio
+    user = _get_session_user(request)
+    if granularity not in _TRAFFIC_GRAN:
+        granularity = "hour"
+    data = await _aio.to_thread(_build_key_traffic, int(user["id"]),
+                                public_id, granularity, tz_off)
+    if data.get("not_found"):
+        raise ApiError("not_found", f"key {public_id!r} not found.")
+    return data
+
+
 @router.get("/{public_id}/requests")
 @api_endpoint("/api/account/keys/{public_id}/requests")
 async def get_key_requests(request: Request, public_id: str,
                             limit: int = Query(50, ge=1, le=200),
-                            cursor: Optional[int] = Query(None, ge=1)):
-    """Phase 8 Wave D: per-request log for the detail page. Newest first."""
+                            cursor: Optional[int] = Query(None, ge=1),
+                            since: Optional[str] = Query(None),
+                            until: Optional[str] = Query(None)):
+    """Phase 8 Wave D: per-request log for the detail page. Newest first.
+    9.N.T: optional since/until (UTC 'YYYY-MM-DD HH:MM:SS' or ms epoch) time
+    filter so Traffic drill-downs land on a specific bucket/day."""
     user = _get_session_user(request)
     items = auth_db.list_key_requests(
         user_id=int(user["id"]), public_id=public_id,
-        limit=limit, cursor=cursor)
-    return {"items": items, "count": len(items), "public_id": public_id}
+        limit=limit, cursor=cursor, since_iso=since, until_iso=until)
+    return {"items": items, "count": len(items), "public_id": public_id,
+            "since": since, "until": until}
 
 
 @router.get("/{public_id}/audit")

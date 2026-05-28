@@ -278,6 +278,43 @@
     try { el.getAnimations().forEach(a => a.cancel()); } catch (e) {}
   }
 
+  // ── Time helper (UTC storage → device-local display) ──────────────────────
+  // The DB stores timestamps in UTC as 'YYYY-MM-DD HH:MM:SS.ssssss' with NO
+  // zone marker. Parsing that naively makes the browser read it as LOCAL time,
+  // skewing every "x ago" by the viewer's UTC offset. APIN.time anchors the
+  // string to UTC (appends Z) and then renders in the viewer's own timezone,
+  // so the console reads correctly on whatever device you're on — no hardcoded
+  // IST. Use this everywhere a server timestamp is shown.
+  function _utcDate(s) {
+    if (s == null) return null;
+    if (s instanceof Date) return s;
+    let str = String(s).trim().replace(" ", "T");
+    // Append Z only if the string carries no explicit zone (Z or ±HH:MM).
+    if (!/[zZ]$|[+-]\d\d:?\d\d$/.test(str)) str += "Z";
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const _TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (_) { return ""; } })();
+  const _tzOffsetMin = () => -new Date().getTimezoneOffset(); // e.g. IST → +330
+  function _ago(s) {
+    const d = _utcDate(s); if (!d) return "—";
+    const sec = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
+    if (sec < 60) return sec + "s ago";
+    if (sec < 3600) return Math.floor(sec / 60) + "m ago";
+    if (sec < 86400) return Math.floor(sec / 3600) + "h ago";
+    return Math.floor(sec / 86400) + "d ago";
+  }
+  function _local(s, opts) {
+    const d = _utcDate(s); if (!d) return "—";
+    try { return d.toLocaleString([], opts || { dateStyle: "medium", timeStyle: "short" }); }
+    catch (_) { return d.toLocaleString(); }
+  }
+  function _localTime(s) {
+    const d = _utcDate(s); if (!d) return "—";
+    try { return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
+    catch (_) { return d.toLocaleTimeString(); }
+  }
+
   // ── Public surface ────────────────────────────────────────────────────────
   window.APIN = window.APIN || {};
   window.APIN.fx = {
@@ -288,5 +325,10 @@
     drawPath, arcMorph, bar,
     cardGrow, chipSlide, wetInk,
     fadeReplace, cancel,
+  };
+  // Timezone-correct formatting, shared across every console page.
+  window.APIN.time = {
+    utcDate: _utcDate, ago: _ago, local: _local, localTime: _localTime,
+    zone: _TZ, offsetMin: _tzOffsetMin,
   };
 })();

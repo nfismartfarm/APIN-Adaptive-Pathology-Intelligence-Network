@@ -391,6 +391,9 @@ a:hover{color:var(--green-deep)}
     <a href="#overview" class="tab" data-tab="overview" role="tab" aria-current="page">
       <svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> Overview
     </a>
+    <a href="#traffic" class="tab" data-tab="traffic" role="tab">
+      <svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg> Traffic
+    </a>
     <a href="#usage" class="tab" data-tab="usage" role="tab">
       <svg class="icon" aria-hidden="true"><use href="#i-chart-line"/></svg> Usage
     </a>
@@ -472,6 +475,58 @@ a:hover{color:var(--green-deep)}
         <div class="ov-card-head"><h3>Insights</h3>
           <button class="ov-expand" data-expand="insights" aria-label="Expand insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
         <div class="ov-card-body" id="ov-insights-body"><div class="ov-skel ov-skel-text"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Traffic (9.N.T · wide-stack: hero · stats rail · calendar · clock+bytes) -->
+  <section class="tabpane" id="pane-traffic" role="tabpanel" aria-hidden="true">
+    <div class="ov-controls">
+      <div class="ov-range" id="tf-gran" role="group" aria-label="Granularity">
+        <button type="button" data-gran="hour" aria-pressed="true">Hour</button>
+        <button type="button" data-gran="day">Day</button>
+        <button type="button" data-gran="week">Week</button>
+        <button type="button" data-gran="month">Month</button>
+      </div>
+      <div class="ov-controls-right">
+        <button type="button" id="tf-live" class="ov-livebtn" data-on="true" aria-label="Toggle live updates">
+          <span class="ov-live-dot"></span><span class="ov-live-label">live</span>
+        </button>
+        <button type="button" id="tf-refresh" class="ov-iconbtn" aria-label="Refresh">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-refresh"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="tf-stack" id="tf-stack">
+      <!-- HERO -->
+      <div class="ov-card tf-hero" id="tf-hero">
+        <div class="ov-card-head"><h3><svg class="icon" aria-hidden="true"><use href="#i-bar-chart"/></svg> Requests over time <span class="ov-head-aux" id="tf-hero-aux"></span></h3>
+          <button class="ov-expand" data-tfx="hero" aria-label="Expand requests over time"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
+        <div class="ov-card-body" id="tf-hero-body"><div class="ov-skel ov-skel-chart"></div></div>
+        <div class="tf-hero-foot"><span><i class="rdot s-2xx"></i>2xx</span><span><i class="rdot s-4xx"></i>4xx</span><span><i class="rdot s-5xx"></i>5xx</span>
+          <span class="ov-ribbon-hint">click a bar → requests at that time</span></div>
+      </div>
+      <!-- STATS RAIL -->
+      <div class="tf-statsrail" id="tf-stats"><div class="ov-skel ov-skel-text"></div></div>
+      <!-- CALENDAR -->
+      <div class="ov-card tf-cal" id="tf-cal">
+        <div class="ov-card-head"><h3><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg> Activity calendar</h3>
+          <button class="ov-expand" data-tfx="calendar" aria-label="Expand activity calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
+        <div class="ov-card-body" id="tf-cal-body"><div class="ov-skel ov-skel-chart"></div></div>
+      </div>
+      <!-- CLOCK + BYTES -->
+      <div class="tf-row">
+        <div class="ov-card tf-clock" id="tf-clock">
+          <div class="ov-card-head"><h3><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg> Traffic clock</h3>
+            <button class="ov-expand" data-tfx="clock" aria-label="Expand traffic clock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
+          <div class="ov-card-body" id="tf-clock-body"><div class="ov-skel ov-skel-gauge"></div></div>
+        </div>
+        <div class="ov-card tf-bytes" id="tf-bytes">
+          <div class="ov-card-head"><h3><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Bytes flow</h3>
+            <button class="ov-expand" data-tfx="bytes" aria-label="Expand bytes flow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
+          <div class="ov-card-body" id="tf-bytes-body"><div class="ov-skel ov-skel-chart"></div></div>
+        </div>
       </div>
     </div>
   </section>
@@ -1007,6 +1062,33 @@ a:hover{color:var(--green-deep)}
 .ov-insight.info .ins-icon{background:#5b8fb0;}
 .ov-card.is-glow{box-shadow:0 0 0 2px var(--c-accent,#52b788),var(--shadow);}
 
+/* ── 9.N.T · Traffic tab (wide stack) ─────────────────────────────────── */
+.tf-stack{display:flex;flex-direction:column;gap:16px;}
+#tf-stack.ov-loading{opacity:.55;transition:opacity .15s ease;}
+.tf-hero-foot{display:flex;gap:14px;align-items:center;padding:8px 16px 14px;
+  font:10.5px/1 'JetBrains Mono',monospace;color:var(--ink-mute);}
+.tf-hero-foot .rdot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle;}
+.tf-hero-foot .rdot.s-2xx{background:var(--c-ok);}.tf-hero-foot .rdot.s-4xx{background:var(--c-amber);}.tf-hero-foot .rdot.s-5xx{background:var(--c-danger);}
+.tf-hero-foot .ov-ribbon-hint{margin-left:auto;font-style:italic;}
+.tf-hero-body{padding:6px 12px 0;}
+/* stats rail */
+.tf-statsrail{display:flex;flex-wrap:wrap;gap:10px 26px;align-items:baseline;
+  background:var(--paper);border:1px solid var(--paper-edge);border-radius:12px;padding:13px 18px;}
+.tf-stat{display:flex;flex-direction:column;cursor:default;}
+.tf-stat.clickable{cursor:pointer;}
+.tf-stat-val{font:600 20px/1 'Fraunces',serif;color:var(--ink);}
+.tf-stat-lbl{font:600 9.5px/1.4 'JetBrains Mono',monospace;color:var(--ink-mute);
+  letter-spacing:.06em;text-transform:uppercase;margin-top:3px;}
+.tf-stat.clickable:hover .tf-stat-val{color:var(--c-accent,#52b788);}
+/* clock + bytes row */
+.tf-row{display:grid;grid-template-columns:340px 1fr;gap:16px;}
+@media (max-width:760px){.tf-row{grid-template-columns:1fr;}}
+.tf-clock-svg, .tf-cal-svg, .tf-hero-svg, .tf-bytes-svg{display:block;width:100%;}
+.tf-clock-wrap{display:flex;justify-content:center;align-items:center;padding:6px;}
+.tf-cal-cell{transition:opacity .12s;}
+.tf-wedge{transition:opacity .12s;cursor:pointer;}
+.tf-bar{cursor:pointer;}
+
 /* mini tooltip */
 .ov-tip{position:fixed;z-index:99998;background:var(--ink);color:var(--paper);
   font:11.5px/1.5 'JetBrains Mono',monospace;padding:7px 10px;border-radius:7px;
@@ -1019,6 +1101,7 @@ a:hover{color:var(--green-deep)}
 <script src="/static/apin_live_stream.js"></script>
 <script src="/static/apin_syntax.js"></script>
 <script src="/static/console_key_overview.js?v=9n9h"></script>
-<script src="/static/console_key_detail.js"></script>
+<script src="/static/console_key_traffic.js?v=9nt2"></script>
+<script src="/static/console_key_detail.js?v=9nt1"></script>
 </body>
 </html>

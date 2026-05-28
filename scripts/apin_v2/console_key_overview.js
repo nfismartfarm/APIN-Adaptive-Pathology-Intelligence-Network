@@ -41,8 +41,12 @@
       .catch(() => ({ ok: false, body: null }));
   }
   function fmtAgo(iso) {
+    // Timezone-correct via the shared helper (anchors UTC → device-local).
+    // Was: Date.parse(iso.replace(" ","T")) — missing the Z, so it read the
+    // UTC string as local and skewed every "ago" by the viewer's offset.
+    if (window.APIN && APIN.time) return APIN.time.ago(iso);
     if (!iso) return "—";
-    const t = Date.parse(String(iso).replace(" ", "T"));
+    const t = Date.parse(String(iso).replace(" ", "T") + "Z");
     if (isNaN(t)) return "—";
     const s = Math.max(0, Math.round((Date.now() - t) / 1000));
     if (s < 60) return s + "s ago";
