@@ -411,66 +411,67 @@ a:hover{color:var(--green-deep)}
 
   <!-- Overview -->
   <section class="tabpane" id="pane-overview" role="tabpanel" aria-hidden="false">
-    <div class="kpi-strip" id="kpi-strip">
-      <div class="kpi-tile" id="kt-requests">
-        <div class="lbl"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg> Requests · 24h</div>
-        <div class="num" data-num>·</div>
-        <div class="sub"><span class="delta" data-delta>·</span><span data-prev></span></div>
+    <!-- 9.N.9 · Bento Overview — global controls -->
+    <div class="ov-controls">
+      <div class="ov-range" role="group" aria-label="Time range">
+        <button type="button" data-range="1h">1h</button>
+        <button type="button" data-range="24h" aria-pressed="true">24h</button>
+        <button type="button" data-range="7d">7d</button>
       </div>
-      <div class="kpi-tile" id="kt-errors">
-        <div class="lbl"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg> 5xx errors · 24h</div>
-        <div class="num" data-num>·</div>
-        <div class="sub"><span class="delta" data-delta>·</span><span data-prev></span></div>
-      </div>
-      <div class="kpi-tile" id="kt-p95">
-        <div class="lbl"><svg class="icon" aria-hidden="true"><use href="#i-gauge"/></svg> p95 latency · 24h</div>
-        <div class="num" data-num>·<span class="unit">ms</span></div>
-        <div class="sub"><span class="delta" data-delta>·</span><span data-prev></span></div>
-      </div>
-      <div class="kpi-tile" id="kt-rate-limited">
-        <div class="lbl"><svg class="icon" aria-hidden="true"><use href="#i-funnel"/></svg> Rate-limited · 24h</div>
-        <div class="num" data-num>·</div>
-        <div class="sub"><span class="delta" data-delta>·</span><span data-prev></span></div>
+      <div class="ov-controls-right">
+        <button type="button" id="ov-live" class="ov-livebtn" data-on="true" aria-label="Toggle live updates">
+          <span class="ov-live-dot"></span><span class="ov-live-label">live</span>
+        </button>
+        <button type="button" id="ov-refresh" class="ov-iconbtn" aria-label="Refresh">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-refresh"/></svg>
+        </button>
       </div>
     </div>
 
-    <div class="overview-2col">
-      <div class="card">
-        <div class="card-head">
-          <h2>Requests over 24h</h2>
-          <span class="aux"><span class="sse-dot" id="sse-dot"></span> live · refreshes every 15s</span>
-        </div>
-        <div class="card-body">
-          <div class="spark-wrap" id="spark-wrap">
-            <div class="placeholder">loading sparkline&hellip;</div>
-          </div>
-        </div>
+    <div class="ov-bento" id="ov-bento">
+      <!-- HEALTH SCORE -->
+      <div class="ov-card ov-health" id="ov-health">
+        <div class="ov-card-head"><h3>Health Score</h3>
+          <button class="ov-expand" data-expand="health" aria-label="Expand health score"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
+        <div class="ov-card-body" id="ov-health-body"><div class="ov-skel ov-skel-gauge"></div></div>
       </div>
-      <div class="card">
-        <div class="card-head"><h2>Top endpoints · 24h</h2></div>
-        <div class="card-body bare">
-          <table class="tbl" id="ov-ep-tbl">
-            <thead><tr><th>endpoint</th><th style="text-align:right">requests</th><th style="text-align:right">5xx</th></tr></thead>
-            <tbody id="ov-ep-tbody">
-              <tr><td colspan="3" class="placeholder">loading&hellip;</td></tr>
-            </tbody>
-          </table>
+      <!-- REQUEST RIBBON -->
+      <div class="ov-card ov-ribbon" id="ov-ribbon">
+        <div class="ov-card-head"><h3>Request Ribbon <span class="ov-head-aux" id="ov-ribbon-aux">last 120</span></h3>
+          <button class="ov-expand" data-expand="ribbon" aria-label="Expand request ribbon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
+        <div class="ov-card-body">
+          <canvas class="ov-ribbon-canvas" id="ov-ribbon-canvas"></canvas>
+          <div class="ov-ribbon-empty" id="ov-ribbon-empty" hidden>No requests yet — fire one and watch it appear here.</div>
+        </div>
+        <div class="ov-ribbon-foot">
+          <span><i class="rdot s-2xx"></i>2xx</span><span><i class="rdot s-4xx"></i>4xx</span><span><i class="rdot s-5xx"></i>5xx</span>
+          <span class="ov-ribbon-hint">height = latency (log) · hover a tick · click → detail</span>
         </div>
       </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <h2>Latest activity</h2>
-        <a href="#requests" class="aux" data-tab-link="requests">see all requests &rarr;</a>
+      <!-- KPI TILES -->
+      <div class="ov-kpis" id="ov-kpis">
+        <button class="ov-kpi" data-kpi="requests" type="button"><div class="ov-kpi-num" data-num>·</div><div class="ov-kpi-lbl">requests</div><div class="ov-kpi-delta" data-delta></div></button>
+        <button class="ov-kpi" data-kpi="success_rate" type="button"><div class="ov-kpi-num" data-num>·</div><div class="ov-kpi-lbl">success</div><div class="ov-kpi-delta" data-delta></div></button>
+        <button class="ov-kpi" data-kpi="p50_ms" type="button"><div class="ov-kpi-num" data-num>·</div><div class="ov-kpi-lbl">p50 latency</div><div class="ov-kpi-delta" data-delta></div></button>
+        <button class="ov-kpi" data-kpi="rate_limited" type="button"><div class="ov-kpi-num" data-num>·</div><div class="ov-kpi-lbl">rate-limited</div><div class="ov-kpi-delta" data-delta></div></button>
       </div>
-      <div class="card-body bare">
-        <table class="tbl" id="ov-recent-tbl">
-          <thead><tr><th>when</th><th>method</th><th>endpoint</th><th>status</th><th style="text-align:right">latency</th></tr></thead>
-          <tbody id="ov-recent-tbody">
-            <tr><td colspan="5" class="placeholder">loading&hellip;</td></tr>
-          </tbody>
-        </table>
+      <!-- KEY PERSONALITY -->
+      <div class="ov-card ov-personality" id="ov-personality">
+        <div class="ov-card-head"><h3>Key Personality</h3>
+          <button class="ov-expand" data-expand="personality" aria-label="Expand personality"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
+        <div class="ov-card-body" id="ov-personality-body"><div class="ov-skel ov-skel-bars"></div></div>
+      </div>
+      <!-- SPARK-GRID -->
+      <div class="ov-card ov-sparkgrid" id="ov-sparkgrid">
+        <div class="ov-card-head"><h3>Top Endpoints <span class="ov-head-aux">24h trend</span></h3>
+          <button class="ov-expand" data-expand="sparkgrid" aria-label="Expand endpoints"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
+        <div class="ov-card-body bare" id="ov-sparkgrid-body"><div class="ov-skel ov-skel-rows"></div></div>
+      </div>
+      <!-- INSIGHTS -->
+      <div class="ov-card ov-insights" id="ov-insights">
+        <div class="ov-card-head"><h3>Insights</h3>
+          <button class="ov-expand" data-expand="insights" aria-label="Expand insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><use href="#i-expand"/></svg></button></div>
+        <div class="ov-card-body" id="ov-insights-body"><div class="ov-skel ov-skel-text"></div></div>
       </div>
     </div>
   </section>
@@ -863,11 +864,144 @@ a:hover{color:var(--green-deep)}
 .scopes-chips{display:flex;flex-wrap:wrap;gap:7px}
 </style>
 
+<style id="ov-bento-css">
+/* 9.N.9 · Bento Overview ─────────────────────────────────────────── */
+.ov-controls{display:flex;align-items:center;justify-content:space-between;
+  margin:0 0 16px;flex-wrap:wrap;gap:10px;}
+.ov-range{display:inline-flex;border:1px solid var(--paper-edge);border-radius:9px;
+  overflow:hidden;background:var(--paper);}
+.ov-range button{border:0;background:transparent;padding:6px 14px;font:600 12px/1
+  'JetBrains Mono',monospace;color:var(--ink-soft);cursor:pointer;transition:.15s;}
+.ov-range button[aria-pressed="true"]{background:var(--ink);color:var(--paper);}
+.ov-range button:hover:not([aria-pressed="true"]){background:var(--paper-deep);}
+.ov-controls-right{display:inline-flex;gap:8px;align-items:center;}
+.ov-livebtn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--paper-edge);
+  background:var(--paper);border-radius:8px;padding:6px 12px;cursor:pointer;
+  font:600 12px/1 'JetBrains Mono',monospace;color:var(--ink-soft);}
+.ov-livebtn .ov-live-dot{width:7px;height:7px;border-radius:50%;background:var(--ink-mute);}
+.ov-livebtn[data-on="true"] .ov-live-dot{background:var(--c-ok);animation:ovpulse 2s ease-in-out infinite;}
+.ov-livebtn[data-on="true"]{color:var(--ink);}
+@keyframes ovpulse{0%,100%{opacity:1}50%{opacity:.4}}
+.ov-iconbtn{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--paper-edge);
+  background:var(--paper);border-radius:8px;cursor:pointer;color:var(--ink-soft);}
+.ov-iconbtn svg{width:16px;height:16px;}
+.ov-iconbtn.is-spinning svg{animation:ovspin .75s linear;}
+@keyframes ovspin{to{transform:rotate(360deg)}}
+
+.ov-bento{display:grid;grid-template-columns:320px 1fr;gap:14px;
+  grid-template-areas:"health ribbon" "health kpis" "person spark" "insights insights";
+  align-items:start;}
+.ov-health{grid-area:health;}.ov-ribbon{grid-area:ribbon;}.ov-kpis{grid-area:kpis;}
+.ov-personality{grid-area:person;}.ov-sparkgrid{grid-area:spark;}.ov-insights{grid-area:insights;}
+@media(max-width:760px){.ov-bento{grid-template-columns:1fr;
+  grid-template-areas:"ribbon" "kpis" "health" "person" "spark" "insights";}}
+
+.ov-card{background:var(--paper);border:1px solid var(--paper-edge);border-radius:12px;
+  box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden;}
+.ov-card-head{display:flex;align-items:center;justify-content:space-between;
+  padding:12px 16px 8px;}
+.ov-card-head h3{margin:0;font:500 14.5px/1.2 'Fraunces',Georgia,serif;color:var(--ink);}
+.ov-head-aux{font:italic 11px/1 'Fraunces',serif;color:var(--ink-mute);margin-left:6px;}
+.ov-card-body{padding:6px 16px 16px;flex:1;}
+.ov-card-body.bare{padding:0 0 6px;}
+.ov-expand{width:26px;height:26px;display:grid;place-items:center;border:0;background:transparent;
+  color:var(--ink-mute);cursor:pointer;border-radius:6px;transition:.15s;}
+.ov-expand svg{width:15px;height:15px;}
+.ov-expand:hover{background:var(--paper-deep);color:var(--ink);}
+
+/* skeletons */
+.ov-skel{background:linear-gradient(90deg,var(--paper-deep) 25%,var(--paper-edge) 50%,var(--paper-deep) 75%);
+  background-size:200% 100%;animation:ovshim 1.3s ease-in-out infinite;border-radius:8px;}
+@keyframes ovshim{to{background-position:-200% 0}}
+.ov-skel-gauge{width:120px;height:120px;border-radius:50%;margin:18px auto;}
+.ov-skel-bars{height:90px;}.ov-skel-rows{height:160px;margin:12px;}.ov-skel-text{height:60px;}
+
+/* health gauge */
+.ov-gauge-wrap{text-align:center;padding:6px 0 2px;}
+.ov-gauge{position:relative;width:140px;height:140px;margin:0 auto;}
+.ov-gauge svg{transform:rotate(-90deg);}
+.ov-gauge-num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:0;}
+.ov-gauge-num b{font:600 34px/1 'Fraunces',serif;color:var(--ink);}
+.ov-gauge-num span{font:600 14px/1 'JetBrains Mono',monospace;color:var(--ink-soft);margin-top:2px;}
+.ov-pillars{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0 6px;}
+.ov-pillar{text-align:center;}
+.ov-pillar-lbl{font:600 9.5px/1 'JetBrains Mono',monospace;color:var(--ink-mute);
+  letter-spacing:.04em;}
+.ov-pillar-val{font:600 13px/1.4 'JetBrains Mono',monospace;color:var(--ink);}
+.ov-pillar-bar{height:4px;border-radius:2px;background:var(--paper-edge);margin-top:3px;overflow:hidden;}
+.ov-pillar-bar i{display:block;height:100%;border-radius:2px;background:var(--c-ok);transition:width .5s ease;}
+.ov-health-headline{font:italic 12px/1.5 'Fraunces',serif;color:var(--ink-soft);
+  margin-top:12px;border-top:1px solid var(--paper-edge);padding-top:10px;}
+.s-great .ov-pillar-bar i,i.s-great{background:var(--c-ok)!important;}
+.s-ok .ov-pillar-bar i{background:#7a9a3e!important;}
+.s-warn .ov-pillar-bar i{background:var(--c-amber)!important;}
+.s-bad .ov-pillar-bar i{background:var(--c-danger)!important;}
+
+/* ribbon */
+.ov-ribbon .ov-card-body{padding:6px 12px 4px;}
+.ov-ribbon-canvas{width:100%;height:90px;display:block;cursor:crosshair;}
+.ov-ribbon-empty{font:italic 13px/1.5 'Fraunces',serif;color:var(--ink-mute);
+  text-align:center;padding:28px 12px;}
+.ov-ribbon-foot{display:flex;gap:14px;align-items:center;padding:4px 16px 12px;
+  font:11px/1 'JetBrains Mono',monospace;color:var(--ink-mute);flex-wrap:wrap;}
+.ov-ribbon-foot .rdot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle;}
+.rdot.s-2xx{background:var(--c-ok);}.rdot.s-4xx{background:var(--c-amber);}.rdot.s-5xx{background:var(--c-danger);}
+.ov-ribbon-hint{margin-left:auto;font-style:italic;font-family:'Fraunces',serif;}
+
+/* KPI tiles */
+.ov-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+.ov-kpi{background:var(--paper);border:1px solid var(--paper-edge);border-radius:12px;
+  box-shadow:var(--shadow);padding:14px 12px;cursor:pointer;text-align:left;
+  transition:transform .15s,box-shadow .15s;display:flex;flex-direction:column;gap:2px;}
+.ov-kpi:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(26,22,18,.1);}
+.ov-kpi-num{font:600 26px/1 'Fraunces',serif;color:var(--ink);}
+.ov-kpi-lbl{font:600 10.5px/1 'JetBrains Mono',monospace;color:var(--ink-mute);
+  letter-spacing:.04em;text-transform:uppercase;}
+.ov-kpi-delta{font:600 11px/1.4 'JetBrains Mono',monospace;min-height:1.4em;}
+.ov-kpi-delta.up{color:var(--c-ok);}.ov-kpi-delta.down{color:var(--c-danger);}
+.ov-kpi-delta.neutral{color:var(--ink-mute);}
+@media(max-width:760px){.ov-kpis{grid-template-columns:repeat(2,1fr);}}
+
+/* personality */
+.ov-pbar{margin:8px 0;}
+.ov-pbar-top{display:flex;justify-content:space-between;font:600 11.5px/1.6 'JetBrains Mono',monospace;color:var(--ink-soft);}
+.ov-pbar-track{height:8px;border-radius:4px;background:var(--paper-deep);overflow:hidden;margin-top:2px;
+  cursor:help;border:1px solid var(--paper-edge);}
+.ov-pbar-fill{height:100%;border-radius:4px;background:var(--c-accent,#52b788);transition:width .6s cubic-bezier(.4,0,.2,1);}
+
+/* spark-grid */
+.ov-spark-row{display:grid;grid-template-columns:1fr 90px auto;gap:10px;align-items:center;
+  padding:9px 16px;border-bottom:1px solid var(--paper-edge);cursor:pointer;transition:background .12s;}
+.ov-spark-row:last-child{border-bottom:0;}
+.ov-spark-row:hover,.ov-spark-row.is-linked{background:var(--paper-deep);}
+.ov-spark-path{font:600 12px/1.3 'JetBrains Mono',monospace;color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ov-spark-svg{width:90px;height:24px;}
+.ov-spark-meta{font:11px/1.3 'JetBrains Mono',monospace;color:var(--ink-mute);text-align:right;white-space:nowrap;}
+
+/* insights */
+.ov-insight{display:flex;gap:9px;align-items:flex-start;padding:8px 0;font:13px/1.5 'Inter',sans-serif;
+  color:var(--ink);border-bottom:1px solid var(--paper-edge);}
+.ov-insight:last-child{border-bottom:0;}
+.ov-insight .ins-icon{flex:0 0 auto;width:7px;height:7px;border-radius:50%;margin-top:6px;}
+.ov-insight.great .ins-icon{background:var(--c-ok);}
+.ov-insight.warn .ins-icon{background:var(--c-amber);}
+.ov-insight.info .ins-icon{background:#5b8fb0;}
+.ov-card.is-glow{box-shadow:0 0 0 2px var(--c-accent,#52b788),var(--shadow);}
+
+/* mini tooltip */
+.ov-tip{position:fixed;z-index:99998;background:var(--ink);color:var(--paper);
+  font:11.5px/1.5 'JetBrains Mono',monospace;padding:7px 10px;border-radius:7px;
+  pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:280px;opacity:0;transition:opacity .1s;}
+.ov-tip.show{opacity:1;}
+</style>
 <script src="/static/odometer.js"></script>
 <script src="/static/apin_charts.js"></script>
 <script src="/static/apin_lightbox.js"></script>
 <script src="/static/apin_live_stream.js"></script>
 <script src="/static/apin_syntax.js"></script>
+<script src="/static/console_key_overview.js"></script>
 <script src="/static/console_key_detail.js"></script>
 </body>
 </html>

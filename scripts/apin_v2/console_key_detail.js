@@ -248,6 +248,15 @@
   }
 
   async function loadOverview() {
+    // 9.N.9 · The bento Overview is now owned by console_key_overview.js.
+    // If the new bento shell is present, this legacy renderer stands down
+    // (its old element IDs — kt-requests, spark-wrap, etc. — no longer
+    // exist in the DOM, so running it would throw).
+    if (document.getElementById('ov-bento')) {
+      if (window.APIN && window.APIN.keyOverview)
+        window.APIN.keyOverview.activate(PID);
+      return;
+    }
     // Sparkline + KPI tiles built from /keys/{pid}/usage?minutes=1440 (24h).
     const { body } = await api('/api/account/keys/' +
       encodeURIComponent(PID) + '/usage?minutes=1440');

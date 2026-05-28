@@ -660,16 +660,42 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
         prev_total = len(prev_rows)
 
         # ── Latencies by endpoint class (for Apdex) ──────────────────────
+        # COLD-START GRACE: the first inference request after an idle gap
+        # > 5 min pays the model-backbone lazy-load tax (the container is
+        # kept warm by the uptime probes, but the model unloads). That
+        # cold latency is infrastructure, not the key's behaviour, so we
+        # exclude it from the Apdex calc — the score reflects WARM
+        # performance, which is what a user on always-warm infra sees.
+        # Cold requests are still counted in traffic/ribbon, just not Apdex.
+        COLD_GAP_S = 300
         lat_by_class: dict = {}
         all_lat = []
         methods = set()
         ips = set()
+        cold_start_excluded = 0
+        _last_ts = None
         for r in cur_rows:
             cls = _kh.classify_endpoint(r.get("path") or "")
             lm = r.get("latency_ms")
+            # parse ts for gap detection
+            cur_ts = None
+            try:
+                cur_ts = _dt.fromisoformat(str(r["timestamp"]).replace(" ", "T")).timestamp()
+            except Exception:
+                pass
+            is_cold = False
+            if (cur_ts is not None and _last_ts is not None
+                    and (cur_ts - _last_ts) > COLD_GAP_S
+                    and cls in ("quick_inference", "heavy_inference")):
+                is_cold = True
+            if cur_ts is not None:
+                _last_ts = cur_ts
             if lm is not None:
-                lat_by_class.setdefault(cls, []).append(float(lm))
-                all_lat.append(float(lm))
+                if is_cold:
+                    cold_start_excluded += 1   # skip from Apdex
+                else:
+                    lat_by_class.setdefault(cls, []).append(float(lm))
+                all_lat.append(float(lm))      # still counts in overall p50/p95
             if r.get("method"): methods.add(str(r["method"]).upper())
             if r.get("ip"): ips.add(r["ip"])
 
@@ -711,6 +737,7 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
             scopes=key.get("scopes"), observed_methods=methods,
             distinct_ips=len(ips), ip_baseline=ip_baseline,
         )
+        health["cold_start_excluded"] = cold_start_excluded
         out["health"] = health
 
         # ── KPIs with prev-period deltas ─────────────────────────────────

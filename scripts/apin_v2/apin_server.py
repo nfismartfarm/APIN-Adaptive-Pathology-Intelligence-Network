@@ -6386,6 +6386,7 @@ def _add_account_console_routes(app):
         "apin_syntax.js",          # Phase 9.N.7 — homegrown code highlighter
         "apin_scrubber.js",        # Phase 9.N.11 — time scrubber slider
         "apin_splash.js",          # 9.N.8h — splash overlay dismiss logic
+        "console_key_overview.js", # 9.N.9 — per-key bento Overview widgets
     }
     _STATIC_JS_CACHE: dict[str, dict] = {}
 
