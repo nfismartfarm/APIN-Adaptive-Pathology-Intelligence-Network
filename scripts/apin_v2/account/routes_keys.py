@@ -594,6 +594,244 @@ async def get_key_usage(request: Request, public_id: str,
             "window_minutes": minutes, "public_id": public_id}
 
 
+# ════════════════════════════════════════════════════════════════════════
+# 9.N.9 · Per-key OVERVIEW — single endpoint feeding all 6 bento widgets.
+#
+# One round-trip returns: health score (4-pillar), KPIs (with prev-period
+# deltas), request ribbon (last 120), spark-grid (top-6 endpoints), key
+# personality (derived behaviour tags), and narrated insights. The live
+# ribbon updates separately via SSE; this is the initial + periodic snapshot.
+# ════════════════════════════════════════════════════════════════════════
+
+_WINDOW_MINUTES = {"1h": 60, "24h": 1440, "7d": 10080}
+
+
+def _build_key_overview(user_id: int, public_id: str, key: dict,
+                        window: str) -> dict:
+    """Gather all overview data in one DB pass + compute the health score.
+    Runs inside asyncio.to_thread (blocking DB I/O)."""
+    import time as _t
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from collections import Counter as _Counter
+    from scripts.apin_v2 import key_health as _kh
+
+    win_min = _WINDOW_MINUTES.get(window, 1440)
+    now = _dt.now(_tz.utc)
+    cut_cur  = (now - _td(minutes=win_min)).strftime("%Y-%m-%d %H:%M:%S.%f")
+    cut_prev = (now - _td(minutes=win_min * 2)).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+    out = {"public_id": public_id, "window": window,
+           "key": {"name": key.get("name"), "environment": key.get("environment"),
+                   "status": key.get("status"), "token_prefix": key.get("token_prefix"),
+                   "created_at": key.get("created_at"), "expires_at": key.get("expires_at"),
+                   "scopes": key.get("scopes"), "last_used_at": key.get("last_used_at")}}
+
+    with auth_db.get_conn() as c:
+        def _rows(sql, args=()):
+            try:
+                return [dict(r) for r in c.execute(sql, args).fetchall()]
+            except Exception as e:
+                log.warning("overview query failed: %s", e)
+                return []
+
+        # ── Pull window rows (status, latency, path, method, ip) ──────────
+        cur_rows = _rows(
+            "SELECT timestamp, method, path, status_code, latency_ms, ip, "
+            "       bytes_in, bytes_out, error_code "
+            "FROM api_key_request_log WHERE key_id = ? AND timestamp >= ? "
+            "ORDER BY id", (public_id, cut_cur))
+        prev_rows = _rows(
+            "SELECT status_code, latency_ms FROM api_key_request_log "
+            "WHERE key_id = ? AND timestamp >= ? AND timestamp < ?",
+            (public_id, cut_prev, cut_cur))
+
+        # ── Status buckets ───────────────────────────────────────────────
+        def _bucket(rows):
+            n2 = n4 = n5 = 0
+            for r in rows:
+                s = int(r.get("status_code") or 0)
+                if 200 <= s < 400: n2 += 1
+                elif 400 <= s < 500: n4 += 1
+                elif s >= 500: n5 += 1
+            return n2, n4, n5
+        n2, n4, n5 = _bucket(cur_rows)
+        total = len(cur_rows)
+        p_n2, p_n4, p_n5 = _bucket(prev_rows)
+        prev_total = len(prev_rows)
+
+        # ── Latencies by endpoint class (for Apdex) ──────────────────────
+        lat_by_class: dict = {}
+        all_lat = []
+        methods = set()
+        ips = set()
+        for r in cur_rows:
+            cls = _kh.classify_endpoint(r.get("path") or "")
+            lm = r.get("latency_ms")
+            if lm is not None:
+                lat_by_class.setdefault(cls, []).append(float(lm))
+                all_lat.append(float(lm))
+            if r.get("method"): methods.add(str(r["method"]).upper())
+            if r.get("ip"): ips.add(r["ip"])
+
+        def _pct(vals, q):
+            if not vals: return None
+            s = sorted(vals)
+            return s[min(len(s) - 1, int(len(s) * q))]
+        p50 = _pct(all_lat, 0.50)
+        p95 = _pct(all_lat, 0.95)
+        prev_lat = [float(r["latency_ms"]) for r in prev_rows if r.get("latency_ms") is not None]
+        p50_prev = _pct(prev_lat, 0.50)
+        p95_prev = _pct(prev_lat, 0.95)
+
+        # ── usage_minute: rate-limited count in window ───────────────────
+        um = _rows(
+            "SELECT SUM(rate_limited) AS rl, SUM(quota_blocked) AS qb "
+            "FROM api_key_usage_minute WHERE key_id = ? AND minute_ts >= ?",
+            (public_id, cut_cur[:16]))  # minute_ts is 'YYYY-MM-DD HH:MM'
+        rate_limited = int((um[0].get("rl") if um else 0) or 0)
+
+        # ── IP baseline (distinct IPs in the prev window) ────────────────
+        prev_ip_rows = _rows(
+            "SELECT DISTINCT ip FROM api_key_request_log "
+            "WHERE key_id = ? AND timestamp >= ? AND timestamp < ? AND ip IS NOT NULL",
+            (public_id, cut_prev, cut_cur))
+        ip_baseline = float(len(prev_ip_rows))
+
+        # ── HEALTH SCORE ─────────────────────────────────────────────────
+        quota = key.get("quota_per_day")
+        health = _kh.compute_health_score(
+            window_label=window, total_requests=total,
+            n_2xx=n2, n_4xx=n4, n_5xx=n5,
+            latencies_by_class=lat_by_class,
+            p95_current=p95, p95_prev=p95_prev,
+            rate_limited=rate_limited,
+            quota_per_day=int(quota) if quota else None,
+            quota_consumed=total,  # approximation: requests today
+            created_at=key.get("created_at"), expires_at=key.get("expires_at"),
+            scopes=key.get("scopes"), observed_methods=methods,
+            distinct_ips=len(ips), ip_baseline=ip_baseline,
+        )
+        out["health"] = health
+
+        # ── KPIs with prev-period deltas ─────────────────────────────────
+        def _delta(cur, prev):
+            if prev in (None, 0): return None
+            return round((cur - prev) / prev * 100, 1)
+        succ = round(100.0 * n2 / total, 1) if total else None
+        prev_succ = round(100.0 * p_n2 / prev_total, 1) if prev_total else None
+        out["kpis"] = {
+            "requests":    {"value": total, "prev": prev_total, "delta_pct": _delta(total, prev_total)},
+            "success_rate":{"value": succ, "prev": prev_succ,
+                            "delta_pct": (round(succ - prev_succ, 1) if (succ is not None and prev_succ is not None) else None)},
+            "p50_ms":      {"value": p50, "prev": p50_prev, "delta_pct": _delta(p50, p50_prev)},
+            "rate_limited":{"value": rate_limited, "prev": None, "delta_pct": None},
+        }
+
+        # ── Request ribbon: last 120 (newest last for left→right flow) ───
+        ribbon = _rows(
+            "SELECT id, timestamp, method, path, status_code, latency_ms "
+            "FROM api_key_request_log WHERE key_id = ? "
+            "ORDER BY id DESC LIMIT 120", (public_id,))
+        out["ribbon"] = list(reversed(ribbon))
+
+        # ── Spark-grid: top-6 endpoints, per-bucket counts ──────────────
+        path_counter = _Counter(r.get("path") for r in cur_rows if r.get("path"))
+        top6 = [p for p, _ in path_counter.most_common(6)]
+        n_buckets = 24
+        bucket_ms = (win_min * 60_000) / n_buckets
+        t0 = (now - _td(minutes=win_min)).timestamp() * 1000
+        spark = []
+        for p in top6:
+            buckets = [0] * n_buckets
+            lats = []
+            for r in cur_rows:
+                if r.get("path") != p: continue
+                ts = _dt.fromisoformat(str(r["timestamp"]).replace(" ", "T")).timestamp() * 1000 \
+                     if r.get("timestamp") else None
+                if ts is not None:
+                    bi = min(n_buckets - 1, max(0, int((ts - t0) / bucket_ms)))
+                    buckets[bi] += 1
+                if r.get("latency_ms") is not None:
+                    lats.append(float(r["latency_ms"]))
+            spark.append({"path": p, "count": path_counter[p],
+                          "buckets": buckets, "p95": _pct(lats, 0.95)})
+        out["spark_grid"] = spark
+
+        # ── Personality (derived behaviour tags) ─────────────────────────
+        predict_n = sum(1 for r in cur_rows if (r.get("path") or "").startswith("/api/predict"))
+        get_n = sum(1 for r in cur_rows if (r.get("method") or "").upper() == "GET")
+        # burstiness: coefficient of variation of inter-request gaps
+        ts_list = []
+        for r in cur_rows:
+            try:
+                ts_list.append(_dt.fromisoformat(str(r["timestamp"]).replace(" ", "T")).timestamp())
+            except Exception:
+                pass
+        gaps = [b - a for a, b in zip(ts_list, ts_list[1:])] if len(ts_list) > 2 else []
+        burst = 0.0
+        if gaps:
+            mean_g = sum(gaps) / len(gaps)
+            if mean_g > 0:
+                var = sum((g - mean_g) ** 2 for g in gaps) / len(gaps)
+                cv = (var ** 0.5) / mean_g
+                burst = min(1.0, cv / 3.0)   # CV of 3+ = maximally bursty
+        out["personality"] = {
+            "tags": [
+                {"name": "predict-heavy", "value": round(predict_n / total, 2) if total else 0,
+                 "signal": f"{round(100*predict_n/total) if total else 0}% of calls hit /predict/*"},
+                {"name": "bursty", "value": round(burst, 2),
+                 "signal": "inter-request timing variance (coefficient of variation)"},
+                {"name": "read-mostly", "value": round(get_n / total, 2) if total else 0,
+                 "signal": f"{round(100*get_n/total) if total else 0}% GET requests"},
+            ]
+        }
+
+        # ── Insights (narrated, key-scoped) ──────────────────────────────
+        insights = []
+        if total == 0:
+            insights.append({"tone": "info", "text": "No traffic in this window yet."})
+        else:
+            if n5 == 0 and n4 == 0:
+                insights.append({"tone": "great", "text": f"No errors in the last {window}."})
+            if health.get("composite") and health["composite"] >= 90:
+                insights.append({"tone": "great", "text": f"Healthy — grade {health['grade']}."})
+            pp = health["pillars"]["performance"]
+            if pp.get("trend_pct") is not None and pp["trend_pct"] < -3:
+                insights.append({"tone": "great",
+                                 "text": f"p95 latency improved {abs(pp['trend_pct'])}% vs previous {window}."})
+            elif pp.get("trend_pct") is not None and pp["trend_pct"] > 5:
+                insights.append({"tone": "warn",
+                                 "text": f"p95 latency degraded {pp['trend_pct']}% vs previous {window}."})
+            if predict_n and total and predict_n / total > 0.5:
+                insights.append({"tone": "info",
+                                 "text": f"Predict-heavy key — {round(100*predict_n/total)}% of calls are inference."})
+            if len(ips) == 1:
+                insights.append({"tone": "info",
+                                 "text": "All traffic from a single IP — likely one integration."})
+            elif ip_baseline > 0 and len(ips) > max(3, ip_baseline * 3):
+                insights.append({"tone": "warn",
+                                 "text": f"IP fan-out: {len(ips)} distinct IPs (baseline ~{ip_baseline:.0f}) — verify the key isn't shared."})
+        out["insights"] = insights[:6]
+
+    return out
+
+
+@router.get("/{public_id}/overview")
+@api_endpoint("/api/account/keys/{public_id}/overview")
+async def get_key_overview(request: Request, public_id: str,
+                           window: str = Query("24h")):
+    """9.N.9 · One-shot overview payload for the bento Overview tab."""
+    import asyncio as _aio
+    user = _get_session_user(request)
+    key = auth_db.get_console_api_key(user_id=int(user["id"]), public_id=public_id)
+    if key is None:
+        raise ApiError("not_found", f"key {public_id!r} not found.")
+    if window not in _WINDOW_MINUTES:
+        window = "24h"
+    data = await _aio.to_thread(_build_key_overview, int(user["id"]), public_id, key, window)
+    return data
+
+
 @router.get("/{public_id}/requests")
 @api_endpoint("/api/account/keys/{public_id}/requests")
 async def get_key_requests(request: Request, public_id: str,
