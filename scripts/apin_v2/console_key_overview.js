@@ -145,7 +145,7 @@
             <circle cx="70" cy="70" r="58" fill="none" stroke="var(--paper-edge)" stroke-width="10"/>
             <path id="ov-gauge-arc" d="${arcPath(70, 70, 58, 0)}" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round"/>
           </svg>
-          <div class="ov-gauge-num"><b id="ov-gauge-num">${h.composite}</b><span id="ov-gauge-grade">${esc(h.grade)}${h.provisional ? " ~" : ""}</span></div>
+          <div class="ov-gauge-num"><b id="ov-gauge-num">${Math.round(h.composite)}</b><span id="ov-gauge-grade">${esc(h.grade)}${h.provisional ? " ~" : ""}</span></div>
         </div></div>
         <div class="ov-pillars">${pill("reliability", "REL")}${pill("performance", "PERF")}${pill("capacity", "CAP")}${pill("hygiene", "HYG")}</div>
         <div class="ov-health-headline" id="ov-health-headline">${esc(h.headline || "")}</div>`;
@@ -164,7 +164,14 @@
     const arc = $("ov-gauge-arc");
     if (arc) _tweenArc(arc, _healthFrac, frac, color);
     const numEl = $("ov-gauge-num");
-    if (numEl) { if (window.APIN && APIN.odometer) APIN.odometer.roll(numEl, h.composite); else numEl.textContent = h.composite; }
+    if (numEl) {
+      // Odometer handles integer digit columns; a decimal "91.9" garbles
+      // the center. The score is a 0-100 index — show the rounded integer
+      // (matches the spec mockup "92").
+      const shown = Math.round(h.composite);
+      if (window.APIN && APIN.odometer) APIN.odometer.roll(numEl, shown);
+      else numEl.textContent = shown;
+    }
     const gradeEl = $("ov-gauge-grade");
     if (gradeEl) gradeEl.textContent = esc(h.grade) + (h.provisional ? " ~" : "");
     ["reliability", "performance", "capacity", "hygiene"].forEach(k => {

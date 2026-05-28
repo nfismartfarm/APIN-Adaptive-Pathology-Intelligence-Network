@@ -47,11 +47,12 @@ SPACE_FILES = os.path.join(ROOT, "deploy", "space_files")
 # pickles, checkpoints) is either runtime history or comes from apin-models.
 CODE_PACKAGES = {
     "scripts/apin":            {".py", ".html"},
-    # scripts/apin_v2 needs .js (24 files allowlisted by /static/{filename}),
-    # .svg (console_icons.svg sprite), and .json (phase_d_data.json mirror).
+    # scripts/apin_v2 needs .js (allowlisted by /static/{filename}),
+    # .svg (console_icons.svg sprite), .json (phase_d_data.json mirror),
+    # and .woff2 (self-hosted fonts served by /fonts/{filename}).
     # .md files (API_CONTRACT.md, DEPLOYMENT.md, request_detailed.md) are
     # deliberately excluded — spec / contract docs, not runtime assets.
-    "scripts/apin_v2":         {".py", ".html", ".js", ".svg", ".json"},
+    "scripts/apin_v2":         {".py", ".html", ".js", ".svg", ".json", ".woff2"},
     "scripts/ladi_net":        {".py"},
     "scripts/model3_training": {".py"},
     "scripts/dinov2_probe":    {".py"},
