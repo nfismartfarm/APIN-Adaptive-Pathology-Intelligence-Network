@@ -253,6 +253,9 @@
     // (its old element IDs — kt-requests, spark-wrap, etc. — no longer
     // exist in the DOM, so running it would throw).
     if (document.getElementById('ov-bento')) {
+      // 9.N.9(a) · expose the request drawer so the ribbon can open it
+      window.APIN = window.APIN || {};
+      window.APIN.keyDetail = window.APIN.keyDetail || { openRequest: openRequestDetail };
       if (window.APIN && window.APIN.keyOverview)
         window.APIN.keyOverview.activate(PID);
       return;

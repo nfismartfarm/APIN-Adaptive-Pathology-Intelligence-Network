@@ -769,19 +769,32 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
         t0 = (now - _td(minutes=win_min)).timestamp() * 1000
         spark = []
         for p in top6:
-            buckets = [0] * n_buckets
+            buckets = [0] * n_buckets              # request count per bucket
+            blat_sum = [0.0] * n_buckets           # latency sum per bucket
+            blat_n = [0] * n_buckets               # latency count per bucket
+            berr = [0] * n_buckets                 # error count per bucket
             lats = []
             for r in cur_rows:
                 if r.get("path") != p: continue
                 ts = _dt.fromisoformat(str(r["timestamp"]).replace(" ", "T")).timestamp() * 1000 \
                      if r.get("timestamp") else None
+                bi = None
                 if ts is not None:
                     bi = min(n_buckets - 1, max(0, int((ts - t0) / bucket_ms)))
                     buckets[bi] += 1
-                if r.get("latency_ms") is not None:
-                    lats.append(float(r["latency_ms"]))
+                    if int(r.get("status_code") or 0) >= 400:
+                        berr[bi] += 1
+                lm = r.get("latency_ms")
+                if lm is not None:
+                    lats.append(float(lm))
+                    if bi is not None:
+                        blat_sum[bi] += float(lm); blat_n[bi] += 1
+            # 9.N.9(d) · per-bucket avg latency for the metric toggle
+            buckets_lat = [round(blat_sum[i] / blat_n[i]) if blat_n[i] else 0
+                           for i in range(n_buckets)]
             spark.append({"path": p, "count": path_counter[p],
-                          "buckets": buckets, "p95": _pct(lats, 0.95)})
+                          "buckets": buckets, "buckets_lat": buckets_lat,
+                          "buckets_err": berr, "p95": _pct(lats, 0.95)})
         out["spark_grid"] = spark
 
         # ── Personality (derived behaviour tags) ─────────────────────────

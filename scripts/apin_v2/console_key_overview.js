@@ -68,6 +68,7 @@
     const { ok, body } = await api(`/api/account/keys/${encodeURIComponent(PID)}/overview?window=${RANGE}`);
     if (!ok || !body) return;
     DATA = body;
+    _liveReqCount = body.kpis && body.kpis.requests ? body.kpis.requests.value : null;  // re-sync live counter
     renderHealth(body.health);
     renderKpis(body.kpis);
     renderRibbon(body.ribbon);
@@ -83,6 +84,22 @@
     const large = a > Math.PI ? 1 : 0;
     return `M ${cx + r} ${cy} A ${r} ${r} 0 ${large} 1 ${x} ${y}`;
   }
+  let _healthFrac = 0;          // last drawn gauge fraction (for arc tween)
+  let _healthArcRaf = null;
+  const _toneColor = (t) => ({ great: "#2f6f3e", ok: "#7a9a3e", warn: "#c98a2b", bad: "#b3402f", nodata: "#9a907a" }[t] || "#7a9a3e");
+  function _tweenArc(pathEl, from, to, color) {
+    if (_healthArcRaf) cancelAnimationFrame(_healthArcRaf);
+    const t0 = performance.now(), dur = 500;
+    pathEl.setAttribute("stroke", color);
+    (function step(now) {
+      const k = Math.min(1, (now - t0) / dur);
+      const eased = 1 - Math.pow(1 - k, 3);          // easeOutCubic
+      const f = from + (to - from) * eased;
+      pathEl.setAttribute("d", arcPath(70, 70, 58, f));
+      if (k < 1) _healthArcRaf = requestAnimationFrame(step);
+      else _healthFrac = to;
+    })(t0);
+  }
   function renderHealth(h) {
     const host = $("ov-health-body");
     if (!host || !h) return;
@@ -91,38 +108,61 @@
         <svg width="140" height="140"><circle cx="70" cy="70" r="58" fill="none" stroke="var(--paper-edge)" stroke-width="10"/></svg>
         <div class="ov-gauge-num"><b>—</b></div></div></div>
         <div class="ov-health-headline">${esc(h.headline || "Awaiting first requests.")}</div>`;
+      host._built = false; _healthFrac = 0;
       return;
     }
     const frac = h.composite / 100;
     const tone = h.tone || "ok";
-    const toneColor = { great: "var(--c-ok)", ok: "#7a9a3e", warn: "var(--c-amber)", bad: "var(--c-danger)", nodata: "var(--ink-mute)" }[tone];
+    const color = _toneColor(tone);
     const P = h.pillars || {};
-    const pill = (k, lbl) => {
-      const v = P[k] && P[k].score != null ? Math.round(P[k].score) : null;
-      const t = v == null ? "nodata" : v >= 90 ? "great" : v >= 75 ? "ok" : v >= 60 ? "warn" : "bad";
-      return `<div class="ov-pillar s-${t}"><div class="ov-pillar-lbl">${lbl}</div>
-        <div class="ov-pillar-val">${v == null ? "—" : v}</div>
-        <div class="ov-pillar-bar"><i style="width:${v || 0}%"></i></div></div>`;
-    };
-    host.innerHTML = `<div class="ov-gauge-wrap"><div class="ov-gauge" id="ov-gauge" tabindex="0">
-        <svg width="140" height="140">
-          <circle cx="70" cy="70" r="58" fill="none" stroke="var(--paper-edge)" stroke-width="10"/>
-          <path d="${arcPath(70, 70, 58, frac)}" fill="none" stroke="${toneColor}" stroke-width="10" stroke-linecap="round"/>
-        </svg>
-        <div class="ov-gauge-num"><b id="ov-gauge-num">${h.composite}</b><span>${esc(h.grade)}${h.provisional ? " ~" : ""}</span></div>
-      </div></div>
-      <div class="ov-pillars">${pill("reliability", "REL")}${pill("performance", "PERF")}${pill("capacity", "CAP")}${pill("hygiene", "HYG")}</div>
-      <div class="ov-health-headline">${esc(h.headline || "")}</div>`;
-    // gauge hover tooltip
-    const g = $("ov-gauge");
-    if (g) {
-      g.addEventListener("mousemove", (e) => {
-        const r = P.reliability, p = P.performance, c = P.capacity, hy = P.hygiene;
-        tip(true, e.clientX, e.clientY,
-          `reliability ${r && r.score != null ? r.score : "—"} · performance ${p && p.score != null ? p.score : "—"}<br>capacity ${c && c.score != null ? c.score : "—"} · hygiene ${hy && hy.score != null ? hy.score : "—"}`);
-      });
-      g.addEventListener("mouseleave", () => tip(false));
+    const pscore = (k) => (P[k] && P[k].score != null) ? Math.round(P[k].score) : null;
+    const ptone = (v) => v == null ? "nodata" : v >= 90 ? "great" : v >= 75 ? "ok" : v >= 60 ? "warn" : "bad";
+
+    // Build-once; subsequent refreshes UPDATE in place so the arc tweens
+    // and the number odometer-rolls instead of hard-redrawing.
+    if (!host._built) {
+      const pill = (k, lbl) => {
+        const v = pscore(k);
+        return `<div class="ov-pillar s-${ptone(v)}" data-pk="${k}"><div class="ov-pillar-lbl">${lbl}</div>
+          <div class="ov-pillar-val">${v == null ? "—" : v}</div>
+          <div class="ov-pillar-bar"><i style="width:${v || 0}%"></i></div></div>`;
+      };
+      host.innerHTML = `<div class="ov-gauge-wrap"><div class="ov-gauge" id="ov-gauge" tabindex="0">
+          <svg width="140" height="140">
+            <circle cx="70" cy="70" r="58" fill="none" stroke="var(--paper-edge)" stroke-width="10"/>
+            <path id="ov-gauge-arc" d="${arcPath(70, 70, 58, 0)}" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round"/>
+          </svg>
+          <div class="ov-gauge-num"><b id="ov-gauge-num">${h.composite}</b><span id="ov-gauge-grade">${esc(h.grade)}${h.provisional ? " ~" : ""}</span></div>
+        </div></div>
+        <div class="ov-pillars">${pill("reliability", "REL")}${pill("performance", "PERF")}${pill("capacity", "CAP")}${pill("hygiene", "HYG")}</div>
+        <div class="ov-health-headline" id="ov-health-headline">${esc(h.headline || "")}</div>`;
+      host._built = true;
+      const g = $("ov-gauge");
+      if (g) {
+        g.addEventListener("mousemove", (e) => {
+          const r = P.reliability, p = P.performance, c = P.capacity, hy = P.hygiene;
+          tip(true, e.clientX, e.clientY,
+            `reliability ${r && r.score != null ? r.score : "—"} · performance ${p && p.score != null ? p.score : "—"}<br>capacity ${c && c.score != null ? c.score : "—"} · hygiene ${hy && hy.score != null ? hy.score : "—"}`);
+        });
+        g.addEventListener("mouseleave", () => tip(false));
+      }
     }
+    // Update dynamic bits
+    const arc = $("ov-gauge-arc");
+    if (arc) _tweenArc(arc, _healthFrac, frac, color);
+    const numEl = $("ov-gauge-num");
+    if (numEl) { if (window.APIN && APIN.odometer) APIN.odometer.roll(numEl, h.composite); else numEl.textContent = h.composite; }
+    const gradeEl = $("ov-gauge-grade");
+    if (gradeEl) gradeEl.textContent = esc(h.grade) + (h.provisional ? " ~" : "");
+    ["reliability", "performance", "capacity", "hygiene"].forEach(k => {
+      const el = host.querySelector(`.ov-pillar[data-pk="${k}"]`);
+      if (!el) return;
+      const v = pscore(k);
+      el.className = "ov-pillar s-" + ptone(v);
+      const val = el.querySelector(".ov-pillar-val"); if (val) val.textContent = v == null ? "—" : v;
+      const bar = el.querySelector(".ov-pillar-bar i"); if (bar) bar.style.width = (v || 0) + "%";
+    });
+    const hl = $("ov-health-headline"); if (hl) hl.textContent = h.headline || "";
   }
 
   function expandHealth(panel) {
@@ -196,14 +236,16 @@
       _ribbonGeo.push({ x, w: w + gap, row: r });
     });
   }
+  let _ribbonRows = [];   // live source of truth for the ribbon
   function renderRibbon(rows) {
     const canvas = $("ov-ribbon-canvas"), empty = $("ov-ribbon-empty"), aux = $("ov-ribbon-aux");
     if (!canvas) return;
-    if (!rows || !rows.length) { canvas.style.display = "none"; if (empty) empty.hidden = false; return; }
+    _ribbonRows = (rows || []).slice();
+    if (!_ribbonRows.length) { canvas.style.display = "none"; if (empty) empty.hidden = false; return; }
     canvas.style.display = "block"; if (empty) empty.hidden = true;
-    if (aux) aux.textContent = "last " + rows.length;
-    drawRibbon(canvas, rows);
-    canvas._rows = rows;
+    if (aux) aux.textContent = "last " + _ribbonRows.length;
+    drawRibbon(canvas, _ribbonRows);
+    canvas._rows = _ribbonRows;
     if (!canvas._wired) {
       canvas._wired = true;
       canvas.addEventListener("mousemove", (e) => {
@@ -261,8 +303,13 @@
     if (!tile) return;
     const numEl = tile.querySelector("[data-num]"), dEl = tile.querySelector("[data-delta]");
     if (numEl) {
-      if (window.APIN && APIN.odometer && /^[\d,]+$/.test(valStr)) {
-        numEl.textContent = valStr;
+      // Odometer-roll pure-integer values (requests, rate-limited); set
+      // mixed strings (e.g. "96.4%", "287ms") directly via cross-fade.
+      const intVal = /^[\d,]+$/.test(valStr) ? Number(valStr.replace(/,/g, "")) : null;
+      if (intVal != null && window.APIN && APIN.odometer) {
+        APIN.odometer.roll(numEl, intVal);
+      } else if (window.APIN && APIN.fx && APIN.fx.fadeReplace && numEl.textContent !== valStr && numEl.textContent !== "·") {
+        APIN.fx.fadeReplace(numEl, () => { numEl.textContent = valStr; });
       } else numEl.textContent = valStr;
     }
     if (dEl) {
@@ -349,19 +396,67 @@
   }
   function expandSparkGrid(panel) {
     const grid = (DATA && DATA.spark_grid) || [];
-    panel.innerHTML = `<div style="font:12px/1.5 'JetBrains Mono',monospace;color:var(--ink-soft);margin-bottom:8px">top endpoints by volume · click a row → Requests tab</div>` +
-      grid.map(s => `<div class="ov-spark-row" style="grid-template-columns:1fr 120px auto">
-        <div class="ov-spark-path">${esc(s.path)}</div>${sparkSvg(s.buckets || [], 120, 28)}
-        <div class="ov-spark-meta">${fmtNum(s.count)} reqs · p95 ${fmtMs(s.p95)}</div></div>`).join("");
+    const metricKey = { requests: "buckets", latency: "buckets_lat", errors: "buckets_err" };
+    function paint(metric) {
+      const bk = metricKey[metric];
+      const color = metric === "errors" ? "var(--c-danger)" : metric === "latency" ? "var(--c-amber)" : "var(--c-ok)";
+      rowsHost.innerHTML = grid.map(s => {
+        const buckets = s[bk] || [];
+        const metaTxt = metric === "latency" ? "p95 " + fmtMs(s.p95)
+          : metric === "errors" ? (s.buckets_err || []).reduce((a, b) => a + b, 0) + " err"
+          : fmtNum(s.count) + " reqs";
+        return `<div class="ov-spark-row" style="grid-template-columns:1fr 120px auto">
+          <div class="ov-spark-path">${esc(s.path)}</div>
+          ${sparkSvg(buckets, 120, 28).replace("var(--c-ok)", color)}
+          <div class="ov-spark-meta">${metaTxt}</div></div>`;
+      }).join("");
+    }
+    panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font:12px/1.5 'JetBrains Mono',monospace;color:var(--ink-soft)">top endpoints · 24h</span>
+        <div class="ov-range" id="ov-spark-metric"><button data-m="requests" aria-pressed="true">requests</button><button data-m="latency">latency</button><button data-m="errors">errors</button></div>
+      </div><div id="ov-spark-rows"></div>`;
+    const rowsHost = panel.querySelector("#ov-spark-rows");
+    paint("requests");
+    panel.querySelectorAll("#ov-spark-metric button").forEach(b => {
+      b.addEventListener("click", () => {
+        panel.querySelectorAll("#ov-spark-metric button").forEach(x => x.removeAttribute("aria-pressed"));
+        b.setAttribute("aria-pressed", "true");
+        paint(b.getAttribute("data-m"));
+      });
+    });
   }
 
   // ════════════════════ WIDGET 6 · INSIGHTS ════════════════════════════
+  // (d) infer which bento card an insight refers to (for hover-glow + click)
+  function _insightRef(text) {
+    const t = (text || "").toLowerCase();
+    if (/latency|p95|p50|slow|fast|degrad|improv/.test(t)) return "ov-health";
+    if (/predict|inference|read|get|burst|personalit/.test(t)) return "ov-personality";
+    if (/error|5xx|4xx|fail|grade|health/.test(t)) return "ov-health";
+    if (/endpoint|\/api\//.test(t)) return "ov-sparkgrid";
+    if (/ip|integration|shared|leak/.test(t)) return "ov-ribbon";
+    return null;
+  }
   function renderInsights(list) {
     const host = $("ov-insights-body");
     if (!host) return;
     if (!list || !list.length) { host.innerHTML = `<div style="font:italic 13px/1.5 'Fraunces',serif;color:var(--ink-mute)">Operating cleanly — no notable signals.</div>`; return; }
-    host.innerHTML = list.map(i => `<div class="ov-insight ${esc(i.tone || "info")}"><i class="ins-icon"></i><span>${esc(i.text)}</span></div>`).join("");
-    // stagger fade-in
+    host.innerHTML = list.map(i => {
+      const ref = _insightRef(i.text);
+      return `<div class="ov-insight ${esc(i.tone || "info")}" data-ref="${ref || ""}"${ref ? ' style="cursor:pointer"' : ""}><i class="ins-icon"></i><span>${esc(i.text)}</span></div>`;
+    }).join("");
+    host.querySelectorAll(".ov-insight[data-ref]").forEach(el => {
+      const ref = el.getAttribute("data-ref");
+      if (!ref) return;
+      el.addEventListener("mouseenter", () => { const c = $(ref); if (c) c.classList.add("is-glow"); });
+      el.addEventListener("mouseleave", () => { const c = $(ref); if (c) c.classList.remove("is-glow"); });
+      el.addEventListener("click", () => {
+        const c = $(ref); if (!c) return;
+        c.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (window.APIN && APIN.fx && APIN.fx.pulse) APIN.fx.pulse(c);
+        else { c.classList.add("is-glow"); setTimeout(() => c.classList.remove("is-glow"), 1200); }
+      });
+    });
     if (window.APIN && APIN.fx) host.querySelectorAll(".ov-insight").forEach((el, i) => setTimeout(() => APIN.fx.enter(el), i * 60));
   }
   function expandInsights(panel) {
@@ -428,6 +523,7 @@
       LIVE = !LIVE; live.setAttribute("data-on", LIVE ? "true" : "false");
       live.querySelector(".ov-live-label").textContent = LIVE ? "live" : "paused";
       _schedulePoll();
+      if (LIVE) startSSE(); else stopSSE();
     });
     const rf = $("ov-refresh");
     if (rf) rf.addEventListener("click", () => { rf.classList.add("is-spinning"); setTimeout(() => rf.classList.remove("is-spinning"), 760); refresh(); });
@@ -440,6 +536,45 @@
     if (LIVE && _active) _pollTimer = setInterval(refresh, 15000);
   }
 
+  // ── (b) Per-event SSE — live ribbon ticks + KPI bump ──────────────────
+  let _es = null, _liveReqCount = null;
+  function startSSE() {
+    if (_es || !window.EventSource) return;
+    try { _es = new EventSource("/api/account/usage/stream"); }
+    catch (_) { _es = null; return; }
+    _es.onmessage = (e) => {
+      if (!LIVE || !_active) return;
+      let ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
+      if (!ev || ev.type !== "request") return;
+      if (ev.key_id && PID && ev.key_id !== PID) return;   // not this key
+      // Append the new request to the ribbon (newest on the right) + cap.
+      _ribbonRows.push({
+        id: ev.id || null, timestamp: ev.timestamp,
+        method: ev.method, path: ev.path,
+        status_code: ev.status_code, latency_ms: ev.latency_ms,
+      });
+      if (_ribbonRows.length > 120) _ribbonRows.shift();
+      const canvas = $("ov-ribbon-canvas"), empty = $("ov-ribbon-empty"), aux = $("ov-ribbon-aux");
+      if (canvas) {
+        canvas.style.display = "block"; if (empty) empty.hidden = true;
+        if (aux) aux.textContent = "last " + _ribbonRows.length + " · live";
+        canvas._rows = _ribbonRows;
+        drawRibbon(canvas, _ribbonRows);
+      }
+      // Bump the requests KPI live (poll reconciles the rest within 15s).
+      if (DATA && DATA.kpis && DATA.kpis.requests) {
+        if (_liveReqCount == null) _liveReqCount = DATA.kpis.requests.value || 0;
+        _liveReqCount += 1;
+        setKpi("requests", fmtNum(_liveReqCount), DATA.kpis.requests.delta_pct, false);
+      }
+      // cross-link: flash matching spark-grid row
+      Bus.emit("hover:endpoint", ev.path);
+      setTimeout(() => Bus.emit("hover:endpoint", null), 600);
+    };
+    _es.onerror = () => { /* EventSource auto-reconnects */ };
+  }
+  function stopSSE() { if (_es) { try { _es.close(); } catch (_) {} _es = null; } }
+
   // ── public init / activate ────────────────────────────────────────────
   function activate(pid) {
     PID = pid; _active = true;
@@ -447,8 +582,9 @@
     wireControls(); wireExpands();
     refresh();
     _schedulePoll();
+    if (LIVE) startSSE();
   }
-  function deactivate() { _active = false; if (_pollTimer) clearInterval(_pollTimer); }
+  function deactivate() { _active = false; if (_pollTimer) clearInterval(_pollTimer); stopSSE(); }
 
   window.APIN = window.APIN || {};
   window.APIN.keyOverview = { activate, deactivate, Bus };
