@@ -379,9 +379,9 @@ def _headline(pillars: dict) -> str:
     if lowest == "reliability":
         r = pillars["reliability"]
         if (r.get("rate_5xx") or 0) > 0.1:
-            return (f"Capped by reliability — {r['rate_5xx']}% of requests "
+            return (f"Capped by reliability — {(r['rate_5xx']):.1f}% of requests "
                     f"returned 5xx (server errors).")
-        return (f"Capped by reliability — {r.get('rate_4xx')}% 4xx client "
+        return (f"Capped by reliability — {(r.get('rate_4xx') or 0):.1f}% 4xx client "
                 f"errors suggest the integration may be misusing the API.")
     if lowest == "performance":
         p = pillars["performance"]

@@ -99,18 +99,51 @@
   }
   let _healthFrac = 0;          // last drawn gauge fraction (for arc tween)
   let _healthArcRaf = null;
+  // Generic per-element count-up. Robust replacement for the odometer (which
+  // needs a CSS contract absent on this page and garbled the gauge centre).
+  // State lives on the element (el._cuVal / el._cuRaf) so the health gauge
+  // and the four KPI tiles animate independently without clobbering frames.
+  //   opts: { dur, from, fmt }  fmt(value)→string (default rounded integer)
+  function countUp(el, to, opts) {
+    if (!el) return;
+    opts = opts || {};
+    const dur = opts.dur || 600;
+    const fmt = opts.fmt || ((v) => String(Math.round(v)));
+    const from = (opts.from != null) ? opts.from
+               : (el._cuVal != null ? el._cuVal : 0);
+    if (el._cuRaf) cancelAnimationFrame(el._cuRaf);
+    if (el._cuTimer) clearTimeout(el._cuTimer);
+    // Safety net: rAF is paused/throttled in hidden or backgrounded tabs,
+    // which would otherwise freeze the number on its first frame (the
+    // "stuck number" class of bug). Guarantee the final value lands even if
+    // not a single animation frame ever runs. No-op on a visible tab.
+    el._cuTimer = setTimeout(() => { el.textContent = fmt(to); el._cuVal = to; }, dur + 160);
+    const t0 = performance.now();
+    (function step(now) {
+      const k = Math.min(1, (now - t0) / dur);
+      const eased = 1 - Math.pow(1 - k, 3);
+      const v = from + (to - from) * eased;
+      el.textContent = fmt(v); el._cuVal = v;
+      if (k < 1) el._cuRaf = requestAnimationFrame(step);
+      else { el.textContent = fmt(to); el._cuVal = to; if (el._cuTimer) { clearTimeout(el._cuTimer); el._cuTimer = null; } }
+    })(t0);
+  }
   const _toneColor = (t) => ({ great: "#2f6f3e", ok: "#7a9a3e", warn: "#c98a2b", bad: "#b3402f", nodata: "#9a907a" }[t] || "#7a9a3e");
+  let _healthArcTimer = null;
   function _tweenArc(pathEl, from, to, color) {
     if (_healthArcRaf) cancelAnimationFrame(_healthArcRaf);
+    if (_healthArcTimer) clearTimeout(_healthArcTimer);
     const t0 = performance.now(), dur = 500;
     pathEl.setAttribute("stroke", color);
+    // Safety net (see countUp): land the final arc even if rAF never fires.
+    _healthArcTimer = setTimeout(() => { pathEl.setAttribute("d", arcPath(70, 70, 58, to)); _healthFrac = to; }, dur + 160);
     (function step(now) {
       const k = Math.min(1, (now - t0) / dur);
       const eased = 1 - Math.pow(1 - k, 3);          // easeOutCubic
       const f = from + (to - from) * eased;
       pathEl.setAttribute("d", arcPath(70, 70, 58, f));
       if (k < 1) _healthArcRaf = requestAnimationFrame(step);
-      else _healthFrac = to;
+      else { _healthFrac = to; if (_healthArcTimer) { clearTimeout(_healthArcTimer); _healthArcTimer = null; } }
     })(t0);
   }
   function renderHealth(h) {
@@ -145,7 +178,7 @@
             <circle cx="70" cy="70" r="58" fill="none" stroke="var(--paper-edge)" stroke-width="10"/>
             <path id="ov-gauge-arc" d="${arcPath(70, 70, 58, 0)}" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round"/>
           </svg>
-          <div class="ov-gauge-num"><b id="ov-gauge-num">${Math.round(h.composite)}</b><span id="ov-gauge-grade">${esc(h.grade)}${h.provisional ? " ~" : ""}</span></div>
+          <div class="ov-gauge-num"><b id="ov-gauge-num">0</b><span id="ov-gauge-grade">${esc(h.grade)}${h.provisional ? " ~" : ""}</span></div>
         </div></div>
         <div class="ov-pillars">${pill("reliability", "REL")}${pill("performance", "PERF")}${pill("capacity", "CAP")}${pill("hygiene", "HYG")}</div>
         <div class="ov-health-headline" id="ov-health-headline">${esc(h.headline || "")}</div>`;
@@ -165,12 +198,9 @@
     if (arc) _tweenArc(arc, _healthFrac, frac, color);
     const numEl = $("ov-gauge-num");
     if (numEl) {
-      // Odometer handles integer digit columns; a decimal "91.9" garbles
-      // the center. The score is a 0-100 index — show the rounded integer
-      // (matches the spec mockup "92").
-      const shown = Math.round(h.composite);
-      if (window.APIN && APIN.odometer) APIN.odometer.roll(numEl, shown);
-      else numEl.textContent = shown;
+      // Count-up from the previously shown value (0 on first launch → score).
+      const first = (numEl._cuVal == null);
+      countUp(numEl, Math.round(h.composite), { dur: first ? 700 : 450 });
     }
     const gradeEl = $("ov-gauge-grade");
     if (gradeEl) gradeEl.textContent = esc(h.grade) + (h.provisional ? " ~" : "");
@@ -222,7 +252,18 @@
   }
 
   // ════════════════════ WIDGET 2 · REQUEST RIBBON ══════════════════════
-  let _ribbonGeo = [];   // [{x,w,row}] for hit-testing
+  function _ribbonColors() {
+    const cs = getComputedStyle(document.documentElement);
+    return {
+      "2xx": cs.getPropertyValue("--c-ok").trim() || "#2f6f3e",
+      "4xx": cs.getPropertyValue("--c-amber").trim() || "#c98a2b",
+      "5xx": cs.getPropertyValue("--c-danger").trim() || "#b3402f",
+      ink:   cs.getPropertyValue("--ink").trim() || "#1a1612",
+    };
+  }
+  // Draw the ribbon into a canvas. Per-canvas geometry stored on canvas._geo
+  // (so the bento + expanded canvases don't clobber each other's hit-test).
+  // opts.progress (0..1) scales bar heights for the intro draw-in animation.
   function drawRibbon(canvas, rows, opts) {
     opts = opts || {};
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -231,83 +272,256 @@
     const ctx = canvas.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
-    _ribbonGeo = [];
+    const geo = [];
+    canvas._geo = geo;
     if (!rows || !rows.length) return;
-    const cs = getComputedStyle(document.documentElement);
-    const col = {
-      "2xx": cs.getPropertyValue("--c-ok").trim() || "#2f6f3e",
-      "4xx": cs.getPropertyValue("--c-amber").trim() || "#c98a2b",
-      "5xx": cs.getPropertyValue("--c-danger").trim() || "#b3402f",
-    };
-    const n = rows.length;
-    const gap = 1;
+    const col = _ribbonColors();
+    const n = rows.length, gap = 1;
     const w = Math.max(2, (cssW - gap * (n - 1)) / n);
-    const baseY = cssH - 4;
-    const maxLog = Math.log10(30000);   // 30s ceiling
+    const baseY = cssH - 4, maxLog = Math.log10(30000);
+    const prog = opts.progress == null ? 1 : opts.progress;
+    const hi = opts.highlightPath;
     rows.forEach((r, i) => {
       const lat = Math.max(1, r.latency_ms || 1);
       const frac = Math.min(1, Math.log10(lat) / maxLog);
-      const hgt = Math.max(3, frac * (cssH - 8));
+      const hgt = Math.max(3, frac * (cssH - 8)) * prog;
       const x = i * (w + gap);
       const bucket = statusBucket(r.status_code || 0);
-      ctx.fillStyle = (opts.dimId && r.id !== opts.dimId && opts.dimMatchPath && r.path !== opts.dimMatchPath) ? "rgba(0,0,0,.08)" : col[bucket];
-      if (opts.highlightId && r.id === opts.highlightId) { ctx.fillStyle = "var(--ink)"; ctx.fillStyle = cs.getPropertyValue("--ink").trim() || "#1a1612"; }
+      ctx.globalAlpha = (hi && r.path !== hi) ? 0.25 : 1;
+      ctx.fillStyle = col[bucket];
       ctx.fillRect(x, baseY - hgt, w, hgt);
-      _ribbonGeo.push({ x, w: w + gap, row: r });
+      ctx.globalAlpha = 1;
+      geo.push({ x, w: w + gap, row: r });
     });
   }
-  let _ribbonRows = [];   // live source of truth for the ribbon
+  // Intro draw-in: animate progress 0→1 over ~520ms (staggered feel via easeOut).
+  function drawRibbonIntro(canvas, rows) {
+    const t0 = performance.now(), dur = 520;
+    // Safety net (see countUp): if rAF never fires the bars would be stuck at
+    // progress 0 (invisible). Force a full-height draw after the intro window.
+    const safety = setTimeout(() => drawRibbon(canvas, rows, { progress: 1 }), dur + 160);
+    (function step(now) {
+      const k = Math.min(1, (now - t0) / dur);
+      drawRibbon(canvas, rows, { progress: 1 - Math.pow(1 - k, 3) });
+      if (k < 1) requestAnimationFrame(step);
+      else clearTimeout(safety);
+    })(t0);
+  }
+  function _wireRibbonHover(canvas, opts) {
+    opts = opts || {};
+    canvas.addEventListener("mousemove", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const hit = (canvas._geo || []).find(g => x >= g.x && x < g.x + g.w);
+      if (hit) {
+        const r = hit.row;
+        tip(true, e.clientX, e.clientY,
+          `${esc(r.method || "")} ${esc(r.path || "")}<br>${r.status_code} · ${fmtMs(r.latency_ms)} · ${fmtAgo(r.timestamp)}`);
+        if (opts.bus !== false) Bus.emit("hover:endpoint", r.path);
+      } else { tip(false); if (opts.bus !== false) Bus.emit("hover:endpoint", null); }
+    });
+    canvas.addEventListener("mouseleave", () => { tip(false); if (opts.bus !== false) Bus.emit("hover:endpoint", null); });
+    canvas.addEventListener("click", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const hit = (canvas._geo || []).find(g => x >= g.x && x < g.x + g.w);
+      if (hit) openRequestDrawer(hit.row.id, hit.row);
+    });
+  }
+  let _ribbonRows = [];      // full set (up to 240) — live source of truth
+  let _ribbonIntroDone = false;
   function renderRibbon(rows) {
     const canvas = $("ov-ribbon-canvas"), empty = $("ov-ribbon-empty"), aux = $("ov-ribbon-aux");
     if (!canvas) return;
     _ribbonRows = (rows || []).slice();
     if (!_ribbonRows.length) { canvas.style.display = "none"; if (empty) empty.hidden = false; return; }
     canvas.style.display = "block"; if (empty) empty.hidden = true;
-    if (aux) aux.textContent = "last " + _ribbonRows.length;
-    drawRibbon(canvas, _ribbonRows);
-    canvas._rows = _ribbonRows;
-    if (!canvas._wired) {
-      canvas._wired = true;
-      canvas.addEventListener("mousemove", (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const hit = _ribbonGeo.find(g => x >= g.x && x < g.x + g.w);
-        if (hit) {
-          const r = hit.row;
-          tip(true, e.clientX, e.clientY,
-            `${esc(r.method || "")} ${esc(r.path || "")}<br>${r.status_code} · ${fmtMs(r.latency_ms)} · ${fmtAgo(r.timestamp)}`);
-          Bus.emit("hover:endpoint", r.path);
-        } else { tip(false); Bus.emit("hover:endpoint", null); }
-      });
-      canvas.addEventListener("mouseleave", () => { tip(false); Bus.emit("hover:endpoint", null); });
-      canvas.addEventListener("click", (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const hit = _ribbonGeo.find(g => x >= g.x && x < g.x + g.w);
-        if (hit && hit.row.id != null) openRequestDrawer(hit.row.id);
-      });
-    }
+    // Bento shows the most recent 120.
+    const shown = _ribbonRows.slice(-120);
+    if (aux) aux.textContent = "last " + shown.length;
+    canvas._rows = shown;
+    if (!_ribbonIntroDone) { _ribbonIntroDone = true; drawRibbonIntro(canvas, shown); }
+    else drawRibbon(canvas, shown);
+    if (!canvas._wired) { canvas._wired = true; _wireRibbonHover(canvas); }
   }
-  function openRequestDrawer(rid) {
-    // Reuse the existing per-key request drawer if console_key_detail exposes it
-    if (window.APIN && APIN.keyDetail && APIN.keyDetail.openRequest) { APIN.keyDetail.openRequest(rid); return; }
-    // else navigate to the requests tab
+  function openRequestDrawer(rid, row) {
+    // Live-streamed rows have no DB id yet (id===null) — they aren't in the
+    // request log until the buffer flushes. Show a brief note instead of a
+    // broken drawer.
+    if (rid == null) {
+      if (window.APIN && APIN.toast) APIN.toast.show("This request is still being recorded — try again in a few seconds.");
+      return;
+    }
+    if (window.APIN && APIN.keyDetail && typeof APIN.keyDetail.openRequest === "function") {
+      APIN.keyDetail.openRequest(rid); return;
+    }
     location.hash = "#requests";
   }
+  // Mini density histogram (req/sec) drawn into a small canvas.
+  function drawDensity(canvas, buckets) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cssW = canvas.clientWidth || 600, cssH = canvas.clientHeight || 34;
+    canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+    const ctx = canvas.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    const max = Math.max(1, ...buckets), n = buckets.length, w = cssW / n;
+    const col = _ribbonColors();
+    buckets.forEach((v, i) => {
+      const h = (v / max) * (cssH - 2);
+      ctx.fillStyle = col["2xx"]; ctx.globalAlpha = 0.5;
+      ctx.fillRect(i * w, cssH - h, Math.max(1, w - 1), h);
+    });
+    ctx.globalAlpha = 1;
+  }
   function expandRibbon(panel) {
-    const rows = (DATA && DATA.ribbon) || [];
+    const allRows = (DATA && DATA.ribbon) || [];
+    const ts = (DATA && DATA.timeseries) || { req: [] };
     panel.innerHTML =
-      `<div style="margin-bottom:10px;font:12px/1.5 'JetBrains Mono',monospace;color:var(--ink-soft)">${rows.length} requests · hover a tick for detail · click → request drawer</div>
-       <canvas id="ov-ribbon-big" style="width:100%;height:200px;display:block;cursor:crosshair"></canvas>
-       <div class="ov-ribbon-foot" style="padding-left:0"><span><i class="rdot s-2xx"></i>2xx</span><span><i class="rdot s-4xx"></i>4xx</span><span><i class="rdot s-5xx"></i>5xx</span><span class="ov-ribbon-hint">height = latency (log scale)</span></div>`;
+      `<div class="ov-rb-controls" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font:12px 'JetBrains Mono',monospace">
+         <div class="ov-range" id="ov-rb-status"><button data-s="all" aria-pressed="true">all</button><button data-s="2xx">2xx</button><button data-s="4xx">4xx</button><button data-s="5xx">5xx</button></div>
+         <select id="ov-rb-method" style="padding:5px 8px;border:1px solid var(--paper-edge);background:var(--paper);font:inherit;color:var(--ink);border-radius:7px"><option value="">any method</option><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select>
+         <input id="ov-rb-ep" type="search" placeholder="endpoint contains…" style="padding:5px 8px;border:1px solid var(--paper-edge);background:var(--paper);font:inherit;color:var(--ink);border-radius:7px;flex:1;min-width:140px">
+         <button id="ov-rb-pause" class="ov-livebtn" data-on="true"><span class="ov-live-dot"></span><span class="ov-live-label">live</span></button>
+         <span id="ov-rb-count" style="color:var(--ink-mute)">${allRows.length} requests</span>
+       </div>
+       <div style="font:italic 10.5px 'Fraunces',serif;color:var(--ink-mute);margin-bottom:2px">density · req per bucket</div>
+       <canvas id="ov-rb-density" style="width:100%;height:30px;display:block;margin-bottom:6px"></canvas>
+       <canvas id="ov-rb-big" style="width:100%;height:190px;display:block;cursor:crosshair"></canvas>
+       <div style="margin-top:8px"><input id="ov-rb-brush" type="range" min="0" max="100" value="100" style="width:100%"></div>
+       <div style="font:italic 11px 'Fraunces',serif;color:var(--ink-mute);text-align:center">drag to pan the window · showing <span id="ov-rb-window"></span></div>
+       <div class="ov-ribbon-foot" style="padding-left:0"><span><i class="rdot s-2xx"></i>2xx</span><span><i class="rdot s-4xx"></i>4xx</span><span><i class="rdot s-5xx"></i>5xx</span><span class="ov-ribbon-hint">height = latency (log) · hover → detail · click → request drawer</span></div>`;
+    let live = true;
+    const WINDOW = 80;                 // ticks visible at once
+    function filtered() {
+      const sf = panel.querySelector('#ov-rb-status button[aria-pressed="true"]').getAttribute("data-s");
+      const mf = panel.querySelector("#ov-rb-method").value;
+      const ef = panel.querySelector("#ov-rb-ep").value.toLowerCase();
+      return allRows.filter(r => {
+        if (sf !== "all" && statusBucket(r.status_code || 0) !== sf) return false;
+        if (mf && (r.method || "").toUpperCase() !== mf) return false;
+        if (ef && !(r.path || "").toLowerCase().includes(ef)) return false;
+        return true;
+      });
+    }
+    function paint() {
+      const c = $("ov-rb-big"); if (!c) return;
+      const rows = filtered();
+      const brush = Number(panel.querySelector("#ov-rb-brush").value);
+      const maxStart = Math.max(0, rows.length - WINDOW);
+      const start = Math.round((brush / 100) * maxStart);
+      const win = rows.slice(start, start + WINDOW);
+      drawRibbon(c, win.length ? win : rows.slice(-WINDOW));
+      const wEl = $("ov-rb-window");
+      if (wEl) wEl.textContent = rows.length <= WINDOW ? `all ${rows.length}` : `${start + 1}–${Math.min(start + WINDOW, rows.length)} of ${rows.length}`;
+      const cnt = $("ov-rb-count"); if (cnt) cnt.textContent = rows.length + " requests";
+    }
     setTimeout(() => {
-      const c = $("ov-ribbon-big");
-      if (c) { drawRibbon(c, rows); c.addEventListener("mousemove", (e) => {
-        const rect = c.getBoundingClientRect(); const x = e.clientX - rect.left;
-        const hit = _ribbonGeo.find(g => x >= g.x && x < g.x + g.w);
-        if (hit) { const r = hit.row; tip(true, e.clientX, e.clientY, `${esc(r.method)} ${esc(r.path)}<br>${r.status_code} · ${fmtMs(r.latency_ms)} · ${fmtAgo(r.timestamp)}`); } else tip(false);
-      }); c.addEventListener("mouseleave", () => tip(false)); }
+      drawDensity($("ov-rb-density"), ts.req || []);
+      const big = $("ov-rb-big");
+      // donut cross-link: pre-press a status chip if opened via _openRibbonFiltered
+      if (_ribbonPreset) {
+        const pb = panel.querySelector(`#ov-rb-status button[data-s="${_ribbonPreset}"]`);
+        if (pb) { panel.querySelectorAll("#ov-rb-status button").forEach(x => x.removeAttribute("aria-pressed")); pb.setAttribute("aria-pressed", "true"); }
+        _ribbonPreset = null;
+      }
+      paint();
+      _wireRibbonHover(big, { bus: false });
+      panel.querySelectorAll("#ov-rb-status button").forEach(b => b.addEventListener("click", () => {
+        panel.querySelectorAll("#ov-rb-status button").forEach(x => x.removeAttribute("aria-pressed"));
+        b.setAttribute("aria-pressed", "true"); paint();
+      }));
+      panel.querySelector("#ov-rb-method").addEventListener("change", paint);
+      panel.querySelector("#ov-rb-ep").addEventListener("input", paint);
+      panel.querySelector("#ov-rb-brush").addEventListener("input", paint);
+      const pause = $("ov-rb-pause");
+      pause.addEventListener("click", () => { live = !live; pause.setAttribute("data-on", live ? "true" : "false"); pause.querySelector(".ov-live-label").textContent = live ? "live" : "paused"; });
     }, 60);
+  }
+
+  // ── shared expanded-view chart primitives (inline SVG, token-aware) ───
+  function _C() {
+    const cs = getComputedStyle(document.documentElement);
+    const g = (n, d) => (cs.getPropertyValue(n).trim() || d);
+    return { ok: g("--c-ok", "#2f6f3e"), amber: g("--c-amber", "#c98a2b"),
+             danger: g("--c-danger", "#b3402f"), ink: g("--ink", "#1a1612"),
+             soft: g("--ink-soft", "#6b6453"), mute: g("--ink-mute", "#9a907a"),
+             edge: g("--paper-edge", "#c7bca9") };
+  }
+  // section subheader inside a lightbox panel (matches lightbox.section style)
+  const _kxSec = (t) => `<div style="font:500 italic 11px 'Fraunces',serif;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-soft);margin:16px 0 9px;padding-bottom:6px;border-bottom:1px solid var(--paper-edge)">${esc(t)}</div>`;
+  // horizontal labelled bars (endpoint breakdown / tables)
+  function hbars(items, opts) {
+    opts = opts || {};
+    const max = Math.max(1, ...items.map(i => i.value));
+    const c = opts.color || _C().ok;
+    return items.map(i => {
+      const pct = (i.value / max) * 100;
+      return `<div style="display:grid;grid-template-columns:140px 1fr 70px;gap:10px;align-items:center;margin:6px 0;font:11.5px 'JetBrains Mono',monospace">
+        <span style="color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(i.label)}">${esc(i.label)}</span>
+        <span style="height:13px;background:rgba(120,110,90,.16);border-radius:3px;overflow:hidden;display:block"><i style="display:block;height:100%;width:${pct.toFixed(1)}%;background:${c};border-radius:3px;transition:width .4s cubic-bezier(.22,1,.36,1)"></i></span>
+        <span style="color:var(--ink);text-align:right">${esc(i.sub != null ? i.sub : i.value)}</span></div>`;
+    }).join("");
+  }
+  // stacked status bars over time (timeseries)
+  function stackedBarsSvg(ts, w, h) {
+    w = w || 560; h = h || 150;
+    const req = ts.req || [], n = req.length || 1;
+    const max = Math.max(1, ...req);
+    const bw = w / n, gap = Math.min(2.5, bw * 0.22), col = _C();
+    let bars = "";
+    for (let i = 0; i < n; i++) {
+      let y = h;
+      const seg = (v, c) => { if (!v) return ""; const sh = (v / max) * (h - 4); y -= sh; return `<rect x="${(i * bw + gap / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - gap).toFixed(1)}" height="${sh.toFixed(1)}" fill="${c}"/>`; };
+      bars += seg(ts.s2xx ? ts.s2xx[i] : 0, col.ok)
+            + seg(ts.s4xx ? ts.s4xx[i] : 0, col.amber)
+            + seg(ts.s5xx ? ts.s5xx[i] : 0, col.danger);
+    }
+    return `<svg width="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block;height:${h}px">${bars}</svg>`;
+  }
+  // donut for status mix; parts:[{key,label,value,color}] — slices are clickable
+  function donutSvg(parts, size, thick) {
+    size = size || 156; thick = thick || 26;
+    const r = (size - thick) / 2, cx = size / 2, cy = size / 2, circ = 2 * Math.PI * r;
+    const total = parts.reduce((a, p) => a + p.value, 0) || 1;
+    let off = 0;
+    const segs = parts.filter(p => p.value > 0).map(p => {
+      const len = (p.value / total) * circ, dash = `${len.toFixed(2)} ${(circ - len).toFixed(2)}`;
+      const s = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${p.color}" stroke-width="${thick}" stroke-dasharray="${dash}" stroke-dashoffset="${(-off).toFixed(2)}" data-slice="${p.key}" style="cursor:pointer;transition:stroke-width .14s" transform="rotate(-90 ${cx} ${cy})"><title>${esc(p.label)}: ${p.value}</title></circle>`;
+      off += len; return s;
+    }).join("");
+    const pct = Math.round(100 * (parts[0] ? parts[0].value : 0) / total);
+    return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--paper-edge)" stroke-width="${thick}" opacity="0.35"/>
+      ${segs}
+      <text x="${cx}" y="${cy - 1}" text-anchor="middle" style="font:700 26px 'Fraunces',serif;fill:var(--ink)">${pct}%</text>
+      <text x="${cx}" y="${cy + 17}" text-anchor="middle" style="font:9.5px 'JetBrains Mono',monospace;fill:var(--ink-mute);letter-spacing:.08em">SUCCESS</text></svg>`;
+  }
+  // log-binned latency histogram with edge ticks
+  function histSvg(lh, w, h) {
+    w = w || 560; h = h || 150;
+    const edges = lh.edges || [], bins = lh.bins || [], n = bins.length || 1;
+    const max = Math.max(1, ...bins), bw = w / n, col = _C();
+    let bars = "", ticks = "";
+    for (let i = 0; i < n; i++) {
+      const bh = (bins[i] / max) * (h - 4);
+      bars += `<rect x="${(i * bw + 1).toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${bh.toFixed(1)}" fill="${col.ok}" opacity="${(0.35 + 0.55 * (bins[i] / max)).toFixed(2)}"><title>${edges[i]}–${edges[i + 1]}ms: ${bins[i]}</title></rect>`;
+    }
+    for (let i = 0; i <= n; i += 2) {
+      const e = edges[i]; if (e == null) continue;
+      const lbl = e >= 1000 ? (e / 1000) + "s" : e + "ms";
+      ticks += `<text x="${(i * bw).toFixed(1)}" y="${h + 12}" text-anchor="middle" style="font:9px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${lbl}</text>`;
+    }
+    return `<svg width="100%" viewBox="0 0 ${w} ${h + 16}" preserveAspectRatio="none" style="display:block;height:${h + 16}px;overflow:visible">${bars}${ticks}</svg>`;
+  }
+  // radial burndown gauge
+  function radialSvg(frac, label, sub, size) {
+    size = size || 144; const r = (size - 22) / 2, cx = size / 2, cy = size / 2, col = _C();
+    const c = frac >= 0.9 ? col.danger : frac >= 0.7 ? col.amber : col.ok;
+    return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--paper-edge)" stroke-width="11" opacity="0.35"/>
+      <path d="${arcPath(cx, cy, r, frac)}" fill="none" stroke="${c}" stroke-width="11" stroke-linecap="round" transform="rotate(-90 ${cx} ${cy})"/>
+      <text x="${cx}" y="${cy - 1}" text-anchor="middle" style="font:700 21px 'Fraunces',serif;fill:var(--ink)">${esc(label)}</text>
+      <text x="${cx}" y="${cy + 15}" text-anchor="middle" style="font:9px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${esc(sub || "")}</text></svg>`;
   }
 
   // ════════════════════ WIDGET 3 · KPI TILES ═══════════════════════════
@@ -323,14 +537,16 @@
     if (!tile) return;
     const numEl = tile.querySelector("[data-num]"), dEl = tile.querySelector("[data-delta]");
     if (numEl) {
-      // Odometer-roll pure-integer values (requests, rate-limited); set
-      // mixed strings (e.g. "96.4%", "287ms") directly via cross-fade.
+      // Pure-integer values (requests, rate-limited) count-up cleanly via the
+      // per-element rAF (odometer needs a CSS contract absent on this page and
+      // garbled the gauge). Mixed strings ("96.4%", "287ms") cross-fade.
       const intVal = /^[\d,]+$/.test(valStr) ? Number(valStr.replace(/,/g, "")) : null;
-      if (intVal != null && window.APIN && APIN.odometer) {
-        APIN.odometer.roll(numEl, intVal);
+      if (intVal != null) {
+        countUp(numEl, intVal, { fmt: (v) => Math.round(v).toLocaleString() });
       } else if (window.APIN && APIN.fx && APIN.fx.fadeReplace && numEl.textContent !== valStr && numEl.textContent !== "·") {
         APIN.fx.fadeReplace(numEl, () => { numEl.textContent = valStr; });
-      } else numEl.textContent = valStr;
+        numEl._cuVal = null;
+      } else { numEl.textContent = valStr; numEl._cuVal = null; }
     }
     if (dEl) {
       if (delta == null) { dEl.textContent = ""; dEl.className = "ov-kpi-delta neutral"; }
@@ -343,22 +559,119 @@
     }
   }
   function expandKpi(name, panel) {
-    const k = (DATA && DATA.kpis) || {};
-    const titles = { requests: "Requests", success_rate: "Success rate", p50_ms: "p50 latency", rate_limited: "Rate-limited / quota" };
-    const d = k[name] || {};
-    let body = `<div style="font:600 40px/1 'Fraunces',serif;color:var(--ink)">${name === "p50_ms" ? fmtMs(d.value) : name === "success_rate" ? (d.value == null ? "—" : d.value + "%") : fmtNum(d.value)}</div>`;
-    body += `<div style="font:12px/1.6 'JetBrains Mono',monospace;color:var(--ink-soft);margin-top:6px">previous period: ${name === "p50_ms" ? fmtMs(d.prev) : fmtNum(d.prev)}${d.delta_pct != null ? ` · Δ ${d.delta_pct > 0 ? "+" : ""}${d.delta_pct}%` : ""}</div>`;
-    if (name === "success_rate" && DATA) {
-      const h = DATA.health || {}; const rel = (h.pillars || {}).reliability || {};
-      body += `<div style="margin-top:18px;font:13px/1.7 'Fraunces',serif;color:var(--ink-soft)">Status breakdown drives this metric.<br>5xx rate ${rel.rate_5xx != null ? rel.rate_5xx + "%" : "—"} · 4xx rate ${rel.rate_4xx != null ? rel.rate_4xx + "%" : "—"}</div>`;
-    } else if (name === "p50_ms" && DATA) {
-      const perf = ((DATA.health || {}).pillars || {}).performance || {};
-      body += `<div style="margin-top:18px;font:12px/1.7 'JetBrains Mono',monospace;color:var(--ink-soft)">Apdex by endpoint class:<br>`;
-      Object.entries(perf.per_class || {}).forEach(([c, v]) => { body += `${c.replace("_", " ")}: ${v.apdex} (T=${v.t_ms}ms, n=${v.n})<br>`; });
-      body += `</div>`;
-    }
-    panel.innerHTML = body;
+    const titles = { requests: "Requests", success_rate: "Success rate", p50_ms: "p50 latency", rate_limited: "Rate-limit / quota" };
+    const d = (DATA && DATA.kpis && DATA.kpis[name]) || {};
+    if (name === "requests") _kpiRequests(panel, d);
+    else if (name === "success_rate") _kpiSuccess(panel, d);
+    else if (name === "p50_ms") _kpiLatency(panel, d);
+    else _kpiRateLimit(panel, d);
     return titles[name] || name;
+  }
+  // REQUESTS — time series stacked by status + endpoint bars + busiest bucket
+  function _kpiRequests(panel, d) {
+    const ts = (DATA && DATA.timeseries) || { req: [], s2xx: [], s4xx: [], s5xx: [] };
+    const grid = (DATA && DATA.spark_grid) || [];
+    let bi = -1, bmax = -1;
+    (ts.req || []).forEach((v, i) => { if (v > bmax) { bmax = v; bi = i; } });
+    let busy = "no traffic";
+    if (bi >= 0 && bmax > 0 && ts.t0_ms && ts.bucket_ms) {
+      const tmid = ts.t0_ms + (bi + 0.5) * ts.bucket_ms;
+      busy = new Date(tmid).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + ` · ${bmax} requests`;
+    }
+    const eps = grid.slice(0, 6).map(s => ({ label: s.path, value: s.count, sub: fmtNum(s.count) }));
+    const dl = d.delta_pct;
+    panel.innerHTML =
+      `<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+        <span style="font:700 42px/1 'Fraunces',serif;color:var(--ink)">${fmtNum(d.value)}</span>
+        <span style="font:12px 'JetBrains Mono',monospace;color:var(--ink-soft)">vs previous period ${fmtNum(d.prev)}${dl != null ? ` · <b style="color:${dl >= 0 ? "var(--c-ok)" : "var(--c-danger)"}">${dl > 0 ? "+" : ""}${dl}%</b>` : ""}</span>
+      </div>
+      ${_kxSec("requests over time · stacked by status")}
+      ${stackedBarsSvg(ts)}
+      <div style="display:flex;gap:16px;font:10.5px 'JetBrains Mono',monospace;color:var(--ink-mute);margin:5px 0 2px"><span><i class="rdot s-2xx"></i> 2xx</span><span><i class="rdot s-4xx"></i> 4xx</span><span><i class="rdot s-5xx"></i> 5xx</span></div>
+      ${_kxSec("busiest bucket")}
+      <div style="font:13px/1.6 'Fraunces',serif;color:var(--ink-soft)">${esc(busy)}</div>
+      ${_kxSec("endpoint breakdown")}
+      ${eps.length ? hbars(eps) : `<div style="font:italic 12px 'Fraunces',serif;color:var(--ink-mute)">no endpoint data</div>`}`;
+  }
+  // SUCCESS — status donut + table; click a slice/row → ribbon filtered
+  function _kpiSuccess(panel, d) {
+    const sc = (DATA && DATA.status_counts) || { n_2xx: 0, n_4xx: 0, n_5xx: 0, total: 0 };
+    const col = _C(), tot = sc.total || 0;
+    const parts = [
+      { key: "2xx", label: "2xx success", value: sc.n_2xx, color: col.ok },
+      { key: "4xx", label: "4xx client", value: sc.n_4xx, color: col.amber },
+      { key: "5xx", label: "5xx server", value: sc.n_5xx, color: col.danger },
+    ];
+    const rowPct = (v) => tot ? ((100 * v / tot).toFixed(1) + "%") : "—";
+    panel.innerHTML =
+      `<div style="display:flex;gap:28px;align-items:center;flex-wrap:wrap">
+        <div>${donutSvg(parts)}</div>
+        <div style="flex:1;min-width:210px">
+          ${[["2xx", sc.n_2xx, col.ok], ["4xx", sc.n_4xx, col.amber], ["5xx", sc.n_5xx, col.danger]].map(([k, v, c]) =>
+            `<div class="ov-kx-statrow" data-slice="${k}" style="display:grid;grid-template-columns:13px 50px 1fr 60px;gap:10px;align-items:center;padding:8px 7px;border-radius:7px;cursor:pointer;font:12px 'JetBrains Mono',monospace;transition:background .12s">
+              <span style="width:11px;height:11px;border-radius:3px;background:${c}"></span>
+              <span style="color:var(--ink)">${k}</span>
+              <span style="color:var(--ink-mute)">${fmtNum(v)} requests</span>
+              <span style="color:var(--ink-soft);text-align:right">${rowPct(v)}</span></div>`).join("")}
+          <div style="font:italic 11px/1.5 'Fraunces',serif;color:var(--ink-mute);margin-top:12px;padding:0 7px">click a status → request ribbon filtered to it</div>
+        </div>
+      </div>`;
+    panel.querySelectorAll("[data-slice]").forEach(el => {
+      el.addEventListener("click", () => _openRibbonFiltered(el.getAttribute("data-slice")));
+      if (el.classList.contains("ov-kx-statrow")) {
+        el.addEventListener("mouseenter", () => el.style.background = "rgba(120,110,90,.10)");
+        el.addEventListener("mouseleave", () => el.style.background = "");
+      }
+    });
+  }
+  // p50 LATENCY — histogram + p50/p95/p99 + bimodal callout + slowest endpoint
+  function _kpiLatency(panel, d) {
+    const lh = (DATA && DATA.latency_hist) || { edges: [], bins: [], p50: null, p95: null, p99: null };
+    const slow = (DATA && DATA.slowest_endpoint) || null;
+    const bins = lh.bins || [], max = Math.max(1, ...bins), peaks = [];
+    for (let i = 1; i < bins.length - 1; i++) {
+      if (bins[i] >= max * 0.35 && bins[i] >= bins[i - 1] && bins[i] >= bins[i + 1]) peaks.push(i);
+    }
+    const bimodal = peaks.length >= 2 && (peaks[peaks.length - 1] - peaks[0] >= 3);
+    panel.innerHTML =
+      `<div style="display:flex;gap:22px;align-items:baseline">
+        ${[["p50", lh.p50], ["p95", lh.p95], ["p99", lh.p99]].map(([k, v]) =>
+          `<div><span style="font:700 27px/1 'Fraunces',serif;color:var(--ink)">${fmtMs(v)}</span><div style="font:10px 'JetBrains Mono',monospace;color:var(--ink-mute);letter-spacing:.12em;margin-top:3px">${k}</div></div>`).join("")}
+      </div>
+      ${_kxSec("latency distribution · log-binned")}
+      ${histSvg(lh)}
+      ${bimodal ? `<div style="font:italic 12px/1.5 'Fraunces',serif;color:var(--c-amber);margin-top:10px">Bimodal — fast metadata responses and slow inference form two distinct clusters.</div>` : ""}
+      ${slow ? `${_kxSec("slowest endpoint (by p95)")}<div style="font:13px/1.6 'JetBrains Mono',monospace;color:var(--ink-soft)">${esc(slow.path)} · p95 ${fmtMs(slow.p95)}</div>` : ""}`;
+  }
+  // RATE-LIMIT / QUOTA — events + quota burndown radial
+  function _kpiRateLimit(panel, d) {
+    const cap = (((DATA && DATA.health) || {}).pillars || {}).capacity || {};
+    const rl = d.value || 0, ql = cap.quota_label || "unlimited";
+    let radial, m = /^(\d+)\s*\/\s*(\d+)$/.exec(ql);
+    if (m) {
+      const consumed = +m[1], quota = +m[2], frac = quota ? Math.min(1, consumed / quota) : 0;
+      radial = radialSvg(frac, Math.round(frac * 100) + "%", fmtNum(consumed) + " / " + fmtNum(quota));
+    } else radial = radialSvg(0, "∞", "no daily cap");
+    panel.innerHTML =
+      `<div style="display:flex;gap:28px;align-items:center;flex-wrap:wrap">
+        <div>${radial}</div>
+        <div style="flex:1;min-width:210px">
+          <div style="font:700 38px/1 'Fraunces',serif;color:${rl ? "var(--c-amber)" : "var(--ink)"}">${fmtNum(rl)}</div>
+          <div style="font:12px 'JetBrains Mono',monospace;color:var(--ink-soft);margin-top:5px">rate-limit events · ${esc(DATA ? DATA.window : "")}</div>
+          <div style="font:13px/1.6 'Fraunces',serif;color:var(--ink-soft);margin-top:15px">${rl ? `${rl} throttle hit(s) this window — the integration is bumping the rate limit.` : "0 events — healthy. No throttling this window."}</div>
+          <div style="font:11px 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:11px">quota · ${esc(String(ql))}</div>
+        </div>
+      </div>`;
+  }
+  // open the ribbon lightbox pre-filtered to a status bucket (donut cross-link)
+  let _ribbonPreset = null;
+  function _openRibbonFiltered(status) {
+    if (!window.APIN || !APIN.lightbox) return;
+    _ribbonPreset = status;
+    const title = "Request Ribbon" + (DATA && DATA.key ? " · " + (DATA.key.name || "") : "");
+    const reopen = () => APIN.lightbox.open({ title, build: expandRibbon });
+    if (APIN.lightbox.isOpen && APIN.lightbox.isOpen()) { APIN.lightbox.close({ skipAnim: true }); setTimeout(reopen, 70); }
+    else reopen();
   }
 
   // ════════════════════ WIDGET 4 · PERSONALITY ═════════════════════════
@@ -390,13 +703,28 @@
   }
 
   // ════════════════════ WIDGET 5 · SPARK-GRID ══════════════════════════
-  function sparkSvg(buckets, w, h) {
-    w = w || 90; h = h || 24;
-    const max = Math.max(1, ...buckets);
+  let _sparkUid = 0;
+  // Rich sparkline: gradient area-fill under a line, with a dot on the latest
+  // point. opts.color overrides the stroke (default --c-ok). Each call gets a
+  // unique gradient id so multiple sparklines on one page don't collide.
+  function sparkSvg(buckets, w, h, opts) {
+    w = w || 90; h = h || 24; opts = opts || {};
+    const stroke = opts.color || "var(--c-ok)";
     const n = buckets.length;
+    if (!n) return `<svg class="ov-spark-svg" viewBox="0 0 ${w} ${h}"></svg>`;
+    const max = Math.max(1, ...buckets);
     const step = w / Math.max(1, n - 1);
-    const pts = buckets.map((v, i) => `${(i * step).toFixed(1)},${(h - (v / max) * (h - 2) - 1).toFixed(1)}`).join(" ");
-    return `<svg class="ov-spark-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--c-ok)" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+    const xy = buckets.map((v, i) => [i * step, h - (v / max) * (h - 3) - 1.5]);
+    const line = xy.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+    const area = `0,${h} ` + line + ` ${w},${h}`;
+    const uid = "sg" + (++_sparkUid), last = xy[xy.length - 1];
+    return `<svg class="ov-spark-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+      <defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="${stroke}" stop-opacity="0.28"/>
+        <stop offset="1" stop-color="${stroke}" stop-opacity="0"/></linearGradient></defs>
+      <polygon points="${area}" fill="url(#${uid})" stroke="none"/>
+      <polyline points="${line}" fill="none" stroke="${stroke}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="1.8" fill="${stroke}"/></svg>`;
   }
   function renderSparkGrid(grid) {
     const host = $("ov-sparkgrid-body");
@@ -416,34 +744,62 @@
   }
   function expandSparkGrid(panel) {
     const grid = (DATA && DATA.spark_grid) || [];
-    const metricKey = { requests: "buckets", latency: "buckets_lat", errors: "buckets_err" };
-    function paint(metric) {
-      const bk = metricKey[metric];
-      const color = metric === "errors" ? "var(--c-danger)" : metric === "latency" ? "var(--c-amber)" : "var(--c-ok)";
-      rowsHost.innerHTML = grid.map(s => {
-        const buckets = s[bk] || [];
-        const metaTxt = metric === "latency" ? "p95 " + fmtMs(s.p95)
-          : metric === "errors" ? (s.buckets_err || []).reduce((a, b) => a + b, 0) + " err"
-          : fmtNum(s.count) + " reqs";
-        return `<div class="ov-spark-row" style="grid-template-columns:1fr 120px auto">
-          <div class="ov-spark-path">${esc(s.path)}</div>
-          ${sparkSvg(buckets, 120, 28).replace("var(--c-ok)", color)}
-          <div class="ov-spark-meta">${metaTxt}</div></div>`;
-      }).join("");
-    }
-    panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <span style="font:12px/1.5 'JetBrains Mono',monospace;color:var(--ink-soft)">top endpoints · 24h</span>
-        <div class="ov-range" id="ov-spark-metric"><button data-m="requests" aria-pressed="true">requests</button><button data-m="latency">latency</button><button data-m="errors">errors</button></div>
-      </div><div id="ov-spark-rows"></div>`;
-    const rowsHost = panel.querySelector("#ov-spark-rows");
-    paint("requests");
-    panel.querySelectorAll("#ov-spark-metric button").forEach(b => {
-      b.addEventListener("click", () => {
-        panel.querySelectorAll("#ov-spark-metric button").forEach(x => x.removeAttribute("aria-pressed"));
-        b.setAttribute("aria-pressed", "true");
-        paint(b.getAttribute("data-m"));
+    const col = _C();
+    const COLS = "1.6fr 112px 50px 56px 56px 48px 66px";
+    const metricKey = { requests: "buckets", latency: "buckets_lat", errors: "buckets_err", bytes: "buckets_bytes" };
+    const metricColor = { requests: col.ok, latency: col.amber, errors: col.danger, bytes: col.soft };
+    const fmtBytes = (b) => b == null ? "—" : b < 1024 ? b + " B" : b < 1048576 ? (b / 1024).toFixed(1) + " KB" : (b / 1048576).toFixed(1) + " MB";
+    let metric = "requests", sortKey = "count", sortDir = -1;
+    const sortVal = (s, k) => k === "count" ? s.count : k === "p50" ? (s.p50 || 0) : k === "p95" ? (s.p95 || 0) : k === "err" ? (s.err_pct || 0) : (s.bytes_total || 0);
+    const sorted = () => grid.slice().sort((a, b) => (sortVal(a, sortKey) - sortVal(b, sortKey)) * sortDir);
+    if (!grid.length) { panel.innerHTML = `<div style="font:italic 13px/1.6 'Fraunces',serif;color:var(--ink-mute);padding:20px">No endpoint traffic in this window yet.</div>`; return; }
+    panel.innerHTML =
+      `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+        <span style="font:12px 'JetBrains Mono',monospace;color:var(--ink-soft)">top endpoints · ${esc(DATA ? DATA.window : "")}</span>
+        <div class="ov-range" id="ov-ep-metric"><button data-m="requests" aria-pressed="true">requests</button><button data-m="latency">latency</button><button data-m="errors">errors</button><button data-m="bytes">bytes</button></div>
+      </div>
+      <div id="ov-ep-head" style="display:grid;grid-template-columns:${COLS};gap:8px;padding:0 8px 7px;border-bottom:1px solid var(--paper-edge);font:600 10px 'JetBrains Mono',monospace;letter-spacing:.05em;color:var(--ink-mute)">
+        <span>ENDPOINT</span><span style="text-align:center">TREND</span>
+        <span data-sort="count" data-base="n" style="text-align:right;cursor:pointer">n</span>
+        <span data-sort="p50" data-base="p50" style="text-align:right;cursor:pointer">p50</span>
+        <span data-sort="p95" data-base="p95" style="text-align:right;cursor:pointer">p95</span>
+        <span data-sort="err" data-base="err%" style="text-align:right;cursor:pointer">err%</span>
+        <span data-sort="bytes" data-base="bytes" style="text-align:right;cursor:pointer">bytes</span></div>
+      <div id="ov-ep-rows" style="margin-top:4px"></div>`;
+    const rowsHost = panel.querySelector("#ov-ep-rows");
+    function paint() {
+      const c = metricColor[metric], bk = metricKey[metric];
+      rowsHost.innerHTML = sorted().map(s =>
+        `<div class="ov-ep-row" data-path="${esc(s.path)}" style="display:grid;grid-template-columns:${COLS};gap:8px;align-items:center;padding:7px 8px;border-radius:7px;cursor:pointer;font:11.5px 'JetBrains Mono',monospace;transition:background .12s">
+          <span style="color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.path)}">${esc(s.path)}</span>
+          <span style="height:26px">${sparkSvg(s[bk] || [], 112, 26, { color: c })}</span>
+          <span style="color:var(--ink-soft);text-align:right">${fmtNum(s.count)}</span>
+          <span style="color:var(--ink-soft);text-align:right">${fmtMs(s.p50)}</span>
+          <span style="color:var(--ink-soft);text-align:right">${fmtMs(s.p95)}</span>
+          <span style="text-align:right;color:${s.err_pct > 0 ? "var(--c-danger)" : "var(--ink-mute)"}">${s.err_pct != null ? s.err_pct + "%" : "—"}</span>
+          <span style="color:var(--ink-mute);text-align:right">${fmtBytes(s.bytes_total)}</span></div>`).join("");
+      rowsHost.querySelectorAll(".ov-ep-row").forEach(r => {
+        const path = r.getAttribute("data-path");
+        r.addEventListener("mouseenter", () => { r.style.background = "rgba(120,110,90,.10)"; Bus.emit("hover:endpoint", path); });
+        r.addEventListener("mouseleave", () => { r.style.background = ""; Bus.emit("hover:endpoint", null); });
+        r.addEventListener("click", () => { if (window.APIN && APIN.lightbox) APIN.lightbox.close(); location.hash = "#requests"; });
       });
-    });
+      panel.querySelectorAll("#ov-ep-head [data-sort]").forEach(thx => {
+        const active = thx.getAttribute("data-sort") === sortKey;
+        thx.style.color = active ? "var(--ink)" : "var(--ink-mute)";
+        thx.textContent = thx.getAttribute("data-base") + (active ? (sortDir < 0 ? " ▾" : " ▴") : "");
+      });
+    }
+    paint();
+    panel.querySelectorAll("#ov-ep-metric button").forEach(b => b.addEventListener("click", () => {
+      panel.querySelectorAll("#ov-ep-metric button").forEach(x => x.removeAttribute("aria-pressed"));
+      b.setAttribute("aria-pressed", "true"); metric = b.getAttribute("data-m"); paint();
+    }));
+    panel.querySelectorAll("#ov-ep-head [data-sort]").forEach(thx => thx.addEventListener("click", () => {
+      const k = thx.getAttribute("data-sort");
+      if (sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = -1; }
+      paint();
+    }));
   }
 
   // ════════════════════ WIDGET 6 · INSIGHTS ════════════════════════════

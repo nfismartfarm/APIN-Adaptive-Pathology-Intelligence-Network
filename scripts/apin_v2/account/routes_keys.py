@@ -742,7 +742,11 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
 
         # ── KPIs with prev-period deltas ─────────────────────────────────
         def _delta(cur, prev):
-            if prev in (None, 0): return None
+            # Guard cur is None too: a window with no latency rows (p50=None)
+            # while the previous window had some would otherwise crash on the
+            # None - float subtraction. Common once traffic ages past the
+            # current window but the prior window still has rows.
+            if cur is None or prev in (None, 0): return None
             return round((cur - prev) / prev * 100, 1)
         succ = round(100.0 * n2 / total, 1) if total else None
         prev_succ = round(100.0 * p_n2 / prev_total, 1) if prev_total else None
@@ -754,11 +758,13 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
             "rate_limited":{"value": rate_limited, "prev": None, "delta_pct": None},
         }
 
-        # ── Request ribbon: last 120 (newest last for left→right flow) ───
+        # ── Request ribbon: last 240 (newest last for left→right flow).
+        #    Bento shows the most-recent 120; expanded view shows all 240
+        #    with a brush-scrubber to pan. ──
         ribbon = _rows(
             "SELECT id, timestamp, method, path, status_code, latency_ms "
             "FROM api_key_request_log WHERE key_id = ? "
-            "ORDER BY id DESC LIMIT 120", (public_id,))
+            "ORDER BY id DESC LIMIT 240", (public_id,))
         out["ribbon"] = list(reversed(ribbon))
 
         # ── Spark-grid: top-6 endpoints, per-bucket counts ──────────────
@@ -774,6 +780,8 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
             blat_n = [0] * n_buckets               # latency count per bucket
             berr = [0] * n_buckets                 # error count per bucket
             lats = []
+            bbytes = [0] * n_buckets               # bytes_out sum per bucket
+            ep_bytes_total = 0
             for r in cur_rows:
                 if r.get("path") != p: continue
                 ts = _dt.fromisoformat(str(r["timestamp"]).replace(" ", "T")).timestamp() * 1000 \
@@ -789,13 +797,63 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
                     lats.append(float(lm))
                     if bi is not None:
                         blat_sum[bi] += float(lm); blat_n[bi] += 1
-            # 9.N.9(d) · per-bucket avg latency for the metric toggle
+                bo = r.get("bytes_out")
+                if bo is not None and bi is not None:
+                    bbytes[bi] += int(bo); ep_bytes_total += int(bo)
+            # per-bucket avg latency for the metric toggle
             buckets_lat = [round(blat_sum[i] / blat_n[i]) if blat_n[i] else 0
                            for i in range(n_buckets)]
+            err_n = sum(1 for r in cur_rows
+                        if r.get("path") == p and int(r.get("status_code") or 0) >= 400)
             spark.append({"path": p, "count": path_counter[p],
                           "buckets": buckets, "buckets_lat": buckets_lat,
-                          "buckets_err": berr, "p95": _pct(lats, 0.95)})
+                          "buckets_err": berr, "buckets_bytes": bbytes,
+                          "p50": _pct(lats, 0.50), "p95": _pct(lats, 0.95),
+                          "err_count": err_n,
+                          "err_pct": round(100.0 * err_n / path_counter[p], 1) if path_counter[p] else 0,
+                          "bytes_total": ep_bytes_total})
         out["spark_grid"] = spark
+
+        # ── 9.N.9 · Extra aggregates for the rich KPI + ribbon expands ────
+        # status_counts (SUCCESS donut), overall timeseries by status
+        # (REQUESTS expand + ribbon density), latency histogram (p50 expand),
+        # slowest endpoint.
+        ts_req = [0] * n_buckets
+        ts_2xx = [0] * n_buckets
+        ts_4xx = [0] * n_buckets
+        ts_5xx = [0] * n_buckets
+        for r in cur_rows:
+            sc = int(r.get("status_code") or 0)
+            tsx = _dt.fromisoformat(str(r["timestamp"]).replace(" ", "T")).timestamp() * 1000 \
+                  if r.get("timestamp") else None
+            if tsx is None:
+                continue
+            bi = min(n_buckets - 1, max(0, int((tsx - t0) / bucket_ms)))
+            ts_req[bi] += 1
+            if 200 <= sc < 400: ts_2xx[bi] += 1
+            elif 400 <= sc < 500: ts_4xx[bi] += 1
+            elif sc >= 500: ts_5xx[bi] += 1
+        out["status_counts"] = {"n_2xx": n2, "n_4xx": n4, "n_5xx": n5, "total": total}
+        out["timeseries"] = {"n_buckets": n_buckets, "bucket_ms": bucket_ms,
+                             "t0_ms": t0, "req": ts_req, "s2xx": ts_2xx,
+                             "s4xx": ts_4xx, "s5xx": ts_5xx}
+        # latency histogram — log-spaced bins from 1ms to 30s
+        import math as _math
+        hist_edges = [0, 10, 30, 100, 300, 1000, 3000, 8000, 20000, 60000]
+        hist = [0] * (len(hist_edges) - 1)
+        for lm in all_lat:
+            for bi in range(len(hist_edges) - 1):
+                if hist_edges[bi] <= lm < hist_edges[bi + 1]:
+                    hist[bi] += 1; break
+            else:
+                if lm >= hist_edges[-1]: hist[-1] += 1
+        out["latency_hist"] = {"edges": hist_edges, "bins": hist,
+                               "p50": p50, "p95": p95,
+                               "p99": _pct(all_lat, 0.99)}
+        # slowest endpoint by p95
+        slowest = max(spark, key=lambda s: (s.get("p95") or 0), default=None) if spark else None
+        out["slowest_endpoint"] = ({"path": slowest["path"], "p95": slowest["p95"]}
+                                   if slowest else None)
 
         # ── Personality (derived behaviour tags) ─────────────────────────
         predict_n = sum(1 for r in cur_rows if (r.get("path") or "").startswith("/api/predict"))
