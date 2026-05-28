@@ -177,6 +177,12 @@ def _reliability_pillar(total: int, n_2xx: int, n_4xx: int, n_5xx: int) -> dict:
     # sample can't claim a perfect reliability score.
     success_wilson = wilson_lower_bound(n_2xx, total)
 
+    # Error budget: a 99.9% SLO permits 0.1% 5xx. "Remaining" is how much of
+    # that budget is still unspent (100% = no allowed-5xx consumed yet).
+    SLO_5XX_BUDGET = 0.001
+    remaining = 1.0 - (rate_5xx / SLO_5XX_BUDGET) if SLO_5XX_BUDGET > 0 else 1.0
+    error_budget_pct = round(_clamp(remaining, 0.0, 1.0) * 100, 1)
+
     return {
         "score": round(score, 1),
         "server_score": round(server_score, 1),
@@ -184,6 +190,8 @@ def _reliability_pillar(total: int, n_2xx: int, n_4xx: int, n_5xx: int) -> dict:
         "rate_5xx": round(rate_5xx * 100, 3),
         "rate_4xx": round(rate_4xx * 100, 3),
         "success_wilson": round(success_wilson * 100, 2),
+        "error_budget_pct": error_budget_pct,
+        "n_2xx": n_2xx, "n_4xx": n_4xx, "n_5xx": n_5xx,
     }
 
 
@@ -275,11 +283,15 @@ def _hygiene_pillar(created_at: Optional[str], expires_at: Optional[str],
     now = datetime.now(timezone.utc)
     penalties = []
     score = 100.0
+    facts = {"expires_label": "never", "age_label": None, "age_days": None,
+             "scope_ok": True, "ip_fanout": False, "distinct_ips": distinct_ips}
 
     # Expiry proximity
     exp = _parse_iso(expires_at)
     if exp is not None:
         days_to_exp = (exp - now).total_seconds() / 86400.0
+        facts["expires_label"] = ("expired" if days_to_exp < 0
+                                  else f"in {days_to_exp:.0f}d")
         if days_to_exp < 0:
             score = 0.0
             penalties.append({"name": "expired", "points": -100,
@@ -293,6 +305,9 @@ def _hygiene_pillar(created_at: Optional[str], expires_at: Optional[str],
     cre = _parse_iso(created_at)
     if cre is not None:
         age_days = (now - cre).total_seconds() / 86400.0
+        facts["age_days"] = round(age_days, 1)
+        facts["age_label"] = (f"{age_days:.0f}d" if age_days >= 1
+                              else f"{age_days*24:.0f}h")
         if age_days > ROTATION_BAD_DAYS:
             score -= 30
             penalties.append({"name": "stale_rotation", "points": -30,
@@ -315,6 +330,7 @@ def _hygiene_pillar(created_at: Optional[str], expires_at: Optional[str],
         sc = (scopes or "").lower()
     has_write = ("write" in sc or "predict:write" in sc)
     only_read = observed_methods.issubset({"GET", "HEAD", "OPTIONS"}) if observed_methods else False
+    facts["scope_ok"] = not (has_write and only_read and observed_methods)
     if has_write and only_read and observed_methods:
         score -= 20
         penalties.append({"name": "over_permissioned", "points": -20,
@@ -327,6 +343,7 @@ def _hygiene_pillar(created_at: Optional[str], expires_at: Optional[str],
     # large, sudden fan-out is penalised.
     if distinct_ips > 8 and (ip_baseline <= 0 or distinct_ips > ip_baseline * 4):
         score -= 30
+        facts["ip_fanout"] = True
         penalties.append({"name": "ip_fan_out", "points": -30,
                           "detail": f"{distinct_ips} IPs (baseline ~{ip_baseline:.0f})"})
 
@@ -334,6 +351,7 @@ def _hygiene_pillar(created_at: Optional[str], expires_at: Optional[str],
         "score": round(max(0.0, score), 1),
         "penalties": penalties,
         "distinct_ips": distinct_ips,
+        **facts,
     }
 
 

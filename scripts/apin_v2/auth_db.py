@@ -2167,6 +2167,25 @@ CREATE TABLE IF NOT EXISTS account_settings (
     updated_at TEXT NOT NULL
 );
 
+-- ── 9.N.9 api_key_health_snapshot — one composite-health row per key per
+-- UTC day, upserted lazily on each Overview load (window='24h'). Powers the
+-- 30-day composite-trend line in the Health-score expanded view. No separate
+-- scheduler: the read path writes today's row, so the series accrues over time.
+CREATE TABLE IF NOT EXISTS api_key_health_snapshot (
+    key_id      TEXT NOT NULL REFERENCES api_keys(public_id) ON DELETE CASCADE,
+    day         TEXT NOT NULL,          -- 'YYYY-MM-DD' (UTC)
+    composite   REAL,
+    reliability REAL,
+    performance REAL,
+    capacity    REAL,
+    hygiene     REAL,
+    sample_size INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (key_id, day)
+);
+CREATE INDEX IF NOT EXISTS idx_health_snap_key_day
+  ON api_key_health_snapshot(key_id, day DESC);
+
 -- Auto-create account_settings for every new user (PDA-R2-F12).
 CREATE TRIGGER IF NOT EXISTS trg_user_insert_default_settings
   AFTER INSERT ON users

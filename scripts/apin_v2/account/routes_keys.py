@@ -605,6 +605,85 @@ async def get_key_usage(request: Request, public_id: str,
 
 _WINDOW_MINUTES = {"1h": 60, "24h": 1440, "7d": 10080}
 
+# Personality axes (order is the radar spoke order).
+_PERSONALITY_DIMS = ["predict_heavy", "read_mostly", "write_heavy",
+                     "bursty", "error_tolerant", "steady"]
+
+
+def _personality_vector(rows: list) -> dict:
+    """Derive a 6-dim behavioural vector in [0,1] from request-log rows.
+    Pure function reused for this key, the account average, and each peer
+    key (for cosine-similarity 'similar keys'). Rows must carry path, method,
+    status_code, timestamp; rows are assumed chronological (query ORDER BY id).
+    """
+    from datetime import datetime as _dt
+    total = len(rows)
+    if not total:
+        return {k: 0.0 for k in _PERSONALITY_DIMS}
+    parsed = []
+    for r in rows:
+        try:
+            parsed.append(_dt.fromisoformat(str(r["timestamp"]).replace(" ", "T")).timestamp())
+        except Exception:
+            parsed.append(None)
+    predict_n = sum(1 for r in rows if (r.get("path") or "").startswith("/api/predict"))
+    get_n = sum(1 for r in rows if (r.get("method") or "").upper() == "GET")
+    # bursty — coefficient of variation of inter-request gaps
+    tser = [t for t in parsed if t is not None]
+    gaps = [b - a for a, b in zip(tser, tser[1:])] if len(tser) > 2 else []
+    bursty = 0.0
+    if gaps:
+        mg = sum(gaps) / len(gaps)
+        if mg > 0:
+            var = sum((g - mg) ** 2 for g in gaps) / len(gaps)
+            bursty = min(1.0, ((var ** 0.5) / mg) / 3.0)
+    # error_tolerant — share of 4xx that were followed by another request <=120s
+    four = followed = 0
+    for i, r in enumerate(rows):
+        if 400 <= int(r.get("status_code") or 0) < 500:
+            four += 1
+            ti = parsed[i]
+            if ti is not None:
+                for j in range(i + 1, min(i + 60, total)):
+                    tj = parsed[j]
+                    if tj is not None and 0 <= tj - ti <= 120:
+                        followed += 1
+                        break
+    error_tolerant = (followed / four) if four else 0.0
+    # steady — 1 − CV of per-bucket request counts across the observed span
+    steady = 0.0
+    if len(tser) > 2:
+        lo, hi = tser[0], tser[-1]
+        span = hi - lo
+        if span > 0:
+            nb = 24
+            counts = [0] * nb
+            for t in tser:
+                counts[min(nb - 1, int((t - lo) / span * nb))] += 1
+            mc = sum(counts) / nb
+            if mc > 0:
+                v = sum((c - mc) ** 2 for c in counts) / nb
+                steady = max(0.0, 1.0 - min(1.0, (v ** 0.5) / mc))
+    return {
+        "predict_heavy": predict_n / total,
+        "read_mostly": get_n / total,
+        "write_heavy": (total - get_n) / total,
+        "bursty": bursty,
+        "error_tolerant": error_tolerant,
+        "steady": steady,
+    }
+
+
+def _cosine(a: dict, b: dict) -> float:
+    """Cosine similarity of two personality vectors over _PERSONALITY_DIMS."""
+    import math
+    dot = sum(a[k] * b[k] for k in _PERSONALITY_DIMS)
+    na = math.sqrt(sum(a[k] ** 2 for k in _PERSONALITY_DIMS))
+    nb = math.sqrt(sum(b[k] ** 2 for k in _PERSONALITY_DIMS))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
 
 def _build_key_overview(user_id: int, public_id: str, key: dict,
                         window: str) -> dict:
@@ -716,6 +795,16 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
             (public_id, cut_cur[:16]))  # minute_ts is 'YYYY-MM-DD HH:MM'
         rate_limited = int((um[0].get("rl") if um else 0) or 0)
 
+        # rate-limit events timeline — per-minute buckets that saw a throttle
+        # (RATE-LIMIT KPI expand). Empty list => the "0 events, healthy" state.
+        rl_event_rows = _rows(
+            "SELECT minute_ts, rate_limited FROM api_key_usage_minute "
+            "WHERE key_id = ? AND minute_ts >= ? AND rate_limited > 0 "
+            "ORDER BY minute_ts", (public_id, cut_cur[:16]))
+        out["rate_limit_events"] = [
+            {"minute": r["minute_ts"], "count": int(r["rate_limited"] or 0)}
+            for r in rl_event_rows][:240]
+
         # ── IP baseline (distinct IPs in the prev window) ────────────────
         prev_ip_rows = _rows(
             "SELECT DISTINCT ip FROM api_key_request_log "
@@ -822,6 +911,7 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
         ts_2xx = [0] * n_buckets
         ts_4xx = [0] * n_buckets
         ts_5xx = [0] * n_buckets
+        ts_lat = [[] for _ in range(n_buckets)]   # per-bucket latencies (fan)
         for r in cur_rows:
             sc = int(r.get("status_code") or 0)
             tsx = _dt.fromisoformat(str(r["timestamp"]).replace(" ", "T")).timestamp() * 1000 \
@@ -833,10 +923,18 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
             if 200 <= sc < 400: ts_2xx[bi] += 1
             elif 400 <= sc < 500: ts_4xx[bi] += 1
             elif sc >= 500: ts_5xx[bi] += 1
+            lm = r.get("latency_ms")
+            if lm is not None:
+                ts_lat[bi].append(float(lm))
+        # percentile fan: p50/p95/p99 per bucket (0 where the bucket is empty)
+        fan_p50 = [round(_pct(b, 0.50) or 0) for b in ts_lat]
+        fan_p95 = [round(_pct(b, 0.95) or 0) for b in ts_lat]
+        fan_p99 = [round(_pct(b, 0.99) or 0) for b in ts_lat]
         out["status_counts"] = {"n_2xx": n2, "n_4xx": n4, "n_5xx": n5, "total": total}
         out["timeseries"] = {"n_buckets": n_buckets, "bucket_ms": bucket_ms,
                              "t0_ms": t0, "req": ts_req, "s2xx": ts_2xx,
-                             "s4xx": ts_4xx, "s5xx": ts_5xx}
+                             "s4xx": ts_4xx, "s5xx": ts_5xx,
+                             "lat_p50": fan_p50, "lat_p95": fan_p95, "lat_p99": fan_p99}
         # latency histogram — log-spaced bins from 1ms to 30s
         import math as _math
         hist_edges = [0, 10, 30, 100, 300, 1000, 3000, 8000, 20000, 60000]
@@ -855,34 +953,91 @@ def _build_key_overview(user_id: int, public_id: str, key: dict,
         out["slowest_endpoint"] = ({"path": slowest["path"], "p95": slowest["p95"]}
                                    if slowest else None)
 
-        # ── Personality (derived behaviour tags) ─────────────────────────
-        predict_n = sum(1 for r in cur_rows if (r.get("path") or "").startswith("/api/predict"))
-        get_n = sum(1 for r in cur_rows if (r.get("method") or "").upper() == "GET")
-        # burstiness: coefficient of variation of inter-request gaps
-        ts_list = []
-        for r in cur_rows:
-            try:
-                ts_list.append(_dt.fromisoformat(str(r["timestamp"]).replace(" ", "T")).timestamp())
-            except Exception:
-                pass
-        gaps = [b - a for a, b in zip(ts_list, ts_list[1:])] if len(ts_list) > 2 else []
-        burst = 0.0
-        if gaps:
-            mean_g = sum(gaps) / len(gaps)
-            if mean_g > 0:
-                var = sum((g - mean_g) ** 2 for g in gaps) / len(gaps)
-                cv = (var ** 0.5) / mean_g
-                burst = min(1.0, cv / 3.0)   # CV of 3+ = maximally bursty
-        out["personality"] = {
-            "tags": [
-                {"name": "predict-heavy", "value": round(predict_n / total, 2) if total else 0,
-                 "signal": f"{round(100*predict_n/total) if total else 0}% of calls hit /predict/*"},
-                {"name": "bursty", "value": round(burst, 2),
-                 "signal": "inter-request timing variance (coefficient of variation)"},
-                {"name": "read-mostly", "value": round(get_n / total, 2) if total else 0,
-                 "signal": f"{round(100*get_n/total) if total else 0}% GET requests"},
-            ]
+        # ── Personality (6-dim behavioural vector) ───────────────────────
+        pv = _personality_vector(cur_rows)
+        predict_n = round(pv["predict_heavy"] * total) if total else 0
+        _sig = {
+            "predict-heavy":  f"{round(100*pv['predict_heavy'])}% of calls hit /predict/*",
+            "bursty":         "inter-request timing variance (coefficient of variation)",
+            "read-mostly":    f"{round(100*pv['read_mostly'])}% GET requests",
+            "write-heavy":    f"{round(100*pv['write_heavy'])}% non-GET (write) calls",
+            "error-tolerant": "share of 4xx retried within 2 min",
+            "steady":         "uniformity of request volume across the window",
         }
+        _order = [("predict-heavy", "predict_heavy"), ("bursty", "bursty"),
+                  ("read-mostly", "read_mostly"), ("write-heavy", "write_heavy"),
+                  ("error-tolerant", "error_tolerant"), ("steady", "steady")]
+        out["personality"] = {
+            "tags": [{"name": n, "value": round(pv[k], 2), "signal": _sig[n]}
+                     for n, k in _order],
+            "vector": {k: round(pv[k], 3) for k in _PERSONALITY_DIMS},
+        }
+
+        # ── Account average + similar keys (cross-key, cosine) ───────────
+        try:
+            klist = auth_db.list_console_api_keys(user_id=user_id, limit=100).get("items", [])
+        except Exception:
+            klist = []
+        id_name = {k["public_id"]: k.get("name") for k in klist}
+        other_ids = [k["public_id"] for k in klist]
+        acct_total, keys_with_traffic, similar = 0, 0, []
+        acct_vec = {k: 0.0 for k in _PERSONALITY_DIMS}
+        if other_ids:
+            ph = ",".join("?" for _ in other_ids)
+            arows = _rows(
+                f"SELECT key_id, method, path, status_code, timestamp "
+                f"FROM api_key_request_log WHERE key_id IN ({ph}) AND timestamp >= ? "
+                f"ORDER BY id", other_ids + [cut_cur])
+            by_key: dict = {}
+            for r in arows:
+                by_key.setdefault(r["key_id"], []).append(r)
+            acct_total = len(arows)
+            keys_with_traffic = sum(1 for v in by_key.values() if v)
+            if arows:
+                acct_vec = _personality_vector(arows)
+            for kid, rws in by_key.items():
+                if kid == public_id or not rws:
+                    continue
+                similar.append({"public_id": kid, "name": id_name.get(kid) or kid,
+                                "match": round(_cosine(pv, _personality_vector(rws)) * 100)})
+            similar.sort(key=lambda s: s["match"], reverse=True)
+            similar = similar[:3]
+        out["personality"]["account_vector"] = {k: round(acct_vec[k], 3) for k in _PERSONALITY_DIMS}
+        out["personality"]["similar_keys"] = similar
+        avg_per_key = (acct_total / keys_with_traffic) if keys_with_traffic else 0
+        out["account"] = {
+            "total": acct_total, "keys_with_traffic": keys_with_traffic,
+            "avg_requests_per_key": round(avg_per_key, 1),
+            "this_vs_avg": round(total / avg_per_key, 2) if avg_per_key else None,
+        }
+
+        # ── 30-day composite-health trend (lazy daily snapshot) ──────────
+        try:
+            # Snapshot today's composite on any window that has a real score
+            # (last write per day wins). Gating on 24h-only left the trend
+            # permanently empty for keys whose traffic has aged past 24h.
+            if health.get("composite") is not None:
+                P = health.get("pillars", {})
+                c.execute(
+                    "INSERT OR REPLACE INTO api_key_health_snapshot"
+                    "(key_id, day, composite, reliability, performance, capacity,"
+                    " hygiene, sample_size, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (public_id, now.strftime("%Y-%m-%d"), health.get("composite"),
+                     (P.get("reliability") or {}).get("score"),
+                     (P.get("performance") or {}).get("score"),
+                     (P.get("capacity") or {}).get("score"),
+                     (P.get("hygiene") or {}).get("score"),
+                     total, now.isoformat()))
+                try: c.commit()
+                except Exception: pass
+            trows = _rows(
+                "SELECT day, composite FROM api_key_health_snapshot "
+                "WHERE key_id = ? ORDER BY day DESC LIMIT 30", (public_id,))
+            health["trend"] = list(reversed(
+                [{"day": r["day"], "composite": r["composite"]} for r in trows]))
+        except Exception as e:
+            log.warning("health snapshot/trend failed: %s", e)
+            health.setdefault("trend", [])
 
         # ── Insights (narrated, key-scoped) ──────────────────────────────
         insights = []

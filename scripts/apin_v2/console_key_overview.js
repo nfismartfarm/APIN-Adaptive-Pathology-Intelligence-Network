@@ -215,40 +215,103 @@
     const hl = $("ov-health-headline"); if (hl) hl.textContent = h.headline || "";
   }
 
+  // mini bullet bar used inside pillar cards
+  function _hbar(score, color) {
+    const v = score == null ? 0 : score;
+    return `<span style="display:block;height:7px;background:rgba(120,110,90,.16);border-radius:3px;overflow:hidden"><i style="display:block;height:100%;width:${v}%;background:${color};border-radius:3px"></i></span>`;
+  }
   function expandHealth(panel) {
     const h = (DATA && DATA.health) || {};
     const P = h.pillars || {};
-    const sec = (window.APIN && APIN.lightbox && APIN.lightbox.section);
-    const bullet = (lbl, score, detail) => {
-      const v = score == null ? 0 : score;
-      const t = v >= 90 ? "great" : v >= 75 ? "ok" : v >= 60 ? "warn" : "bad";
-      return `<div style="margin:10px 0"><div style="display:flex;justify-content:space-between;font:600 12px/1.6 'JetBrains Mono',monospace;color:var(--ink-soft)"><span>${esc(lbl)}</span><span>${score == null ? "—" : score}</span></div>
-        <div class="ov-pillar-bar s-${t}" style="height:8px"><i style="width:${v}%"></i></div>
-        <div style="font:11px/1.5 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:3px">${detail}</div></div>`;
-    };
+    const col = _C();
     const rel = P.reliability || {}, perf = P.performance || {}, cap = P.capacity || {}, hyg = P.hygiene || {};
-    let perfDetail = "";
+    const tone = (v) => v == null ? col.mute : v >= 90 ? col.ok : v >= 75 ? "#7a9a3e" : v >= 60 ? col.amber : col.danger;
+    const cardHead = (key, label, score) =>
+      `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+         <span style="font:600 11px 'JetBrains Mono',monospace;letter-spacing:.08em;color:var(--ink-soft)">${label}</span>
+         <span style="font:700 20px 'Fraunces',serif;color:${tone(score)}">${score == null ? "—" : score}</span></div>`;
+    const subbar = (label, val, score, color) =>
+      `<div style="margin:5px 0"><div style="display:flex;justify-content:space-between;font:10.5px 'JetBrains Mono',monospace;color:var(--ink-mute)"><span>${label}</span><span>${val}</span></div>${_hbar(score, color)}</div>`;
+    // Reliability card
+    const relCard = cardHead("reliability", "RELIABILITY", rel.score) +
+      subbar("5xx", (rel.rate_5xx != null ? rel.rate_5xx + "%" : "—"), rel.rate_5xx != null ? 100 - Math.min(100, rel.rate_5xx * 200) : 0, col.danger) +
+      subbar("4xx", (rel.rate_4xx != null ? rel.rate_4xx + "%" : "—"), rel.rate_4xx != null ? 100 - Math.min(100, rel.rate_4xx * 4) : 0, col.amber) +
+      `<div style="font:10.5px/1.6 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:6px">success (Wilson) ${rel.success_wilson != null ? rel.success_wilson + "%" : "—"}<br>error budget: ${rel.error_budget_pct != null ? rel.error_budget_pct + "% remaining" : "—"}</div>`;
+    // Performance card — Apdex by class bars
+    let perfRows = "";
     Object.entries(perf.per_class || {}).forEach(([cls, d]) => {
-      perfDetail += `${cls.replace("_", " ")}: Apdex ${d.apdex} (n=${d.n})  `;
+      perfRows += subbar(cls.replace(/_/g, " "), `${d.apdex} (n=${d.n})`, d.apdex * 100, d.apdex >= 0.85 ? col.ok : d.apdex >= 0.7 ? col.amber : col.danger);
     });
+    const trendTxt = perf.trend_pct == null ? "" : (perf.trend_pct < 0 ? `▾ improving ${Math.abs(perf.trend_pct)}%` : `▴ degrading ${perf.trend_pct}%`);
+    const perfCard = cardHead("performance", "PERFORMANCE", perf.score) +
+      (perfRows || `<div style="font:11px 'Fraunces',serif;font-style:italic;color:var(--ink-mute)">no latency data</div>`) +
+      (trendTxt ? `<div style="font:10.5px 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:6px">p95 trend · ${trendTxt}</div>` : "");
+    // Capacity card
+    const capCard = cardHead("capacity", "CAPACITY", cap.score) +
+      `<div style="font:11px/1.7 'JetBrains Mono',monospace;color:var(--ink-soft)">rate-limited · ${cap.rate_limited != null ? cap.rate_limited : 0}<br>quota · ${esc(cap.quota_label || "unlimited")}</div>` +
+      `<div style="font:10.5px 'Fraunces',serif;font-style:italic;color:var(--ink-mute);margin-top:6px">${cap.rate_limited ? "throttling observed this window" : "no throttling this window"}</div>`;
+    // Hygiene card
+    const tick = (ok) => ok ? `<span style="color:${col.ok}">✓</span>` : `<span style="color:${col.danger}">⚠</span>`;
+    const hygCard = cardHead("hygiene", "HYGIENE", hyg.score) +
+      `<div style="font:11px/1.8 'JetBrains Mono',monospace;color:var(--ink-soft)">
+        expires · ${esc(hyg.expires_label || "never")} ${tick((hyg.expires_label || "never") === "never" || !/^expired/.test(hyg.expires_label || ""))}<br>
+        age · ${esc(hyg.age_label || "—")} ${tick(true)}<br>
+        scopes ${tick(hyg.scope_ok !== false)} ${hyg.scope_ok === false ? "over-permissioned" : "match usage"}<br>
+        IPs · ${hyg.distinct_ips != null ? hyg.distinct_ips : "—"} ${tick(!hyg.ip_fanout)} ${hyg.ip_fanout ? "fan-out!" : "stable"}</div>`;
+    const cardWrap = (key, inner) =>
+      `<div class="ov-hx-card" data-pillar="${key}" style="border:1px solid var(--paper-edge);border-radius:10px;padding:13px 15px;cursor:pointer;transition:background .12s,border-color .12s">${inner}</div>`;
+
     panel.innerHTML =
-      `<div style="display:flex;align-items:center;gap:20px;margin-bottom:8px">
-        <div class="ov-gauge" style="width:110px;height:110px"><svg width="110" height="110" style="transform:rotate(-90deg)">
-          <circle cx="55" cy="55" r="46" fill="none" stroke="var(--paper-edge)" stroke-width="9"/>
-          <path d="${arcPath(55, 55, 46, (h.composite || 0) / 100)}" fill="none" stroke="var(--c-ok)" stroke-width="9" stroke-linecap="round"/></svg>
-          <div class="ov-gauge-num"><b style="font-size:28px">${h.composite == null ? "—" : h.composite}</b><span>${esc(h.grade || "")}</span></div></div>
-        <div style="font:13px/1.7 'Fraunces',serif;color:var(--ink-soft)">window ${esc(h.window || "")} · ${fmtNum(h.sample_size)} requests${h.provisional ? " · <b>provisional</b>" : ""}${h.cold_start_excluded ? `<br><span style="font-size:11.5px;color:var(--ink-mute)">${h.cold_start_excluded} cold-start request(s) excluded from latency scoring</span>` : ""}</div>
+      `<div style="display:flex;align-items:center;gap:20px;margin-bottom:14px">
+        <svg width="92" height="92" viewBox="0 0 92 92" style="transform:rotate(-90deg);flex:none">
+          <circle cx="46" cy="46" r="38" fill="none" stroke="var(--paper-edge)" stroke-width="8"/>
+          <path d="${arcPath(46, 46, 38, (h.composite || 0) / 100)}" fill="none" stroke="${tone(h.composite)}" stroke-width="8" stroke-linecap="round"/></svg>
+        <div><div style="font:700 30px/1 'Fraunces',serif;color:var(--ink)">${h.composite == null ? "—" : h.composite} <span style="font-size:18px;color:${tone(h.composite)}">${esc(h.grade || "")}</span></div>
+          <div style="font:12px/1.6 'JetBrains Mono',monospace;color:var(--ink-soft);margin-top:4px">window ${esc(h.window || "")} · ${fmtNum(h.sample_size)} requests${h.provisional ? " · provisional" : ""}</div>
+          ${h.cold_start_excluded ? `<div style="font:10.5px 'Fraunces',serif;font-style:italic;color:var(--ink-mute)">${h.cold_start_excluded} cold-start request(s) excluded from latency scoring</div>` : ""}</div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px">
-        <div>${bullet("Reliability " + (rel.score != null ? rel.score : ""), rel.score, `5xx ${rel.rate_5xx != null ? rel.rate_5xx + "%" : "—"} · 4xx ${rel.rate_4xx != null ? rel.rate_4xx + "%" : "—"} · success(Wilson) ${rel.success_wilson != null ? rel.success_wilson + "%" : "—"}`)}
-          ${bullet("Capacity " + (cap.score != null ? cap.score : ""), cap.score, `rate-limited ${cap.rate_limited != null ? cap.rate_limited : 0} · quota ${esc(cap.quota_label || "—")}`)}</div>
-        <div>${bullet("Performance " + (perf.score != null ? perf.score : ""), perf.score, perfDetail || "no latency data")}
-          ${bullet("Hygiene " + (hyg.score != null ? hyg.score : ""), hyg.score, (hyg.penalties && hyg.penalties.length) ? hyg.penalties.map(p => p.detail).join(" · ") : "clean — no penalties")}</div>
-      </div>
-      <div class="ov-health-headline" style="margin-top:16px"><b>What's capping you:</b> ${esc(h.headline || "")}</div>
-      <div style="font:11px/1.6 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:10px">
-        WEIGHTING · Reliability 35 · Performance 30 · Capacity 20 · Hygiene 15<br>
-        GRADE · A+≥97 A≥93 A-≥90 B+≥87 B≥83 B-≥80 C+≥77 C≥73 C-≥70 D≥60 F&lt;60</div>`;
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        ${cardWrap("reliability", relCard)}${cardWrap("performance", perfCard)}
+        ${cardWrap("capacity", capCard)}${cardWrap("hygiene", hygCard)}</div>
+      <div id="ov-hx-drill" hidden style="margin-top:12px;border:1px solid var(--paper-edge);border-radius:10px;padding:13px 15px;background:rgba(120,110,90,.05)"></div>
+      <div style="margin-top:16px"><div style="font:500 italic 11px 'Fraunces',serif;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:6px">30-day composite trend</div>
+        <div id="ov-hx-trend"></div><div id="ov-hx-trend-read" style="font:11px 'JetBrains Mono',monospace;color:var(--ink-mute);height:14px;text-align:center"></div></div>
+      <div class="ov-health-headline" style="margin-top:14px"><b>What's capping you:</b> ${esc(h.headline || "")}</div>
+      <details style="margin-top:10px"><summary style="cursor:pointer;font:11px 'JetBrains Mono',monospace;color:var(--ink-soft)">weighting &amp; grade scale</summary>
+        <div style="font:10.5px/1.7 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:8px">
+          HEALTH = 0.35·Reliability + 0.30·Performance + 0.20·Capacity + 0.15·Hygiene<br>
+          A+≥97 · A≥93 · A-≥90 · B+≥87 · B≥83 · B-≥80 · C+≥77 · C≥73 · C-≥70 · D≥60 · F&lt;60</div></details>`;
+
+    // 30-day trend (hover-scrub)
+    trendChart(panel.querySelector("#ov-hx-trend"), (h.trend || []).map(t => ({ label: t.day, value: t.composite })), panel.querySelector("#ov-hx-trend-read"));
+
+    // pillar click-to-drill
+    const drill = panel.querySelector("#ov-hx-drill");
+    const drillBuild = {
+      performance: () => {
+        const rows = Object.entries(perf.per_class || {});
+        if (!rows.length) return "no per-class latency data.";
+        return `<div style="font:600 11px 'JetBrains Mono',monospace;color:var(--ink-soft);margin-bottom:8px">PERFORMANCE · per-endpoint-class Apdex (T = satisfaction threshold)</div>` +
+          rows.map(([c, d]) => `<div style="margin:7px 0"><div style="display:flex;justify-content:space-between;font:11px 'JetBrains Mono',monospace;color:var(--ink)"><span>${esc(c.replace(/_/g, " "))}</span><span>Apdex ${d.apdex} · T=${d.t_ms}ms · n=${d.n}</span></div>${_hbar(d.apdex * 100, d.apdex >= 0.85 ? col.ok : d.apdex >= 0.7 ? col.amber : col.danger)}</div>`).join("");
+      },
+      reliability: () => `<div style="font:11px/1.8 'JetBrains Mono',monospace;color:var(--ink-soft)">5xx ${rel.rate_5xx != null ? rel.rate_5xx + "%" : "—"} (${rel.n_5xx || 0} reqs) · 4xx ${rel.rate_4xx != null ? rel.rate_4xx + "%" : "—"} (${rel.n_4xx || 0})<br>success(Wilson lower bound) ${rel.success_wilson != null ? rel.success_wilson + "%" : "—"}<br>server-error score ${rel.server_score != null ? rel.server_score : "—"} (70%) · client-error score ${rel.client_score != null ? rel.client_score : "—"} (30%)<br>error budget ${rel.error_budget_pct != null ? rel.error_budget_pct + "% remaining" : "—"} (99.9% SLO)</div>`,
+      capacity: () => `<div style="font:11px/1.8 'JetBrains Mono',monospace;color:var(--ink-soft)">rate-limit pressure score ${cap.rate_limit_score != null ? cap.rate_limit_score : "—"} (60%)<br>quota headroom score ${cap.quota_score != null ? cap.quota_score : "—"} (40%)<br>rate-limited ${cap.rate_limited || 0} · quota ${esc(cap.quota_label || "unlimited")}</div>`,
+      hygiene: () => {
+        const pens = hyg.penalties || [];
+        return `<div style="font:11px/1.8 'JetBrains Mono',monospace;color:var(--ink-soft)">expires ${esc(hyg.expires_label || "never")} · age ${esc(hyg.age_label || "—")}<br>distinct IPs ${hyg.distinct_ips != null ? hyg.distinct_ips : "—"}${hyg.ip_fanout ? " (fan-out flagged)" : ""}<br>${pens.length ? "penalties: " + pens.map(p => esc(p.detail)).join(" · ") : "clean — no penalties applied"}</div>`;
+      },
+    };
+    panel.querySelectorAll(".ov-hx-card").forEach(card => {
+      card.addEventListener("mouseenter", () => card.style.background = "rgba(120,110,90,.06)");
+      card.addEventListener("mouseleave", () => card.style.background = "");
+      card.addEventListener("click", () => {
+        const pk = card.getAttribute("data-pillar");
+        drill.innerHTML = (drillBuild[pk] ? drillBuild[pk]() : "");
+        drill.hidden = false;
+        panel.querySelectorAll(".ov-hx-card").forEach(c => c.style.borderColor = "var(--paper-edge)");
+        card.style.borderColor = tone(P[pk] && P[pk].score);
+      });
+    });
   }
 
   // ════════════════════ WIDGET 2 · REQUEST RIBBON ══════════════════════
@@ -524,6 +587,72 @@
       <text x="${cx}" y="${cy + 15}" text-anchor="middle" style="font:9px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${esc(sub || "")}</text></svg>`;
   }
 
+  // 6-axis radar — this key (solid fill) vs account average (dashed outline)
+  function radarSvg(dims, labels, vecA, vecB, size) {
+    size = size || 300;
+    const cx = size / 2, cy = size / 2, R = size / 2 - 42, n = dims.length, col = _C();
+    const ang = (i) => (-Math.PI / 2) + i * (2 * Math.PI / n);
+    const pt = (i, r) => [cx + Math.cos(ang(i)) * R * r, cy + Math.sin(ang(i)) * R * r];
+    let grid = "", spokes = "", labs = "";
+    [0.25, 0.5, 0.75, 1].forEach(rr => {
+      grid += `<polygon points="${dims.map((_, i) => pt(i, rr).map(v => v.toFixed(1)).join(",")).join(" ")}" fill="none" stroke="var(--paper-edge)" stroke-width="1" opacity="0.45"/>`;
+    });
+    dims.forEach((k, i) => {
+      const [ex, ey] = pt(i, 1);
+      spokes += `<line x1="${cx}" y1="${cy}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}" stroke="var(--paper-edge)" stroke-width="1" opacity="0.45"/>`;
+      const [lx, ly] = pt(i, 1.17);
+      const anchor = Math.abs(lx - cx) < 12 ? "middle" : (lx < cx ? "end" : "start");
+      labs += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle" style="font:9px 'JetBrains Mono',monospace;fill:var(--ink-soft)">${esc(labels[i])}</text>`;
+    });
+    const poly = (vec, stroke, fill, dash) =>
+      `<polygon points="${dims.map((k, i) => pt(i, Math.max(0, Math.min(1, vec[k] || 0))).map(v => v.toFixed(1)).join(",")).join(" ")}" fill="${fill}" stroke="${stroke}" stroke-width="2" stroke-linejoin="round"${dash ? ' stroke-dasharray="5 4"' : ""}/>`;
+    return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${grid}${spokes}${labs}
+      ${vecB ? poly(vecB, col.mute, "none", true) : ""}
+      ${poly(vecA, col.ok, "rgba(47,111,62,0.16)", false)}</svg>`;
+  }
+  // percentile fan over time: shaded p50–p99 band + p50/p95/p99 lines
+  function fanSvg(p50, p95, p99, w, h) {
+    w = w || 560; h = h || 140; const col = _C();
+    const n = (p99 || []).length || 1;
+    const max = Math.max(1, ...(p99 || [1]), ...(p95 || [1]), ...(p50 || [1]));
+    const X = (i) => (n <= 1 ? 0 : (i / (n - 1)) * w);
+    const Y = (v) => h - (v / max) * (h - 6) - 3;
+    const path = (arr) => (arr || []).map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+    const band = () => (p99 || []).map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`)
+      .concat((p50 || []).map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).reverse()).join(" ");
+    return `<svg width="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block;height:${h}px">
+      <polygon points="${band()}" fill="${col.amber}" opacity="0.13"/>
+      <polyline points="${path(p99)}" fill="none" stroke="${col.danger}" stroke-width="1.2" opacity="0.7" stroke-dasharray="4 3"/>
+      <polyline points="${path(p95)}" fill="none" stroke="${col.amber}" stroke-width="1.5"/>
+      <polyline points="${path(p50)}" fill="none" stroke="${col.ok}" stroke-width="1.6"/></svg>`;
+  }
+  // line chart with hover-scrub crosshair; points:[{label,value}]. Renders into
+  // `host` and wires a mousemove readout into `readoutEl`.
+  function trendChart(host, points, readoutEl, fmtVal) {
+    fmtVal = fmtVal || ((v) => Math.round(v));
+    const col = _C(), w = 560, h = 120;
+    if (!points || !points.length) { host.innerHTML = `<div style="font:italic 12px 'Fraunces',serif;color:var(--ink-mute);padding:12px 0">Trend builds over the coming days — one snapshot is recorded per day.</div>`; return; }
+    const vals = points.map(p => p.value).filter(v => v != null);
+    const max = Math.max(100, ...vals), min = Math.min(0, ...vals);
+    const X = (i) => (points.length <= 1 ? w / 2 : (i / (points.length - 1)) * w);
+    const Y = (v) => h - ((v - min) / (max - min || 1)) * (h - 10) - 5;
+    const line = points.map((p, i) => `${X(i).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" ");
+    const dots = points.map((p, i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(p.value).toFixed(1)}" r="2.4" fill="${col.ok}"/>`).join("");
+    host.innerHTML = `<svg width="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block;height:${h}px;cursor:crosshair;overflow:visible">
+      <polyline points="${line}" fill="none" stroke="${col.ok}" stroke-width="1.8" stroke-linejoin="round"/>${dots}
+      <line id="ov-tr-cross" x1="0" y1="0" x2="0" y2="${h}" stroke="${col.ink}" stroke-width="1" opacity="0" stroke-dasharray="3 3"/></svg>`;
+    const svg = host.querySelector("svg"), cross = host.querySelector("#ov-tr-cross");
+    svg.addEventListener("mousemove", (e) => {
+      const r = svg.getBoundingClientRect();
+      const i = Math.round(((e.clientX - r.left) / r.width) * (points.length - 1));
+      const p = points[Math.max(0, Math.min(points.length - 1, i))];
+      if (!p) return;
+      cross.setAttribute("x1", X(i)); cross.setAttribute("x2", X(i)); cross.setAttribute("opacity", "0.4");
+      if (readoutEl) readoutEl.textContent = `${p.label}: ${fmtVal(p.value)}`;
+    });
+    svg.addEventListener("mouseleave", () => { cross.setAttribute("opacity", "0"); if (readoutEl) readoutEl.textContent = ""; });
+  }
+
   // ════════════════════ WIDGET 3 · KPI TILES ═══════════════════════════
   function renderKpis(k) {
     if (!k) return;
@@ -567,31 +696,52 @@
     else _kpiRateLimit(panel, d);
     return titles[name] || name;
   }
-  // REQUESTS — time series stacked by status + endpoint bars + busiest bucket
+  // REQUESTS — range toggle + stacked-by-status timeseries + busiest bucket
+  //            + endpoint bars + vs-account-average.
   function _kpiRequests(panel, d) {
-    const ts = (DATA && DATA.timeseries) || { req: [], s2xx: [], s4xx: [], s5xx: [] };
-    const grid = (DATA && DATA.spark_grid) || [];
-    let bi = -1, bmax = -1;
-    (ts.req || []).forEach((v, i) => { if (v > bmax) { bmax = v; bi = i; } });
-    let busy = "no traffic";
-    if (bi >= 0 && bmax > 0 && ts.t0_ms && ts.bucket_ms) {
-      const tmid = ts.t0_ms + (bi + 0.5) * ts.bucket_ms;
-      busy = new Date(tmid).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + ` · ${bmax} requests`;
-    }
-    const eps = grid.slice(0, 6).map(s => ({ label: s.path, value: s.count, sub: fmtNum(s.count) }));
+    const acct = (DATA && DATA.account) || {};
+    const vsAvg = acct.this_vs_avg;
     const dl = d.delta_pct;
     panel.innerHTML =
       `<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
-        <span style="font:700 42px/1 'Fraunces',serif;color:var(--ink)">${fmtNum(d.value)}</span>
+        <span id="ov-rq-num" style="font:700 42px/1 'Fraunces',serif;color:var(--ink)">${fmtNum(d.value)}</span>
         <span style="font:12px 'JetBrains Mono',monospace;color:var(--ink-soft)">vs previous period ${fmtNum(d.prev)}${dl != null ? ` · <b style="color:${dl >= 0 ? "var(--c-ok)" : "var(--c-danger)"}">${dl > 0 ? "+" : ""}${dl}%</b>` : ""}</span>
+        ${vsAvg != null ? `<span style="font:12px 'JetBrains Mono',monospace;color:var(--ink-mute)">· ${vsAvg}× account average (${fmtNum(acct.avg_requests_per_key)}/key)</span>` : ""}
       </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:6px"><div class="ov-range" id="ov-rq-range"><button data-r="1h">1h</button><button data-r="24h">24h</button><button data-r="7d">7d</button></div></div>
       ${_kxSec("requests over time · stacked by status")}
-      ${stackedBarsSvg(ts)}
+      <div id="ov-rq-ts"></div>
       <div style="display:flex;gap:16px;font:10.5px 'JetBrains Mono',monospace;color:var(--ink-mute);margin:5px 0 2px"><span><i class="rdot s-2xx"></i> 2xx</span><span><i class="rdot s-4xx"></i> 4xx</span><span><i class="rdot s-5xx"></i> 5xx</span></div>
-      ${_kxSec("busiest bucket")}
-      <div style="font:13px/1.6 'Fraunces',serif;color:var(--ink-soft)">${esc(busy)}</div>
-      ${_kxSec("endpoint breakdown")}
-      ${eps.length ? hbars(eps) : `<div style="font:italic 12px 'Fraunces',serif;color:var(--ink-mute)">no endpoint data</div>`}`;
+      ${_kxSec("busiest bucket")}<div id="ov-rq-busy" style="font:13px/1.6 'Fraunces',serif;color:var(--ink-soft)"></div>
+      ${_kxSec("endpoint breakdown")}<div id="ov-rq-eps"></div>`;
+    function paint(ts, grid, total) {
+      ts = ts || { req: [] }; grid = grid || [];
+      $("ov-rq-ts").innerHTML = stackedBarsSvg(ts);
+      let bi = -1, bmax = -1;
+      (ts.req || []).forEach((v, i) => { if (v > bmax) { bmax = v; bi = i; } });
+      let busy = "no traffic in this window";
+      if (bi >= 0 && bmax > 0 && ts.t0_ms && ts.bucket_ms) {
+        const tmid = ts.t0_ms + (bi + 0.5) * ts.bucket_ms;
+        busy = new Date(tmid).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + ` · ${bmax} requests`;
+      }
+      $("ov-rq-busy").textContent = busy;
+      const eps = grid.slice(0, 6).map(s => ({ label: s.path, value: s.count, sub: fmtNum(s.count) }));
+      $("ov-rq-eps").innerHTML = eps.length ? hbars(eps) : `<div style="font:italic 12px 'Fraunces',serif;color:var(--ink-mute)">no endpoint data</div>`;
+      const numEl = $("ov-rq-num"); if (numEl && total != null) numEl.textContent = fmtNum(total);
+    }
+    // initial paint from the already-loaded window
+    const rng = panel.querySelector("#ov-rq-range");
+    rng.querySelectorAll("button").forEach(b => { if (b.getAttribute("data-r") === RANGE) b.setAttribute("aria-pressed", "true"); });
+    paint(DATA && DATA.timeseries, DATA && DATA.spark_grid, d.value);
+    rng.querySelectorAll("button").forEach(b => b.addEventListener("click", async () => {
+      const w = b.getAttribute("data-r");
+      rng.querySelectorAll("button").forEach(x => x.removeAttribute("aria-pressed"));
+      b.setAttribute("aria-pressed", "true");
+      const { ok, body } = await api(`/api/account/keys/${encodeURIComponent(PID)}/overview?window=${w}`);
+      if (!ok || !body) return;
+      const dd = body.data || body;
+      paint(dd.timeseries, dd.spark_grid, (dd.kpis && dd.kpis.requests) ? dd.kpis.requests.value : null);
+    }));
   }
   // SUCCESS — status donut + table; click a slice/row → ribbon filtered
   function _kpiSuccess(panel, d) {
@@ -641,6 +791,9 @@
       ${_kxSec("latency distribution · log-binned")}
       ${histSvg(lh)}
       ${bimodal ? `<div style="font:italic 12px/1.5 'Fraunces',serif;color:var(--c-amber);margin-top:10px">Bimodal — fast metadata responses and slow inference form two distinct clusters.</div>` : ""}
+      ${(() => { const ts = (DATA && DATA.timeseries) || {}; return (ts.lat_p95 || []).some(v => v > 0)
+        ? `${_kxSec("percentile fan over time")}${fanSvg(ts.lat_p50, ts.lat_p95, ts.lat_p99)}
+           <div style="display:flex;gap:16px;font:10px 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:4px"><span style="color:${_C().ok}">— p50</span><span style="color:${_C().amber}">— p95</span><span style="color:${_C().danger}">- - p99</span></div>` : ""; })()}
       ${slow ? `${_kxSec("slowest endpoint (by p95)")}<div style="font:13px/1.6 'JetBrains Mono',monospace;color:var(--ink-soft)">${esc(slow.path)} · p95 ${fmtMs(slow.p95)}</div>` : ""}`;
   }
   // RATE-LIMIT / QUOTA — events + quota burndown radial
@@ -652,6 +805,15 @@
       const consumed = +m[1], quota = +m[2], frac = quota ? Math.min(1, consumed / quota) : 0;
       radial = radialSvg(frac, Math.round(frac * 100) + "%", fmtNum(consumed) + " / " + fmtNum(quota));
     } else radial = radialSvg(0, "∞", "no daily cap");
+    const events = (DATA && DATA.rate_limit_events) || [];
+    let timeline = "";
+    if (events.length) {
+      const max = Math.max(1, ...events.map(e => e.count));
+      timeline = `${_kxSec("rate-limit events")}
+        <div style="display:flex;align-items:flex-end;gap:2px;height:60px;border-bottom:1px solid var(--paper-edge);padding-bottom:2px">
+          ${events.slice(-80).map(e => `<span title="${esc(e.minute)} · ${e.count}" style="flex:1;min-width:2px;height:${Math.max(6, (e.count / max) * 56)}px;background:var(--c-amber);border-radius:1px"></span>`).join("")}</div>
+        <div style="font:10px 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:4px">${events.length} minute(s) with throttling · most recent ${esc(events[events.length - 1].minute)}</div>`;
+    }
     panel.innerHTML =
       `<div style="display:flex;gap:28px;align-items:center;flex-wrap:wrap">
         <div>${radial}</div>
@@ -661,7 +823,7 @@
           <div style="font:13px/1.6 'Fraunces',serif;color:var(--ink-soft);margin-top:15px">${rl ? `${rl} throttle hit(s) this window — the integration is bumping the rate limit.` : "0 events — healthy. No throttling this window."}</div>
           <div style="font:11px 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:11px">quota · ${esc(String(ql))}</div>
         </div>
-      </div>`;
+      </div>${timeline}`;
   }
   // open the ribbon lightbox pre-filtered to a status bucket (donut cross-link)
   let _ribbonPreset = null;
@@ -678,7 +840,9 @@
   function renderPersonality(p) {
     const host = $("ov-personality-body");
     if (!host || !p) return;
-    const tags = p.tags || [];
+    // Bento shows the 3 headline tags; the radar + full 6-dim table live in
+    // the expanded view (⤢).
+    const tags = (p.tags || []).slice(0, 3);
     if (!tags.length) { host.innerHTML = `<div style="font:italic 13px/1.5 'Fraunces',serif;color:var(--ink-mute);padding:14px 0">Personality emerges after ~20 requests.</div>`; return; }
     host.innerHTML = tags.map(t => {
       const pct = Math.round((t.value || 0) * 100);
@@ -692,14 +856,45 @@
     });
   }
   function expandPersonality(panel) {
-    const tags = ((DATA && DATA.personality) || {}).tags || [];
-    panel.innerHTML = `<div style="font:13px/1.7 'Fraunces',serif;color:var(--ink-soft);margin-bottom:14px">Behavioural fingerprint derived from this key's request mix and timing.</div>` +
-      tags.map(t => {
-        const pct = Math.round((t.value || 0) * 100);
-        return `<div style="margin:14px 0"><div style="display:flex;justify-content:space-between;font:600 13px/1.6 'JetBrains Mono',monospace;color:var(--ink)"><span>${esc(t.name)}</span><span>${pct}%</span></div>
-          <div class="ov-pbar-track" style="height:10px"><div class="ov-pbar-fill" style="width:${pct}%"></div></div>
-          <div style="font:11.5px/1.5 'Fraunces',serif;font-style:italic;color:var(--ink-mute);margin-top:4px">${esc(t.signal)}</div></div>`;
-      }).join("");
+    const p = (DATA && DATA.personality) || {};
+    const tags = p.tags || [];
+    const vec = p.vector || {};
+    const acct = p.account_vector || null;
+    const similar = p.similar_keys || [];
+    const col = _C();
+    const DIMS = ["predict_heavy", "read_mostly", "write_heavy", "bursty", "error_tolerant", "steady"];
+    const LBL = { predict_heavy: "predict-heavy", read_mostly: "read-mostly", write_heavy: "write-heavy", bursty: "bursty", error_tolerant: "error-tolerant", steady: "steady" };
+    const sigByName = {}; tags.forEach(t => sigByName[t.name] = t.signal);
+    const hasAcct = !!acct && DIMS.some(k => (acct[k] || 0) > 0);
+    panel.innerHTML =
+      `<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+        <div style="flex:none">${radarSvg(DIMS, DIMS.map(k => LBL[k]), vec, hasAcct ? acct : null, 300)}</div>
+        <div style="flex:1;min-width:230px">
+          <div style="display:flex;gap:14px;font:10.5px 'JetBrains Mono',monospace;color:var(--ink-mute);margin-bottom:8px">
+            <span><i style="display:inline-block;width:10px;height:10px;background:rgba(47,111,62,0.5);border:1.5px solid ${col.ok};vertical-align:middle"></i> this key</span>
+            ${hasAcct ? `<span><i style="display:inline-block;width:10px;height:0;border-top:2px dashed ${col.mute};vertical-align:middle"></i> account avg</span>` : ""}</div>
+          <div style="font:13px/1.7 'Fraunces',serif;color:var(--ink-soft)">Behavioural fingerprint from this key's request mix and timing${hasAcct ? ", overlaid on your account average" : ""}.</div>
+        </div>
+      </div>
+      <div style="margin-top:16px;font:500 italic 11px 'Fraunces',serif;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-soft);border-bottom:1px solid var(--paper-edge);padding-bottom:6px">dimensions</div>
+      <div style="display:grid;grid-template-columns:120px 60px 60px 1fr;gap:6px 10px;align-items:center;font:11px 'JetBrains Mono',monospace;margin-top:10px">
+        <span style="color:var(--ink-mute)">DIMENSION</span><span style="color:var(--ink-mute);text-align:right">THIS</span><span style="color:var(--ink-mute);text-align:right">ACCT</span><span style="color:var(--ink-mute)">SIGNAL</span>
+        ${DIMS.map(k => `<span style="color:var(--ink)">${LBL[k]}</span>
+          <span style="text-align:right;color:var(--ink-soft)">${Math.round((vec[k] || 0) * 100)}%</span>
+          <span style="text-align:right;color:var(--ink-mute)">${hasAcct ? Math.round((acct[k] || 0) * 100) + "%" : "—"}</span>
+          <span style="color:var(--ink-mute);font-size:10px">${esc(sigByName[LBL[k]] || "")}</span>`).join("")}
+      </div>
+      <div style="margin-top:16px;font:500 italic 11px 'Fraunces',serif;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-soft);border-bottom:1px solid var(--paper-edge);padding-bottom:6px">similar keys</div>
+      <div id="ov-pz-similar" style="margin-top:10px">${
+        similar.length
+          ? similar.map(s => `<div class="ov-pz-row" data-pid="${esc(s.public_id)}" style="display:flex;justify-content:space-between;align-items:center;padding:7px 8px;border-radius:7px;cursor:pointer;font:12px 'JetBrains Mono',monospace;transition:background .12s"><span style="color:var(--ink)">${esc(s.name)}</span><span style="color:var(--ink-soft)">${s.match}% match</span></div>`).join("")
+          : `<div style="font:italic 12px 'Fraunces',serif;color:var(--ink-mute)">No peer keys with traffic to compare against yet.</div>`
+      }</div>`;
+    panel.querySelectorAll(".ov-pz-row").forEach(r => {
+      r.addEventListener("mouseenter", () => r.style.background = "rgba(120,110,90,.10)");
+      r.addEventListener("mouseleave", () => r.style.background = "");
+      r.addEventListener("click", () => { location.href = "/account/api/keys/" + encodeURIComponent(r.getAttribute("data-pid")); });
+    });
   }
 
   // ════════════════════ WIDGET 5 · SPARK-GRID ══════════════════════════
@@ -835,12 +1030,58 @@
     });
     if (window.APIN && APIN.fx) host.querySelectorAll(".ov-insight").forEach((el, i) => setTimeout(() => APIN.fx.enter(el), i * 60));
   }
+  // Build a supporting mini-chart that "proves" an insight, keyed off its text.
+  function _insightChart(text) {
+    const t = (text || "").toLowerCase();
+    const col = _C();
+    if (/p95|p50|latency|slow|fast|degrad|improv/.test(t)) {
+      const ts = (DATA && DATA.timeseries) || {};
+      if ((ts.lat_p95 || []).some(v => v > 0)) return fanSvg(ts.lat_p50, ts.lat_p95, ts.lat_p99, 460, 90);
+    }
+    if (/error|5xx|4xx|fail/.test(t)) {
+      const sc = (DATA && DATA.status_counts) || {};
+      return donutSvg([
+        { key: "2xx", label: "2xx", value: sc.n_2xx || 0, color: col.ok },
+        { key: "4xx", label: "4xx", value: sc.n_4xx || 0, color: col.amber },
+        { key: "5xx", label: "5xx", value: sc.n_5xx || 0, color: col.danger }], 120, 20);
+    }
+    if (/predict|inference/.test(t)) {
+      const grid = (DATA && DATA.spark_grid) || [];
+      if (grid.length) return hbars(grid.slice(0, 5).map(s => ({ label: s.path, value: s.count, sub: fmtNum(s.count) })));
+    }
+    if (/ip|integration|shared|leak/.test(t)) {
+      const hyg = (((DATA && DATA.health) || {}).pillars || {}).hygiene || {};
+      return `<div style="font:11.5px/1.7 'JetBrains Mono',monospace;color:var(--ink-soft)">distinct IPs this window: ${hyg.distinct_ips != null ? hyg.distinct_ips : "—"}${hyg.ip_fanout ? " · <b style='color:var(--c-danger)'>fan-out flagged</b>" : " · stable"}</div>`;
+    }
+    if (/healthy|grade|health/.test(t)) {
+      const P = (((DATA && DATA.health) || {}).pillars) || {};
+      return hbars([["reliability", "RELIABILITY"], ["performance", "PERFORMANCE"], ["capacity", "CAPACITY"], ["hygiene", "HYGIENE"]]
+        .map(([k, L]) => ({ label: L, value: (P[k] && P[k].score) || 0, sub: (P[k] && P[k].score != null) ? P[k].score : "—" })));
+    }
+    return null;
+  }
   function expandInsights(panel) {
     const list = (DATA && DATA.insights) || [];
     const byTone = { great: 0, warn: 0, info: 0 };
     list.forEach(i => byTone[i.tone] = (byTone[i.tone] || 0) + 1);
-    panel.innerHTML = `<div style="font:12px/1.6 'JetBrains Mono',monospace;color:var(--ink-soft);margin-bottom:10px">${byTone.warn || 0} warning · ${byTone.info || 0} info · ${byTone.great || 0} positive</div>` +
-      list.map(i => `<div class="ov-insight ${esc(i.tone || "info")}"><i class="ins-icon"></i><span>${esc(i.text)}</span></div>`).join("");
+    if (!list.length) { panel.innerHTML = `<div style="font:italic 13px/1.6 'Fraunces',serif;color:var(--ink-mute);padding:16px">Operating cleanly — no notable signals this window.</div>`; return; }
+    panel.innerHTML = `<div style="font:12px/1.6 'JetBrains Mono',monospace;color:var(--ink-soft);margin-bottom:12px">⚠ ${byTone.warn || 0} warning · ℹ ${byTone.info || 0} info · ✓ ${byTone.great || 0} positive</div>` +
+      list.map((i, idx) => {
+        const hasChart = !!_insightChart(i.text);
+        return `<div class="ov-insight ${esc(i.tone || "info")}" style="display:block;margin-bottom:8px">
+          <div style="display:flex;align-items:flex-start;gap:6px"><i class="ins-icon"></i><span style="flex:1">${esc(i.text)}</span>
+          ${hasChart ? `<button class="ov-ins-toggle" data-i="${idx}" style="background:none;border:none;cursor:pointer;color:var(--ink-soft);font:13px 'JetBrains Mono',monospace">▸</button>` : ""}</div>
+          ${hasChart ? `<div class="ov-ins-chart" data-i="${idx}" hidden style="margin:8px 0 2px 22px"></div>` : ""}</div>`;
+      }).join("");
+    panel.querySelectorAll(".ov-ins-toggle").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const idx = btn.getAttribute("data-i");
+        const box = panel.querySelector(`.ov-ins-chart[data-i="${idx}"]`);
+        if (!box) return;
+        if (box.hidden) { box.innerHTML = _insightChart(list[idx].text) || ""; box.hidden = false; btn.textContent = "▾"; }
+        else { box.hidden = true; btn.textContent = "▸"; }
+      });
+    });
   }
 
   // ── cross-widget linking: hover an endpoint → highlight spark-grid row ─
