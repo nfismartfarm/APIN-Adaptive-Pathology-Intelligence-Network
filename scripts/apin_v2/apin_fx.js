@@ -314,6 +314,34 @@
     try { return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
     catch (_) { return d.toLocaleTimeString(); }
   }
+  // Device timezone abbreviation: PST / EST / IST / GST / UTC …
+  function _tzAbbr() {
+    try {
+      const part = (fmtOpts) => {
+        const p = new Intl.DateTimeFormat("en-US", fmtOpts).formatToParts(new Date())
+          .find(x => x.type === "timeZoneName");
+        return p ? p.value : "";
+      };
+      const short = part({ timeZoneName: "short" });
+      if (/^UTC$/i.test(short)) return "UTC";
+      // already a clean abbreviation (PST, EST, GST, IST on some browsers)
+      if (short && !/^GMT[+\-]/i.test(short)) return short;
+      // offset form (GMT+5:30) → take initials of the long name (India Standard Time → IST)
+      const long = part({ timeZoneName: "long" });
+      const init = long.split(/\s+/).filter(w => /^[A-Z]/.test(w)).map(w => w[0]).join("");
+      return init.length >= 2 ? init : (short || "local");
+    } catch (_) { return "local"; }
+  }
+  // Full device-local datetime + timezone abbreviation, e.g. "29 May 2026, 9:59:17 pm IST"
+  function _localFull(s) {
+    const d = _utcDate(s); if (!d) return "—";
+    let base;
+    try {
+      base = d.toLocaleString([], { year: "numeric", month: "short", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } catch (_) { base = d.toLocaleString(); }
+    return base + " " + _tzAbbr();
+  }
 
   // ── Public surface ────────────────────────────────────────────────────────
   window.APIN = window.APIN || {};
@@ -329,6 +357,7 @@
   // Timezone-correct formatting, shared across every console page.
   window.APIN.time = {
     utcDate: _utcDate, ago: _ago, local: _local, localTime: _localTime,
+    localFull: _localFull, tzAbbr: _tzAbbr,
     zone: _TZ, offsetMin: _tzOffsetMin,
   };
 })();

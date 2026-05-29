@@ -7870,6 +7870,9 @@ def list_key_requests(*, user_id: int, public_id: str,
                        path_contains: Optional[str] = None,
                        since_iso: Optional[str] = None,
                        until_iso: Optional[str] = None,
+                       local_hour: Optional[int] = None,
+                       local_weekday: Optional[int] = None,
+                       tz_off: int = 0,
                        ) -> list[dict]:
     """Phase 9.A — recent request log for the detail page. Newest first.
 
@@ -7908,6 +7911,26 @@ def list_key_requests(*, user_id: int, public_id: str,
     if until_iso:
         wheres.append("timestamp < ?")
         args.append(str(until_iso))
+    # local hour-of-day / weekday filters (viewer tz). Shift the UTC timestamp
+    # by tz_off minutes, then match the hour / weekday in that local frame.
+    if local_hour is not None or local_weekday is not None:
+        try:
+            tzo = max(-840, min(840, int(tz_off)))
+        except Exception:
+            tzo = 0
+        modifier = f"{tzo:+d} minutes"
+        if local_hour is not None:
+            wheres.append(
+                "CAST(substr(datetime(substr(timestamp,1,19), ?), 12, 2) AS INTEGER) = ?")
+            args.append(modifier)
+            args.append(int(local_hour))
+        if local_weekday is not None:
+            # incoming local_weekday is Mon=0..Sun=6; SQLite %w is Sun=0..Sat=6
+            sqlite_wd = (int(local_weekday) + 1) % 7
+            wheres.append(
+                "CAST(strftime('%w', datetime(substr(timestamp,1,19), ?)) AS INTEGER) = ?")
+            args.append(modifier)
+            args.append(sqlite_wd)
     sql = (
         "SELECT id, timestamp, method, path, status_code, latency_ms, "
         "       bytes_in, bytes_out, ip, ua, error_code, via "
@@ -7983,6 +8006,42 @@ def _build_user_keys_where(user_id: int,
         args.append(str(env))
     sub = "(SELECT public_id FROM api_keys WHERE " + " AND ".join(wheres) + ")"
     return sub, args
+
+
+def compute_usage_lifetime(*, user_id: int, key_id: Optional[str] = None,
+                            env: Optional[str] = None) -> dict:
+    """'Has this scope ever seen a request?' probe — powers the Usage empty
+    states (new-key vs dormant-window). Scoped to the user's keys (+ optional
+    key_id/env), deliberately NOT to endpoint/status (those are content
+    filters, a separate 'no matches' case). One indexed lookup + a count."""
+    sub, args = _build_user_keys_where(int(user_id), key_id, env)
+    out = {"ever": False, "total": 0, "last_ts": None, "last_id": None,
+           "last_method": None, "last_path": None, "last_status": None}
+    try:
+        with get_conn() as c:
+            row = c.execute(
+                "SELECT id, timestamp, method, path, status_code "
+                "FROM api_key_request_log WHERE key_id IN " + sub +
+                " ORDER BY id DESC LIMIT 1", args).fetchone()
+            if not row:
+                return out
+            d = dict(row)
+            cnt = c.execute(
+                "SELECT COUNT(*) AS n FROM api_key_request_log WHERE key_id IN " + sub,
+                args).fetchone()
+            out.update({
+                "ever": True,
+                "total": int(dict(cnt).get("n", 0) or 0),
+                "last_ts": d.get("timestamp"),
+                "last_id": d.get("id"),
+                "last_method": d.get("method"),
+                "last_path": d.get("path"),
+                "last_status": d.get("status_code"),
+            })
+    except Exception as e:
+        _logging.getLogger("apin_v2.auth_db").warning(
+            "compute_usage_lifetime failed: %s", e)
+    return out
 
 
 def _percentile(sorted_lats: list[int], p: float) -> Optional[float]:

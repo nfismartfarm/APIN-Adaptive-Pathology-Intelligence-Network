@@ -31,7 +31,7 @@
   const csrf = csrfMeta ? csrfMeta.content : '';
   const pidMeta = document.querySelector('meta[name="key-public-id"]');
   const PID = pidMeta ? pidMeta.content : '';
-  const TABS = ['overview', 'traffic', 'usage', 'requests', 'audit', 'settings'];
+  const TABS = ['overview', 'traffic', 'endpoints', 'usage', 'requests', 'audit', 'settings'];
   const DEFAULT_TAB = 'overview';
 
   // ─── helpers ──────────────────────────────────────────────────────────
@@ -199,10 +199,12 @@
     loadActiveTab();
   }
   function loadActiveTab() {
-    // Stop the Traffic live loop (SSE + clock rAF) whenever we leave the tab.
+    // Stop the Traffic / Endpoints live loops whenever we leave those tabs.
     if (activeTab !== 'traffic' && window.APIN && APIN.keyTraffic) APIN.keyTraffic.deactivate();
+    if (activeTab !== 'endpoints' && window.APIN && APIN.keyEndpoints) APIN.keyEndpoints.deactivate();
     if (activeTab === 'overview')  loadOverview();
     else if (activeTab === 'traffic') { if (window.APIN && APIN.keyTraffic) APIN.keyTraffic.activate(PID); }
+    else if (activeTab === 'endpoints') { if (window.APIN && APIN.keyEndpoints) APIN.keyEndpoints.activate(PID); }
     else if (activeTab === 'usage')    loadUsageTab();
     else if (activeTab === 'requests') loadRequests({ reset: true });
     else if (activeTab === 'audit')    loadAudit();
@@ -418,8 +420,10 @@
     const pySnip = body.data.as_python || '';
     const nodeSnip = body.data.as_node || '';
 
-    $('reqd-title').textContent = (r.method || '') + ' ' + (r.path || '');
-    $('reqd-sub').textContent = (r.timestamp || '') + ' UTC · key: ' + (r.key_name || r.key_public_id || '?');
+    $('reqd-title').innerHTML = '<span class="reqd-tp">' + escHtml((r.method || '') + ' ' + (r.path || '')) + '</span>'
+      + '<span class="reqd-rno">Request #' + escHtml(String(r.id != null ? r.id : rid)) + '</span>';
+    $('reqd-sub').textContent = ((window.APIN && APIN.time && APIN.time.localFull) ? APIN.time.localFull(r.timestamp) : (r.timestamp || ''))
+      + ' · key: ' + (r.key_name || r.key_public_id || '?');
 
     const sb = r.status_code || 0;
     const sbCls = statusBucket(sb);

@@ -62,6 +62,12 @@
   const _local = (iso) => (window.APIN && APIN.time) ? APIN.time.local(iso) : iso;
   const GRAN_MS = { hour: 3600e3, day: 86400e3, week: 7 * 86400e3, month: 31 * 86400e3 };
   const GRAN_LABEL = { hour: "last 24h", day: "last 30d", week: "last 12w", month: "last 12mo" };
+  // window (ms) the clock aggregates over, per granularity — matches backend _TRAFFIC_GRAN
+  const GRAN_WIN_MS = { hour: 1440 * 60e3, day: 43200 * 60e3, week: 120960 * 60e3, month: 535680 * 60e3 };
+  // 12-hour labels — "7:00 AM", "6:00 PM", "12:00 AM" (midnight), "12:00 PM" (noon)
+  const fmt12 = (h) => { h = ((+h) % 24 + 24) % 24; return ((h % 12) || 12) + ":00 " + (h < 12 ? "AM" : "PM"); };
+  // current wall-clock with minutes — "7:42 PM"
+  const fmtClockNow = (d) => { const h = d.getHours(); return ((h % 12) || 12) + ":" + String(d.getMinutes()).padStart(2, "0") + " " + (h < 12 ? "AM" : "PM"); };
 
   // ── state ───────────────────────────────────────────────────────────────
   let PID = null, DATA = null, _active = false, _wired = false, _introDone = false;
@@ -70,6 +76,15 @@
   let _clockTick = null, _rerenderRaf = null, _dirty = {};
   let _openExpand = null;   // {kind, update} when a lightbox is open
   let _zoom = null;         // {i0,i1} bucket-index window for the hero (null = full)
+  let _calMode = "volume";  // calendar heatmap mode (volume | error)
+  let _calPhraseIdx = 0;    // which interactive phrase is shown (click cycles)
+  let _calSweep = false;    // request the today cell to light-sweep on next render
+  let _byMode = "ring";     // bandwidth widget view: ring | river
+  let _byPhraseIdx = 0;     // bytes-insight phrase index (click cycles)
+  let _rateWin = [];        // rolling [{t, bytes}] for the live MB/s readout
+  let _byPulse = 0;         // pending live throughput pulses to flush
+  let _rateTimer = null;    // 1 s interval that decays the live rate
+  let _hivePulseMethod = null;   // colony to pulse on the next render frame
 
   // ════════════════════ DATA FETCH ════════════════════════════════════════
   async function refresh() {
@@ -128,8 +143,19 @@
           </tr></thead><tbody id="tf-rc-tbody"></tbody></table>
         </div>
       </div>`;
-    const r = await api(`/api/account/keys/${encodeURIComponent(PID)}/requests?since=${encodeURIComponent(sinceISO)}&until=${encodeURIComponent(untilISO)}&limit=200`);
-    let rows = (r.body && r.body.data && r.body.data.items) || [];
+    let rows;
+    if (opts.presetRows) {
+      // caller already computed the exact row set (e.g. a per-block slice)
+      rows = opts.presetRows.slice();
+    } else {
+      // Time-of-day filters (clock drills) are applied SERVER-SIDE so they span
+      // the whole window correctly (the 200-row cap can't miss the target hour).
+      let qs = `since=${encodeURIComponent(sinceISO)}&until=${encodeURIComponent(untilISO)}&limit=200`;
+      if (opts.localHour != null) qs += `&local_hour=${+opts.localHour}&tz_off=${TZOFF}`;
+      if (opts.localWeekday != null) qs += `&local_weekday=${+opts.localWeekday}&tz_off=${TZOFF}`;
+      const r = await api(`/api/account/keys/${encodeURIComponent(PID)}/requests?${qs}`);
+      rows = (r.body && r.body.data && r.body.data.items) || [];
+    }
     let fM = (opts.method || "ALL"), fS = (opts.status || "ALL"), fEp = "";
     const methods = ["ALL"].concat(Array.from(new Set(rows.map(x => (x.method || "").toUpperCase()).filter(Boolean))));
     const statuses = ["ALL", "2xx", "4xx", "5xx"];
@@ -166,49 +192,69 @@
 
   // ════════════════════ ① HERO — segmented blocks + draggable scrubber ════
   const HERO_W = 760, HERO_H = 200, MAXBLOCKS = 14, BLK_H = 9, BLK_GAP = 3, BASE_OFF = 30;
-  const SEG_DEFS = [["n2", "ok", "2xx"], ["n4", "amber", "4xx"], ["n5", "danger", "5xx"]];
+  // a slice's local time-range label, e.g. "2:00 PM – 2:08 PM" or, across days,
+  // "May 27 11:00 PM – May 28 1:00 AM".
+  function _sliceTip(sinceMs, untilMs) {
+    const d1 = new Date(sinceMs), d2 = new Date(untilMs);
+    const t = (d) => { const h = d.getHours(); return ((h % 12) || 12) + ":" + String(d.getMinutes()).padStart(2, "0") + " " + (h < 12 ? "AM" : "PM"); };
+    const day = (d) => d.toLocaleDateString([], { month: "short", day: "numeric" });
+    return d1.toDateString() === d2.toDateString() ? `${t(d1)} – ${t(d2)}` : `${day(d1)} ${t(d1)} – ${day(d2)} ${t(d2)}`;
+  }
+  // Click a block → fetch its bucket, sort by time, take the k-th equal-COUNT
+  // chunk, and open the container with that exact row set + its real time-span.
+  async function _drillSlice(b, k, blocks) {
+    if (!b || !b.total) return;
+    const dur = DATA.bucket_ms || GRAN_MS[GRAN] || 3600e3;
+    const r = await api(`/api/account/keys/${encodeURIComponent(PID)}/requests?since=${encodeURIComponent(_utcStr(b.t_ms))}&until=${encodeURIComponent(_utcStr(b.t_ms + dur))}&limit=200`);
+    let rows = (r.body && r.body.data && r.body.data.items) || [];
+    rows.sort((x, y) => (x.timestamp < y.timestamp ? -1 : x.timestamp > y.timestamp ? 1 : 0));  // ascending
+    const N = rows.length;
+    let lo = Math.floor(k * N / blocks), hi = Math.floor((k + 1) * N / blocks);
+    if (hi <= lo && lo < N) hi = lo + 1;
+    const chunk = rows.slice(lo, hi);
+    const base = b.label + (b.sub ? " " + b.sub : "");
+    let label = base + " · slice " + (k + 1) + "/" + blocks, sMs = b.t_ms, uMs = b.t_ms + dur;
+    if (chunk.length) {
+      const ts = (s) => new Date((s || "").replace(" ", "T") + "Z").getTime();
+      sMs = ts(chunk[0].timestamp); uMs = ts(chunk[chunk.length - 1].timestamp) + 1000;
+      label = base + " · " + _sliceTip(sMs, uMs);
+    }
+    openRequestContainer({ presetRows: chunk, sinceMs: sMs, untilMs: uMs, label });
+  }
   function heroSvg(buckets, max, off) {
     const col = _C(), n = buckets.length || 1;
     const slotW = HERO_W / n, bw = Math.max(6, Math.min(30, slotW - 7));
     const baseY = HERO_H - BASE_OFF;
     const stride = Math.max(1, Math.ceil(n / 12));
-    let bars = "", labels = "", segHits = "", colHits = "";
+    let bars = "", labels = "", topHits = "", sliceHits = "";
     buckets.forEach((b, i) => {
       const ai = i + (off || 0);              // absolute bucket index
-      const cx = i * slotW + slotW / 2, x = cx - bw / 2;
+      const cx = i * slotW + slotW / 2, x = cx - bw / 2, slotX = i * slotW;
       const blocks = b.total > 0 ? Math.max(1, Math.round(b.total / (max || 1) * MAXBLOCKS)) : 0;
       const g = Math.round(blocks * (b.n2 / (b.total || 1)));
       const a = Math.round(blocks * (b.n4 / (b.total || 1)));
-      // colored blocks, tagged by status so hover can highlight one band
-      let y = baseY, kg = 0;
+      // colored blocks (k=0 is the bottom block = earliest slice of the window)
       for (let k = 0; k < blocks; k++) {
-        y -= BLK_H;
+        const yTop = baseY - (k + 1) * BLK_H;
         const st = k < g ? "n2" : k < g + a ? "n4" : "n5";
         const color = st === "n2" ? col.ok : st === "n4" ? col.amber : col.danger;
-        bars += `<rect class="tf-blk" data-i="${ai}" data-st="${st}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${BLK_H - BLK_GAP}" rx="2" fill="${color}"/>`;
-        y -= BLK_GAP;
+        bars += `<rect class="tf-blk" data-i="${ai}" data-k="${k}" x="${x.toFixed(1)}" y="${yTop.toFixed(1)}" width="${bw.toFixed(1)}" height="${BLK_H - BLK_GAP}" rx="2" fill="${color}"/>`;
+        // a transparent hit slice over this block (covers the gap too)
+        sliceHits += `<rect class="tf-slice" data-i="${ai}" data-k="${k}" data-blocks="${blocks}" x="${slotX.toFixed(1)}" y="${yTop.toFixed(1)}" width="${slotW.toFixed(1)}" height="${BLK_H}" fill="transparent"/>`;
       }
       if (i % stride === 0) {
         labels += `<text x="${cx.toFixed(1)}" y="${baseY + 13}" text-anchor="middle" style="font:9.5px 'JetBrains Mono',monospace;fill:var(--ink-soft)">${esc(b.label)}</text>`;
         if (b.sub) labels += `<text x="${cx.toFixed(1)}" y="${baseY + 24}" text-anchor="middle" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${esc(b.sub)}</text>`;
       }
-      // whole-column hit (drills the full bucket) — painted first (under segments)
-      colHits += `<rect class="tf-bar" data-i="${ai}" x="${(i * slotW).toFixed(1)}" y="0" width="${slotW.toFixed(1)}" height="${baseY}" fill="transparent"/>`;
-      // per-status segment hit zones over the bar bands (painted last → win clicks)
-      const blkPx = BLK_H;
-      const bands = [["n2", g], ["n4", a], ["n5", Math.max(0, blocks - g - a)]];
-      let topUsed = 0;
-      bands.forEach(([st, cnt]) => {
-        if (cnt <= 0) return;
-        const yTop = baseY - (topUsed + cnt) * blkPx, hgt = cnt * blkPx;
-        segHits += `<rect class="tf-seg" data-i="${ai}" data-st="${st}" x="${(i * slotW).toFixed(1)}" y="${yTop.toFixed(1)}" width="${slotW.toFixed(1)}" height="${hgt.toFixed(1)}" fill="transparent"/>`;
-        topUsed += cnt;
-      });
+      // whole-bucket hit covers ONLY the empty area above the bar
+      const barTop = baseY - blocks * BLK_H;
+      topHits += `<rect class="tf-bar" data-i="${ai}" x="${slotX.toFixed(1)}" y="0" width="${slotW.toFixed(1)}" height="${Math.max(0, barTop).toFixed(1)}" fill="transparent"/>`;
     });
     return `<svg class="tf-hero-svg" viewBox="0 0 ${HERO_W} ${HERO_H}" preserveAspectRatio="none" style="height:${HERO_H}px">
-      <line x1="0" y1="${baseY}" x2="${HERO_W}" y2="${baseY}" stroke="var(--paper-edge)" stroke-width="1"/>${bars}${labels}${colHits}${segHits}</svg>`;
+      <line x1="0" y1="${baseY}" x2="${HERO_W}" y2="${baseY}" stroke="var(--paper-edge)" stroke-width="1"/>${bars}${labels}${topHits}${sliceHits}</svg>`;
   }
-  // scrubber strip: overview of ALL buckets with a grab-to-pan / drag-edge-to-resize window.
+  // scrubber strip — handles drawn at local x=0 and positioned via transform so
+  // they can be repositioned in place during a drag (no SVG rebuild).
   const BR_W = 760, BR_H = 36;
   function brushSvg(buckets, max, z) {
     const col = _C(), n = buckets.length || 1, sw = BR_W / n;
@@ -220,130 +266,132 @@
       bars += `<rect x="${(i * sw + 1).toFixed(1)}" y="${(BR_H - h).toFixed(1)}" width="${Math.max(1, sw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="1" fill="${fill}" fill-opacity="${b.total ? 0.7 : 1}"/>`;
     });
     const x0 = (z.i0 / n) * BR_W, x1 = ((z.i1 + 1) / n) * BR_W;
-    // dim the regions OUTSIDE the window so the scrubber reads as a lens
-    const shade = `<rect x="0" y="0" width="${x0.toFixed(1)}" height="${BR_H}" fill="var(--paper)" fill-opacity=".62" pointer-events="none"/>
-      <rect x="${x1.toFixed(1)}" y="0" width="${(BR_W - x1).toFixed(1)}" height="${BR_H}" fill="var(--paper)" fill-opacity=".62" pointer-events="none"/>`;
-    const gripDots = (gx) => [0.32, 0.5, 0.68].map(f =>
-      `<circle cx="${gx}" cy="${(BR_H * f).toFixed(1)}" r="1.1" fill="var(--paper)"/>`).join("");
-    const win = `<rect class="tf-brush-win" x="${x0.toFixed(1)}" y="0" width="${(x1 - x0).toFixed(1)}" height="${BR_H}" fill="rgba(82,183,136,.10)" stroke="var(--ink)" stroke-width="1.3"/>
-      <g class="tf-brush-h" data-edge="0" style="cursor:ew-resize"><rect x="${(x0 - 4).toFixed(1)}" y="0" width="8" height="${BR_H}" rx="2" fill="var(--ink)"/>${gripDots(x0)}</g>
-      <g class="tf-brush-h" data-edge="1" style="cursor:ew-resize"><rect x="${(x1 - 4).toFixed(1)}" y="0" width="8" height="${BR_H}" rx="2" fill="var(--ink)"/>${gripDots(x1)}</g>`;
-    return `<svg class="tf-brush-svg" viewBox="0 0 ${BR_W} ${BR_H}" preserveAspectRatio="none" style="height:${BR_H}px;width:100%">${bars}${shade}${win}</svg>`;
+    const shade = `<rect class="tf-brush-shade-l" x="0" y="0" width="${x0.toFixed(1)}" height="${BR_H}" fill="var(--paper)" fill-opacity=".6" pointer-events="none"/>
+      <rect class="tf-brush-shade-r" x="${x1.toFixed(1)}" y="0" width="${(BR_W - x1).toFixed(1)}" height="${BR_H}" fill="var(--paper)" fill-opacity=".6" pointer-events="none"/>`;
+    const gripDots = [0.32, 0.5, 0.68].map(f => `<circle cx="0" cy="${(BR_H * f).toFixed(1)}" r="1.1" fill="var(--paper)"/>`).join("");
+    const handle = (edge, gx) => `<g class="tf-brush-h" data-edge="${edge}" transform="translate(${gx.toFixed(1)},0)" style="cursor:ew-resize"><rect x="-4.5" y="0" width="9" height="${BR_H}" rx="2" fill="var(--ink)"/>${gripDots}</g>`;
+    const win = `<rect class="tf-brush-win" x="${x0.toFixed(1)}" y="0" width="${(x1 - x0).toFixed(1)}" height="${BR_H}" fill="rgba(82,183,136,.12)" stroke="var(--ink)" stroke-width="1.3" style="cursor:grab"/>`;
+    return `<svg class="tf-brush-svg" viewBox="0 0 ${BR_W} ${BR_H}" preserveAspectRatio="none" style="height:${BR_H}px;width:100%">${bars}${shade}${win}${handle("0", x0)}${handle("1", x1)}</svg>`;
   }
   function _heroWindow(total) {
     const n = total;
     if (!_zoom) return { i0: 0, i1: n - 1 };
     return { i0: Math.max(0, Math.min(_zoom.i0, n - 1)), i1: Math.max(0, Math.min(_zoom.i1, n - 1)) };
   }
+  // Build the shell once; main chart + brush are then updated in place.
   function heroChart(host, intro) {
     const h = DATA.hero || { buckets: [], max: 0 };
     if (!h.buckets.length || h.max === 0) { host.innerHTML = `<div class="tf-empty">No traffic in this range yet.</div>`; return; }
     const z = _heroWindow(h.buckets.length);
+    host.innerHTML =
+      `<div class="tf-hero-main"></div>
+       <div class="tf-brush-wrap"><div class="tf-brush-cap"></div>${brushSvg(h.buckets, h.max, z)}</div>`;
+    _renderHeroMain(host, intro);
+    _wireBrush(host, h.buckets);
+  }
+  // Re-render ONLY the main chart + cap (cheap; safe to call every drag frame).
+  function _renderHeroMain(host, intro) {
+    const h = DATA.hero || { buckets: [] };
+    const z = _heroWindow(h.buckets.length);
     const slice = h.buckets.slice(z.i0, z.i1 + 1);
     const sliceMax = Math.max(1, ...slice.map(b => b.total));
-    const zoomed = z.i0 > 0 || z.i1 < h.buckets.length - 1;
-    host.innerHTML =
-      `<div class="tf-hero-main">${heroSvg(slice, sliceMax, z.i0)}</div>
-       <div class="tf-brush-wrap"><div class="tf-brush-cap">${zoomed ? `showing ${z.i0 + 1}–${z.i1 + 1} of ${h.buckets.length} · <button class="tf-brush-reset" id="tf-brush-reset">reset</button>` : `drag the scrubber to zoom · grab the middle to pan`}</div>${brushSvg(h.buckets, h.max, z)}</div>`;
-    _wireHeroMain(host.querySelector(".tf-hero-main"), h.buckets, intro);
-    _wireBrush(host.querySelector(".tf-brush-wrap"), h.buckets, z, () => heroChart(host, false));
-    const rs = host.querySelector("#tf-brush-reset");
-    if (rs) rs.addEventListener("click", () => { _zoom = null; heroChart(host, false); });
+    const main = host.querySelector(".tf-hero-main"); if (!main) return;
+    main.innerHTML = heroSvg(slice, sliceMax, z.i0);
+    _wireHeroMain(main, h.buckets, intro);
+    const cap = host.querySelector(".tf-brush-cap");
+    if (cap) {
+      const zoomed = z.i0 > 0 || z.i1 < h.buckets.length - 1;
+      cap.innerHTML = zoomed
+        ? `showing ${z.i0 + 1}–${z.i1 + 1} of ${h.buckets.length} · <button class="tf-brush-reset" id="tf-brush-reset">reset</button>`
+        : `drag the edge handles to zoom · grab the window to slide`;
+      const rs = cap.querySelector("#tf-brush-reset");
+      if (rs) rs.addEventListener("click", () => { _zoom = null; _renderHeroMain(host, false); _positionBrush(host, _heroWindow(h.buckets.length), h.buckets.length); });
+    }
   }
-  function _segDrill(b, st) {
-    if (!b || !b.total) return;
-    const stLabel = st === "n2" ? "2xx" : st === "n4" ? "4xx" : "5xx";
-    openRequestContainer({
-      sinceMs: b.t_ms, untilMs: b.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN] || 3600e3),
-      label: (b.label + (b.sub ? " " + b.sub : "")) + " · " + stLabel, status: stLabel,
-    });
+  // Reposition the brush window/handles/shades by mutating attributes only.
+  function _positionBrush(host, z, n) {
+    const svg = host.querySelector(".tf-brush-svg"); if (!svg) return;
+    const x0 = (z.i0 / n) * BR_W, x1 = ((z.i1 + 1) / n) * BR_W;
+    const win = svg.querySelector(".tf-brush-win"); if (win) { win.setAttribute("x", x0.toFixed(1)); win.setAttribute("width", Math.max(0, x1 - x0).toFixed(1)); }
+    const sl = svg.querySelector(".tf-brush-shade-l"); if (sl) sl.setAttribute("width", x0.toFixed(1));
+    const sr = svg.querySelector(".tf-brush-shade-r"); if (sr) { sr.setAttribute("x", x1.toFixed(1)); sr.setAttribute("width", Math.max(0, BR_W - x1).toFixed(1)); }
+    const h0 = svg.querySelector('.tf-brush-h[data-edge="0"]'); if (h0) h0.setAttribute("transform", `translate(${x0.toFixed(1)},0)`);
+    const h1 = svg.querySelector('.tf-brush-h[data-edge="1"]'); if (h1) h1.setAttribute("transform", `translate(${x1.toFixed(1)},0)`);
   }
   function _wireHeroMain(main, buckets, intro) {
     const svg = main.querySelector("svg"); if (!svg) return;
-    const dimOthers = (ai, st) => svg.querySelectorAll(".tf-blk").forEach(blk => {
-      const on = st == null || (+blk.getAttribute("data-i") === ai && blk.getAttribute("data-st") === st);
-      blk.style.opacity = (st == null) ? "1" : (on ? "1" : "0.22");
-    });
-    // per-status segment: hover highlights just that band, click drills that status
-    svg.querySelectorAll(".tf-seg").forEach(seg => {
-      const ai = +seg.getAttribute("data-i"), st = seg.getAttribute("data-st");
-      seg.style.cursor = "pointer";
-      seg.addEventListener("mousemove", (e) => {
+    const dur = DATA.bucket_ms || GRAN_MS[GRAN] || 3600e3;
+    // per-block SLICE: each block ≈ an equal share of the bar's requests.
+    // Hover shows the approx count; click opens that chronological chunk with
+    // its real time-span (robust to bursty traffic — never an empty slice).
+    svg.querySelectorAll(".tf-slice").forEach(sl => {
+      const ai = +sl.getAttribute("data-i"), k = +sl.getAttribute("data-k"), blocks = +sl.getAttribute("data-blocks");
+      sl.style.cursor = "pointer";
+      sl.addEventListener("mousemove", (e) => {
         const b = buckets[ai]; if (!b) return;
-        const cnt = st === "n2" ? b.n2 : st === "n4" ? b.n4 : b.n5;
-        const stL = st === "n2" ? "2xx" : st === "n4" ? "4xx" : "5xx";
-        tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}${b.sub ? " · " + esc(b.sub) : ""}</b><br>${stL}: ${fmtNum(cnt)} of ${fmtNum(b.total)} req<br><span style="opacity:.7">click → these requests</span>`);
-        dimOthers(ai, st);
+        const approx = Math.max(1, Math.round(b.total / blocks));
+        tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}${b.sub ? " · " + esc(b.sub) : ""}</b><br>slice ${k + 1} of ${blocks} · ≈${fmtNum(approx)} requests<br><span style="opacity:.7">click → this slice of requests</span>`);
+        svg.querySelectorAll(`.tf-blk[data-i="${ai}"]`).forEach(blk => { blk.style.opacity = (+blk.getAttribute("data-k") === k) ? "1" : "0.3"; });
       });
-      seg.addEventListener("mouseleave", () => { tip(false); dimOthers(null); });
-      seg.addEventListener("click", (e) => { e.stopPropagation(); _segDrill(buckets[ai], st); });
+      sl.addEventListener("mouseleave", () => { tip(false); svg.querySelectorAll(".tf-blk").forEach(blk => blk.style.opacity = "1"); });
+      sl.addEventListener("click", (e) => { e.stopPropagation(); _drillSlice(buckets[ai], k, blocks); });
     });
-    // whole-column hit (area above the bar): drills the entire bucket
+    // empty area above a bar → drill the whole bucket
     svg.querySelectorAll(".tf-bar").forEach(hrect => {
       const ai = +hrect.getAttribute("data-i");
       hrect.addEventListener("mousemove", (e) => {
         const b = buckets[ai]; if (!b) return;
         const errp = b.total ? Math.round(100 * (b.n4 + b.n5) / b.total) : 0;
-        tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}${b.sub ? " · " + esc(b.sub) : ""}</b><br>${fmtNum(b.total)} req · 2xx ${b.n2} · 4xx ${b.n4} · 5xx ${b.n5} · ${errp}% err<br><span style="opacity:.7">click → all requests · click a colour band for one status</span>`);
+        tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}${b.sub ? " · " + esc(b.sub) : ""}</b><br>${fmtNum(b.total)} req · 2xx ${b.n2} · 4xx ${b.n4} · 5xx ${b.n5} · ${errp}% err<br><span style="opacity:.7">click → all requests · click a block for a time slice</span>`);
       });
       hrect.addEventListener("mouseleave", () => tip(false));
       hrect.addEventListener("click", () => {
         const b = buckets[ai];
-        if (b && b.total) openRequestContainer({ sinceMs: b.t_ms, untilMs: b.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN] || 3600e3), label: b.label + (b.sub ? " " + b.sub : "") });
+        if (b && b.total) openRequestContainer({ sinceMs: b.t_ms, untilMs: b.t_ms + dur, label: b.label + (b.sub ? " " + b.sub : "") });
       });
     });
     if (intro && window.APIN && APIN.fx) svg.querySelectorAll(".tf-blk").forEach((r, k) => {
       try { r.animate([{ transform: "scaleY(0)", transformOrigin: "center bottom" }, { transform: "scaleY(1)", transformOrigin: "center bottom" }], { duration: 320, delay: Math.min(600, k * 4), easing: "cubic-bezier(.22,1,.36,1)", fill: "backwards" }); } catch (_) {}
     });
   }
-  // Real scrubber: grab the middle to PAN (keeps width), drag a handle to RESIZE.
-  function _wireBrush(wrap, buckets, z, rerender) {
-    const svg = wrap.querySelector(".tf-brush-svg"); if (!svg) return;
+  // Real scrubber: drag an edge handle to RESIZE, grab the window to PAN.
+  // Updates happen IN PLACE (main re-render + brush attr mutation) so the brush
+  // SVG stays attached and getBoundingClientRect keeps working mid-drag.
+  function _wireBrush(host, buckets) {
+    const svg = host.querySelector(".tf-brush-svg"); if (!svg) return;
     const n = buckets.length;
     const idxAt = (clientX) => {
       const r = svg.getBoundingClientRect();
       if (!r.width) return 0;
       return Math.max(0, Math.min(n - 1, Math.floor(((clientX - r.left) / r.width) * n)));
     };
-    let mode = null, grabIdx = 0, origI0 = z.i0, origI1 = z.i1;
+    const apply = () => { _renderHeroMain(host, false); _positionBrush(host, _heroWindow(n), n); };
+    let mode = null, grabIdx = 0, origI0 = 0, origI1 = n - 1;
     const onMove = (e) => {
       if (!mode) return;
-      const i = idxAt(e.clientX);
-      if (mode === "e0") { _zoom = { i0: Math.min(i, (_zoom || z).i1), i1: (_zoom || z).i1 }; }
-      else if (mode === "e1") { _zoom = { i0: (_zoom || z).i0, i1: Math.max(i, (_zoom || z).i0) }; }
-      else if (mode === "pan") {
-        const w = origI1 - origI0 + 1;
-        let ni0 = origI0 + (i - grabIdx);
-        ni0 = Math.max(0, Math.min(n - w, ni0));
-        _zoom = { i0: ni0, i1: ni0 + w - 1 };
-      }
-      rerender();
+      const i = idxAt(e.clientX), cur = _zoom || { i0: 0, i1: n - 1 };
+      if (mode === "e0") _zoom = { i0: Math.min(i, cur.i1), i1: cur.i1 };
+      else if (mode === "e1") _zoom = { i0: cur.i0, i1: Math.max(i, cur.i0) };
+      else if (mode === "pan") { const w = origI1 - origI0 + 1; const ni0 = Math.max(0, Math.min(n - w, origI0 + (i - grabIdx))); _zoom = { i0: ni0, i1: ni0 + w - 1 }; }
+      apply();
     };
-    const onUp = () => {
-      mode = null;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      document.body.style.userSelect = "";
-    };
+    const onUp = () => { mode = null; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); document.body.style.userSelect = ""; const w = svg.querySelector(".tf-brush-win"); if (w) w.style.cursor = "grab"; };
     svg.addEventListener("mousedown", (e) => {
       const edge = e.target.closest(".tf-brush-h");
-      const cur = _zoom || z;
-      origI0 = cur.i0; origI1 = cur.i1;
+      const cur = _heroWindow(n); origI0 = cur.i0; origI1 = cur.i1;
       if (edge) { mode = edge.getAttribute("data-edge") === "0" ? "e0" : "e1"; _zoom = { i0: cur.i0, i1: cur.i1 }; }
       else {
-        // grab inside (or anywhere on) the strip → pan from this point
         mode = "pan"; grabIdx = idxAt(e.clientX);
-        // if click landed outside the current window, recenter window on it first
+        // grab outside the window → recenter on the cursor first, then pan
         if (grabIdx < cur.i0 || grabIdx > cur.i1) {
-          const w = cur.i1 - cur.i0 + 1;
-          let ni0 = Math.max(0, Math.min(n - w, grabIdx - Math.floor(w / 2)));
-          origI0 = ni0; origI1 = ni0 + w - 1; grabIdx = ni0 + Math.floor(w / 2);
-          _zoom = { i0: origI0, i1: origI1 };
+          const w = cur.i1 - cur.i0 + 1, ni0 = Math.max(0, Math.min(n - w, grabIdx - Math.floor(w / 2)));
+          origI0 = ni0; origI1 = ni0 + w - 1; grabIdx = ni0 + Math.floor(w / 2); _zoom = { i0: origI0, i1: origI1 };
         }
+        const win = svg.querySelector(".tf-brush-win"); if (win) win.style.cursor = "grabbing";
       }
       document.body.style.userSelect = "none";
       window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
-      rerender();
+      e.preventDefault(); apply();
     });
   }
   function renderHero(intro) {
@@ -414,38 +462,140 @@
     }
     return { cells, max, ncols: cells.reduce((m, x) => Math.max(m, x.c), 0) + 1 };
   }
+  // ── colour ramps (single-hue sequential for volume, ordered for error) ──
+  const _MIX = (a, b, t) => `rgb(${Math.round(a[0] + (b[0] - a[0]) * t)},${Math.round(a[1] + (b[1] - a[1]) * t)},${Math.round(a[2] + (b[2] - a[2]) * t)})`;
+  const _VOL_PALE = [216, 238, 226], _VOL_ACC = [82, 183, 136], _VOL_DEEP = [21, 56, 40];   // pale → accent → forest-ink
+  const _ERR_OK = [47, 111, 62], _ERR_AM = [201, 138, 43], _ERR_DA = [179, 64, 47];          // ok → amber → danger
+  function _volColor(t) { t = Math.max(0, Math.min(1, t)); return t < 0.55 ? _MIX(_VOL_PALE, _VOL_ACC, t / 0.55) : _MIX(_VOL_ACC, _VOL_DEEP, (t - 0.55) / 0.45); }
+  function _errColor(r) { r = Math.max(0, Math.min(1, r)); return r < 0.5 ? _MIX(_ERR_OK, _ERR_AM, r / 0.5) : _MIX(_ERR_AM, _ERR_DA, (r - 0.5) / 0.5); }
+  const _calAvg = () => { const a = ((DATA.calendar || {}).days || []).filter(d => d.n > 0); return a.length ? a.reduce((s, d) => s + d.n, 0) / a.length : 0; };
+
   function calSvg(days, weeks, mode, cell) {
-    const col = _C(), g = _calGrid(days, weeks);
-    cell = cell || 13; const gap = 3, ox = 22, oy = 16;
+    const g = _calGrid(days, weeks);
+    cell = cell || 18; const gap = 4, ox = 26, oy = 18;
     const W = ox + g.ncols * (cell + gap), H = oy + 7 * (cell + gap);
-    let rects = "", monLbls = "";
+    const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const todayKey = (() => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; })();
-    let lastMon = -1;
+    let cells = "", monLbls = "", lastMon = -1;
+    let hits = "";
     g.cells.forEach(c => {
-      const x = ox + c.c * (cell + gap), y = oy + c.r * (cell + gap);
-      let fill = "rgba(120,110,90,.10)", op = 1;
+      const x = ox + c.c * (cell + gap), y = oy + c.r * (cell + gap), live = c.key === todayKey;
+      const liveRing = live ? `<rect class="tf-cal-livering" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="4" fill="none" stroke="var(--ink)" stroke-width="1.5" pointer-events="none"/>` : "";
       if (c.n > 0) {
-        if (mode === "error") { const er = c.e / c.n; fill = er === 0 ? col.ok : er < 0.1 ? col.amber : col.danger; }
-        else { fill = col.accent; op = 0.2 + 0.8 * Math.min(1, c.n / (g.max || 1)); }
+        let fill, op = 1, glow = 0;
+        if (mode === "error") { const rate = c.e / c.n, cn = Math.min(1, c.n / (g.max || 1)); fill = _errColor(rate); op = 0.34 + 0.66 * cn; glow = rate > 0.08 ? (0.35 + 0.65 * cn) : 0; }
+        else { const t = Math.pow(c.n / (g.max || 1), 0.7); fill = _volColor(t); glow = t > 0.6 ? (t - 0.6) / 0.4 : 0; }
+        const hot = glow > 0.04;
+        cells += `<rect class="tf-cal-cell${hot ? " tf-cal-hot" : ""}${live ? " tf-cal-live" : ""}" data-key="${c.key}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="4" fill="${fill}" fill-opacity="${op.toFixed(2)}" style="--gc:${fill}${hot ? `;--g:${(1.5 + glow * 6).toFixed(1)}px` : ""}" pointer-events="none"/>`
+          + `<rect class="tf-cal-sheen" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="4" fill="url(#tfSheen)" pointer-events="none"/>` + liveRing;
+      } else {
+        cells += `<rect class="tf-cal-cell tf-cal-empty${live ? " tf-cal-live" : ""}" data-key="${c.key}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="4" fill="var(--paper-deep,#e9e2d1)" fill-opacity="0.45" stroke="rgba(26,22,18,0.07)" stroke-width="1" pointer-events="none"/>`
+          + `<circle cx="${(x + cell / 2).toFixed(1)}" cy="${(y + cell / 2).toFixed(1)}" r="${Math.max(1, cell * 0.08).toFixed(1)}" fill="rgba(26,22,18,0.13)" pointer-events="none"/>` + liveRing;
       }
-      rects += `<rect class="tf-cal-cell" data-key="${c.key}" data-ms="${c.dt}" data-n="${c.n}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="3" fill="${fill}" fill-opacity="${op.toFixed(2)}"${c.key === todayKey ? ' stroke="var(--ink)" stroke-width="1.3"' : ""}><title>${esc(c.label)} · ${c.n} req · ${c.n ? Math.round(100 * c.e / c.n) : 0}% err</title></rect>`;
-      if (c.r === 0) { const mo = new Date(c.dt).getMonth(); if (mo !== lastMon) { lastMon = mo; monLbls += `<text x="${x}" y="11" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][mo]}</text>`; } }
+      // topmost transparent hit target — guarantees hover/click land here
+      hits += `<rect class="tf-cal-hit" data-key="${c.key}" data-ms="${c.dt}" data-n="${c.n}" data-e="${c.e}" data-label="${esc(c.label)}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="4" fill="transparent" style="cursor:${c.n ? "pointer" : "default"}"/>`;
+      if (c.r === 0) { const mo = new Date(c.dt).getMonth(); if (mo !== lastMon) { lastMon = mo; monLbls += `<text x="${x}" y="12" style="font:9px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${MON[mo]}</text>`; } }
     });
-    const wd = ["", "Mon", "", "Wed", "", "Fri", ""].map((d, r) => d ? `<text x="0" y="${oy + r * (cell + gap) + cell - 2}" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${d}</text>` : "").join("");
-    return `<svg class="tf-cal-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMinYMid meet" style="max-height:${H}px">${monLbls}${wd}${rects}</svg>`;
+    const wd = ["", "Mon", "", "Wed", "", "Fri", ""].map((d, r) => d ? `<text x="0" y="${oy + r * (cell + gap) + cell - 3}" style="font:8.5px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${d}</text>` : "").join("");
+    const defs = `<defs><linearGradient id="tfSheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.24"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0.05"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient></defs>`;
+    return `<svg class="tf-cal-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="max-width:100%;max-height:${H + 4}px;overflow:visible">${defs}${monLbls}${wd}${cells}${hits}</svg>`;
   }
   function _wireCal(host) {
-    host.querySelectorAll(".tf-cal-cell").forEach(c => {
-      c.addEventListener("mousemove", (e) => { const t = c.querySelector("title"); tip(true, e.clientX, e.clientY, esc(t ? t.textContent : "")); });
-      c.addEventListener("mouseleave", () => tip(false));
-      c.addEventListener("click", () => { const ms = +c.getAttribute("data-ms"); const n = +c.getAttribute("data-n"); if (ms && n) openRequestContainer({ sinceMs: ms, untilMs: ms + 86400e3, label: new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" }) }); });
+    host.querySelectorAll(".tf-cal-hit").forEach(h => {
+      const key = h.getAttribute("data-key");
+      const vis = host.querySelector('.tf-cal-cell[data-key="' + key + '"]');
+      h.addEventListener("mousemove", (e) => {
+        const n = +h.getAttribute("data-n"), er = +h.getAttribute("data-e"), label = h.getAttribute("data-label");
+        if (!n) { tip(true, e.clientX, e.clientY, `<b>${esc(label)}</b><br><span style="opacity:.7">no traffic</span>`); return; }
+        const errp = Math.round(100 * er / n), avg = _calAvg();
+        const cmp = avg ? `<br>${(n / avg) >= 1 ? (n / avg).toFixed(1) + "× your daily average" : Math.round(100 * n / avg) + "% of your daily average"}` : "";
+        tip(true, e.clientX, e.clientY, `<b>${esc(label)}</b><br>${fmtNum(n)} requests · ${errp}% errors${cmp}`);
+        if (vis && !vis.classList.contains("tf-cal-empty")) vis.classList.add("tf-cal-cell-hover");
+      });
+      h.addEventListener("mouseleave", () => { tip(false); if (vis) vis.classList.remove("tf-cal-cell-hover"); });
+      h.addEventListener("click", () => { const ms = +h.getAttribute("data-ms"), n = +h.getAttribute("data-n"); if (ms && n) openRequestContainer({ sinceMs: ms, untilMs: ms + 86400e3, label: new Date(ms).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) }); });
     });
   }
-  function renderCalendar(intro, mode, weeks, cell) {
+  // ── interactive phrase engine — many data-driven, personal variations ──
+  function _calInsights() {
+    const C = DATA.calendar || { days: [] }, S = DATA.stats || {}, CL = DATA.clock || {};
+    const days = (C.days || []).slice().sort((a, b) => a.date < b.date ? -1 : 1);
+    const active = days.filter(d => d.n > 0);
+    if (!active.length) return ["Fresh key — your traffic map starts here."];
+    const WDl = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const fmtD = (s) => new Date(s + "T00:00:00").toLocaleDateString([], { month: "short", day: "numeric" });
+    const wdOf = (s) => new Date(s + "T00:00:00").getDay();
+    const todayKey = (() => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; })();
+    const today = days.find(d => d.date === todayKey) || { date: todayKey, n: 0, e: 0 };
+    const total = active.reduce((s, d) => s + d.n, 0), avg = total / active.length;
+    const busiest = active.reduce((m, d) => d.n > m.n ? d : m, active[0]);
+    const out = [], push = (sc, t) => out.push({ sc, t });
+    let streak = 0; { const t0 = new Date(); t0.setHours(0, 0, 0, 0); for (let i = 0; ; i++) { const dt = new Date(t0); dt.setDate(dt.getDate() - i); const k = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`; const r = days.find(d => d.date === k); if (r && r.n > 0) streak++; else break; } }
+    // today
+    const tWd = wdOf(today.date), sameWd = active.filter(d => wdOf(d.date) === tWd);
+    if (today.n > 0) {
+      const errp = Math.round(100 * today.e / today.n);
+      if (sameWd.length >= 2 && today.n >= Math.max(...sameWd.map(d => d.n))) push(96, `${fmtNum(today.n)} requests today — your busiest ${WDl[tWd]} yet.`);
+      else if (today.n >= 2 * avg) push(90, `Today's already ${(today.n / avg).toFixed(1)}× a typical day — ${fmtNum(today.n)} requests.`);
+      else if (today.n < 0.5 * avg) push(58, `Quiet so far today — just ${fmtNum(today.n)} request${today.n === 1 ? "" : "s"}.`);
+      else push(54, `${fmtNum(today.n)} requests today · ${errp}% errors.`);
+    } else push(38, `No traffic yet today — the grid's waiting.`);
+    // streak
+    if (streak >= 3) push(82, `${streak}-day active streak${streak >= active.length ? " — your longest yet" : ""}.`);
+    else if (streak === 2) push(46, `Two days running.`);
+    // peak
+    const daysAgo = Math.round((Date.now() - new Date(busiest.date + "T00:00:00").getTime()) / 864e5);
+    if (daysAgo <= 2) push(86, `New high-water mark: ${fmtNum(busiest.n)} requests on ${fmtD(busiest.date)}.`);
+    else push(73, `Last peak was ${daysAgo} days ago — ${fmtD(busiest.date)} · ${fmtNum(busiest.n)} requests.`);
+    // weekday dominance + weekend share
+    const wt = [0, 0, 0, 0, 0, 0, 0]; active.forEach(d => wt[wdOf(d.date)] += d.n);
+    const dom = wt.indexOf(Math.max(...wt)), domPct = Math.round(100 * wt[dom] / total);
+    if (domPct >= 35) push(67, `${WDl[dom]}s carry ${domPct}% of your traffic.`);
+    const wkndPct = Math.round(100 * (wt[0] + wt[6]) / total);
+    if (wkndPct <= 8) push(57, `Weekends stay quiet — ${wkndPct}% of all volume.`);
+    else if (wkndPct >= 45) push(63, `Weekend-heavy — ${wkndPct}% lands on Sat/Sun.`);
+    // week over week
+    const wsum = (off) => { let s = 0; const t0 = new Date(); t0.setHours(0, 0, 0, 0); for (let i = 0; i < 7; i++) { const dt = new Date(t0); dt.setDate(dt.getDate() - (off * 7 + i)); const k = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`; const r = days.find(d => d.date === k); if (r) s += r.n; } return s; };
+    const w0 = wsum(0), w1 = wsum(1);
+    if (w1 > 0) { const ch = Math.round(100 * (w0 - w1) / w1); if (ch >= 15) push(71, `This week is up ${ch}% on last.`); else if (ch <= -15) push(65, `This week is down ${Math.abs(ch)}% on last.`); }
+    // errors
+    const totErr = active.reduce((s, d) => s + d.e, 0);
+    if (totErr === 0 && active.length >= 3) push(75, `Clean sheet — zero errors across ${active.length} active days.`);
+    const errDay = active.slice().sort((a, b) => (b.e / (b.n || 1)) - (a.e / (a.n || 1)))[0];
+    if (errDay && errDay.n >= 10 && errDay.e / errDay.n >= 0.2) push(77, `Error spike on ${fmtD(errDay.date)} — ${Math.round(100 * errDay.e / errDay.n)}% of ${fmtNum(errDay.n)} requests.`);
+    // clock rhythm
+    if (CL.busiest_h != null) { const h = CL.busiest_h, band = (h >= 22 || h < 6) ? `Night owl — busiest around ${fmt12(h)}` : h < 12 ? `Morning rush — peak around ${fmt12(h)}` : h < 17 ? `Afternoon peak around ${fmt12(h)}` : `Evening peak around ${fmt12(h)}`; push(61, band + "."); }
+    // milestone + breadth
+    if (total >= 1000) push(49, `${(total / 1000).toFixed(total >= 10000 ? 0 : 1)}k+ requests mapped here.`);
+    push(34, `${active.length} active day${active.length > 1 ? "s" : ""} · ${fmtNum(total)} requests in view.`);
+    out.sort((a, b) => b.sc - a.sc);
+    return out.map(o => o.t);
+  }
+  function _renderCalPhrase() {
+    const ph = $("tf-cal-phrase"); if (!ph) return;
+    const list = _calInsights(); if (!list.length) { ph.innerHTML = ""; return; }
+    const idx = ((_calPhraseIdx % list.length) + list.length) % list.length;
+    ph.innerHTML = `<span class="tf-cal-phrase-txt">${esc(list[idx])}</span>` + (list.length > 1 ? `<svg class="tf-cal-phrase-cyc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><use href="#i-refresh"/></svg>` : "");
+    ph.dataset.count = list.length;
+  }
+  function renderCalendar(intro, modeOverride, weeks, cell) {
     const host = $("tf-cal-body"); if (!host || !DATA) return;
-    host.innerHTML = calSvg((DATA.calendar || {}).days, weeks || 18, mode || "volume", cell);
+    const mode = modeOverride || _calMode;
+    const swatch = (t) => `<i style="background:${mode === "error" ? _errColor(t) : _volColor(t)}"></i>`;
+    host.innerHTML =
+      `<div class="tf-cal-phrase" id="tf-cal-phrase" role="button" tabindex="0" aria-label="Cycle insight"></div>
+       <div class="tf-cal-grid">${calSvg((DATA.calendar || {}).days, weeks || 18, mode, cell)}</div>
+       <div class="tf-cal-foot">
+         <span class="tf-cal-legend">less ${[0.06, 0.3, 0.55, 0.8, 1].map(swatch).join("")} more</span>
+         <div class="ov-range" id="tf-cal-mode"><button data-m="volume"${mode === "volume" ? ' aria-pressed="true"' : ""}>volume</button><button data-m="error"${mode === "error" ? ' aria-pressed="true"' : ""}>error rate</button></div>
+       </div>`;
     _wireCal(host);
-    if (intro && window.APIN && APIN.fx) host.querySelectorAll(".tf-cal-cell").forEach(c => { try { c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, delay: Math.min(640, (+c.getAttribute("data-ms")) % 640), easing: "ease", fill: "backwards" }); } catch (_) {} });
+    _renderCalPhrase();
+    const ph = $("tf-cal-phrase");
+    if (ph) ph.addEventListener("click", () => { _calPhraseIdx++; _renderCalPhrase(); });
+    host.querySelectorAll("#tf-cal-mode button").forEach(b => b.addEventListener("click", () => { if (b.getAttribute("data-m") === _calMode) return; _calMode = b.getAttribute("data-m"); renderCalendar(false); }));
+    if (intro && window.APIN && APIN.fx) host.querySelectorAll(".tf-cal-cell").forEach((c, k) => { try { c.animate([{ opacity: 0, transform: "scale(.6)" }, { opacity: 1, transform: "scale(1)" }], { duration: 280, delay: Math.min(700, k * 5), easing: "cubic-bezier(.22,1,.36,1)", fill: "backwards" }); } catch (_) {} });
+    if (_calSweep) { _calSweep = false; const lc = host.querySelector(".tf-cal-live:not(.tf-cal-empty)") || host.querySelector(".tf-cal-live"); if (lc) { lc.classList.add("tf-cal-sweep"); setTimeout(() => lc.classList.remove("tf-cal-sweep"), 760); } }
   }
 
   // ════════════════════ ④ HIVE — Method × Status honeycomb ════════════════
@@ -455,71 +605,188 @@
     return p + "Z";
   }
   const _kc = (n) => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
-  function hiveSvg(matrix) {
+  // ── Connected Adaptive Hive ────────────────────────────────────────────
+  // Each METHOD is a colony: a circular core node (◉ total) connected to its
+  // 2xx/4xx/5xx status cells in a small fan. Encodings:
+  //   hex size  = request volume        color   = status category
+  //   glow      = live activity         border  = error severity / anomaly
+  //   texture   = latency class (per-cell stripe density, per-method hatch angle)
+  // Zero cells are rendered as faint DORMANT hexes (asleep, not missing).
+  const _STAT = [{ k: "n2", sb: "2", lbl: "2xx", cv: "ok" }, { k: "n4", sb: "4", lbl: "4xx", cv: "amber" }, { k: "n5", sb: "5", lbl: "5xx", cv: "danger" }];
+  function _hatchAngle(method) {            // stable per-method hatch angle (colony identity)
+    let h = 0; const s = String(method || "?"); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return 20 + (h % 5) * 30;               // 20,50,80,110,140°
+  }
+  function _latBand(ms) { return ms == null ? null : ms < 100 ? "fast" : ms < 500 ? "med" : "slow"; }
+  function _cellLatBand(cell) {             // dominant latency band of a cell from its bands
+    if (!cell) return null;
+    if (cell.lat != null) return _latBand(cell.lat);
+    const b = { fast: cell.lf || 0, med: cell.lm || 0, slow: cell.ls || 0 };
+    return Object.keys(b).sort((x, y) => b[y] - b[x])[0];
+  }
+  // latency texture: stripe spacing + weight per band; fast reads dense (fine),
+  // slow reads boldly striped. Hatch angle is the colony's shared identity.
+  const _BAND_TEX = { fast: { sp: 3, w: 0.8, o: 0.16 }, med: { sp: 5, w: 1.4, o: 0.34 }, slow: { sp: 8, w: 2.2, o: 0.52 } };
+  function _hiveDefs(matrix) {
+    let defs = "";
+    const seen = {};
+    matrix.forEach(m => {
+      const ang = _hatchAngle(m.method);
+      ["fast", "med", "slow"].forEach(band => {
+        const id = `tfhx-${_methSafe(m.method)}-${band}`; if (seen[id]) return; seen[id] = 1;
+        const t = _BAND_TEX[band];
+        defs += `<pattern id="${id}" patternUnits="userSpaceOnUse" width="${t.sp}" height="${t.sp}" patternTransform="rotate(${ang})">`
+          + `<line x1="0" y1="0" x2="0" y2="${t.sp}" stroke="#fff" stroke-width="${t.w}" stroke-opacity="${t.o}"/></pattern>`;
+      });
+    });
+    return `<defs>${defs}</defs>`;
+  }
+  const _methSafe = (m) => String(m || "x").replace(/[^A-Za-z0-9]/g, "");
+  function _methHealth(m) {
+    const t = m.total || 0, err = (m.n4 || 0) + (m.n5 || 0);
+    const succ = t ? Math.round(100 * (m.n2 || 0) / t) : 0;
+    const errPct = t ? Math.round(100 * err / t) : 0;
+    let state = "stable";
+    if (t >= 3) { if (m.n5 > 0 && errPct >= 30) state = "critical"; else if (errPct >= 20) state = "critical"; else if (errPct >= 5) state = "degraded"; }
+    if (succ === 0 && t >= 3) state = "critical";
+    return { succ, errPct, state, latBand: _latBand(m.lat_avg), lat: m.lat_avg };
+  }
+  function hiveColonySvg(matrix, opts) {
+    opts = opts || {}; const EXP = !!opts.expanded;
     const col = _C();
-    const cols = [{ k: "n2", lbl: "2xx", c: col.ok }, { k: "n4", lbl: "4xx", c: col.amber }, { k: "n5", lbl: "5xx", c: col.danger }];
-    const rows = matrix.filter(m => m.total > 0);
-    if (!rows.length) return `<div class="tf-empty">No requests to map yet.</div>`;
+    const rows = (matrix || []).filter(m => m.total > 0);
+    if (!rows.length) return `<div class="tf-empty">No requests to map yet — colonies emerge with traffic.</div>`;
+    const cv = { ok: col.ok, amber: col.amber, danger: col.danger };
     const allMax = Math.max(1, ...rows.flatMap(m => [m.n2, m.n4, m.n5]));
     const methodMax = Math.max(1, ...rows.map(m => m.total));
-    const stTot = { n2: 0, n4: 0, n5: 0 };
-    rows.forEach(m => { stTot.n2 += m.n2; stTot.n4 += m.n4; stTot.n5 += m.n5; });
-    const rH = 64, hexR = 26, ox = 74, oy = 46, colW = 74;
-    const railX = ox + cols.length * colW + 16, railW = 86;
-    const W = railX + railW + 8, H = oy + rows.length * rH + 20;
-    let head = "", body = "";
-    // column headers (status label + column total)
-    cols.forEach((c, ci) => {
-      const cxh = ox + ci * colW;
-      head += `<text x="${cxh}" y="20" text-anchor="middle" style="font:600 10px 'JetBrains Mono',monospace;fill:${c.c}">${c.lbl}</text>
-        <text x="${cxh}" y="33" text-anchor="middle" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${_kc(stTot[c.k])}</text>`;
-    });
-    head += `<text x="${railX + railW / 2}" y="20" text-anchor="middle" style="font:600 9px 'JetBrains Mono',monospace;fill:var(--ink-soft)">method total</text>`;
+    const busiest = rows[0] && rows[0].method;
+    const G = EXP
+      ? { rowH: 116, coreX: 104, R: 104, ang: 24, crMax: 30, crMin: 15, maxR: 33, minR: 11, dormR: 8, lblX: 30, W: 360 }
+      : { rowH: 80, coreX: 70, R: 66, ang: 19, crMax: 19, crMin: 10, maxR: 22, minR: 9, dormR: 6.5, lblX: 8, W: 250 };
+    const oy = EXP ? 30 : 24;
+    const H = oy + rows.length * G.rowH + 22;
+    const angs = { "2": -G.ang * Math.PI / 180, "4": 0, "5": G.ang * Math.PI / 180 };
+    let body = "";
     rows.forEach((m, ri) => {
-      const cy = oy + ri * rH + hexR, off = (ri % 2 ? 14 : 0);
-      body += `<text x="${ox - 30}" y="${cy + 4}" text-anchor="end" style="font:600 11px 'JetBrains Mono',monospace;fill:var(--ink)">${esc(m.method)}</text>`;
-      cols.forEach((c, ci) => {
-        const v = m[c.k] || 0, cx = ox + ci * colW + off;
-        const r = v > 0 ? Math.max(9, hexR * Math.sqrt(v / allMax)) : 5;
-        const fill = v > 0 ? c.c : "rgba(120,110,90,.08)";
-        body += `<path class="tf-hex" data-m="${esc(m.method)}" data-s="${c.lbl}" data-v="${v}" d="${_hexPath(cx, cy, r)}" fill="${fill}" fill-opacity="${v > 0 ? 0.85 : 1}" stroke="var(--ink)" stroke-width="${v > 0 ? 0.9 : 0.5}" stroke-opacity="${v > 0 ? 0.5 : 0.25}"/>`;
-        if (v > 0) {
+      const cy = oy + ri * G.rowH + G.rowH / 2 - 6;
+      const cr = Math.max(G.crMin, G.crMax * Math.sqrt((m.total || 0) / methodMax));
+      const ang = _hatchAngle(m.method);
+      const hl = _methHealth(m);
+      let conns = "", cells = "";
+      _STAT.forEach(st => {
+        const v = m[st.k] || 0;
+        const cellX = G.coreX + G.R * Math.cos(angs[st.sb]);
+        const cellY = cy + G.R * Math.sin(angs[st.sb]);
+        const dormant = v === 0;
+        const r = dormant ? G.dormR : Math.max(G.minR, G.maxR * Math.sqrt(v / allMax));
+        const cell = (m.cells && m.cells[st.sb]) || null;
+        const band = _cellLatBand(cell);
+        // connector core → cell (opacity ∝ share); dormant = faint dotted
+        const share = m.total ? v / m.total : 0;
+        const mx = (G.coreX + cellX) / 2, my = (cy + cellY) / 2 - 6;
+        conns += `<path class="tf-hive-conn${dormant ? " tf-hive-conn-dorm" : ""}" d="M ${G.coreX.toFixed(1)} ${cy.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${cellX.toFixed(1)} ${cellY.toFixed(1)}" fill="none" stroke="${dormant ? "var(--ink-mute)" : cv[st.cv]}" stroke-width="${dormant ? 1 : (1 + 2.4 * share).toFixed(2)}" stroke-opacity="${dormant ? 0.18 : (0.25 + 0.5 * share).toFixed(2)}"${dormant ? ' stroke-dasharray="2 3"' : ""}/>`;
+        if (dormant) {
+          cells += `<g class="tf-hive-cellg tf-hive-dormant"><path d="${_hexPath(cellX, cellY, r)}" fill="rgba(120,110,90,.05)" stroke="var(--ink-mute)" stroke-width="0.7" stroke-opacity="0.3" stroke-dasharray="1.5 2.5"/><circle cx="${cellX.toFixed(1)}" cy="${cellY.toFixed(1)}" r="1" fill="var(--ink-mute)" fill-opacity="0.3"/></g>`;
+        } else {
+          const errShare = (st.sb === "4" || st.sb === "5") ? share : 0;
+          const sw = (st.sb === "2" ? 0.8 : 1 + (st.sb === "5" ? 3.4 : 2.4) * errShare).toFixed(2);
           const pctM = m.total ? Math.round(100 * v / m.total) : 0;
-          body += `<text x="${cx}" y="${cy + (r > 16 ? -1 : 3)}" text-anchor="middle" pointer-events="none" style="font:600 9.5px 'JetBrains Mono',monospace;fill:var(--paper)">${_kc(v)}</text>`;
-          if (r > 16) body += `<text x="${cx}" y="${cy + 10}" text-anchor="middle" pointer-events="none" style="font:7.5px 'JetBrains Mono',monospace;fill:var(--paper);fill-opacity:.88">${pctM}%</text>`;
+          const lblBig = r > 15;
+          cells += `<g class="tf-hive-cellg" style="--gc:${cv[st.cv]}">`
+            + `<path class="tf-hive-cell-base" d="${_hexPath(cellX, cellY, r)}" fill="${cv[st.cv]}" fill-opacity="0.9" stroke="${st.sb === "2" ? "var(--ink)" : cv[st.cv]}" stroke-width="${sw}" stroke-opacity="${st.sb === "2" ? 0.45 : 0.95}"/>`
+            + (band ? `<path d="${_hexPath(cellX, cellY, r)}" fill="url(#tfhx-${_methSafe(m.method)}-${band})" pointer-events="none"/>` : "")
+            + `<text x="${cellX.toFixed(1)}" y="${(cellY + (lblBig ? -1 : 3)).toFixed(1)}" text-anchor="middle" pointer-events="none" style="font:600 ${lblBig ? 9.5 : 8}px 'JetBrains Mono',monospace;fill:#fff">${_kc(v)}</text>`
+            + (lblBig ? `<text x="${cellX.toFixed(1)}" y="${(cellY + 9).toFixed(1)}" text-anchor="middle" pointer-events="none" style="font:7px 'JetBrains Mono',monospace;fill:#fff;fill-opacity:.85">${pctM}%</text>` : "")
+            + `<path class="tf-hive-cell tf-hive-hit" data-m="${esc(m.method)}" data-s="${st.lbl}" data-v="${v}" data-pct="${pctM}" data-lat="${cell && cell.lat != null ? cell.lat : ""}" data-band="${band || ""}" d="${_hexPath(cellX, cellY, r + 3)}" fill="transparent"/></g>`;
         }
       });
-      // per-method total rail bar
-      const bw = (m.total / methodMax) * railW;
-      body += `<rect x="${railX}" y="${cy - 7}" width="${railW}" height="14" rx="3" fill="rgba(120,110,90,.12)"/>
-        <rect x="${railX}" y="${cy - 7}" width="${bw.toFixed(1)}" height="14" rx="3" fill="var(--ink)" fill-opacity=".5"/>
-        <text x="${railX + railW - 5}" y="${cy + 3.5}" text-anchor="end" style="font:600 9px 'JetBrains Mono',monospace;fill:var(--ink)">${_kc(m.total)}</text>`;
+      // core node (◉ total) + method label + state dot
+      const stCol = hl.state === "critical" ? cv.danger : hl.state === "degraded" ? cv.amber : cv.ok;
+      const core = `<g class="tf-hive-coreg${m.method === busiest ? " tf-hive-breathe" : ""}" style="--gc:${stCol}">`
+        + `<circle class="tf-hive-core-ring" cx="${G.coreX}" cy="${cy.toFixed(1)}" r="${(cr + 3).toFixed(1)}" fill="none" stroke="${stCol}" stroke-width="1.4" stroke-opacity="0.5"/>`
+        + `<circle class="tf-hive-core-fill" cx="${G.coreX}" cy="${cy.toFixed(1)}" r="${cr.toFixed(1)}" fill="var(--ink)" fill-opacity="0.9"/>`
+        + `<text x="${G.coreX}" y="${(cy + 3.5).toFixed(1)}" text-anchor="middle" pointer-events="none" style="font:600 ${cr > 15 ? 11 : 9}px 'JetBrains Mono',monospace;fill:var(--paper)">${_kc(m.total)}</text>`
+        + `<text x="${G.coreX}" y="${(cy - cr - 6).toFixed(1)}" text-anchor="middle" pointer-events="none" class="meth ${_methClass(m.method)}" style="font:600 ${EXP ? 12 : 10.5}px 'JetBrains Mono',monospace">${esc(m.method)}</text>`
+        + `<circle class="tf-hive-hit" data-m="${esc(m.method)}" data-core="1" cx="${G.coreX}" cy="${cy.toFixed(1)}" r="${(cr + 4).toFixed(1)}" fill="transparent"/></g>`;
+      body += `<g class="tf-hive-colony" data-colony="${esc(m.method)}">${conns}${cells}${core}</g>`;
     });
-    const legend = `<text x="${ox - 30}" y="${H - 5}" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">hex size = volume · % = share of that method · click a cell → its requests</text>`;
-    return `<svg class="tf-hive-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="max-height:${H}px;width:100%">${head}${body}${legend}</svg>`;
+    const legend = `<text x="${G.lblX}" y="${H - 6}" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">size=volume · color=status · texture=latency · ring=health · ${EXP ? "click a colony to inspect" : "hover a colony · click → requests"}</text>`;
+    return `<svg class="tf-hive-svg" viewBox="0 0 ${G.W} ${H}" preserveAspectRatio="xMidYMid meet" style="max-height:${H}px;width:100%;overflow:visible">${_hiveDefs(rows)}${body}${legend}</svg>`;
   }
-  function _wireHive(host) {
-    const hexes = host.querySelectorAll(".tf-hex");
-    hexes.forEach(h => {
+  // recent-spike / trend read from a method's status-over-time series
+  function _seriesSpike(series) {
+    const act = (series || []).filter(s => s.n > 0); if (act.length < 2) return null;
+    const avg = act.reduce((a, s) => a + s.n, 0) / act.length, last = series[series.length - 1] || { n: 0 };
+    if (last.n > avg * 1.8 && last.n >= 3) return "spiking now";
+    const h = Math.floor(series.length / 2);
+    const a = series.slice(0, h).reduce((s, x) => s + x.n, 0), b = series.slice(h).reduce((s, x) => s + x.n, 0);
+    if (a && b > a * 1.5) return "trending up"; if (b && a > b * 1.5) return "cooling down"; return "steady";
+  }
+  function _hiveCellTip(m, st) {
+    const v = m[st === "2xx" ? "n2" : st === "4xx" ? "n4" : "n5"] || 0;
+    const pct = m.total ? Math.round(100 * v / m.total) : 0;
+    const cell = m.cells && m.cells[st[0]];
+    const lat = cell && cell.lat != null ? cell.lat : null;
+    const band = _cellLatBand(cell);
+    const bn = band === "slow" ? "slow" : band === "med" ? "moderate" : band === "fast" ? "fast" : "—";
+    return `<b>${esc(m.method)} · ${esc(st)}</b><br>${fmtNum(v)} req · ${pct}% of ${esc(m.method)}`
+      + (lat != null ? `<br>latency ${fmtNum(lat)} ms · ${bn}` : "")
+      + `<br><span style="opacity:.6">click → these requests</span>`;
+  }
+  function _hiveCoreTip(m) {
+    const hl = _methHealth(m), spike = _seriesSpike(m.series);
+    const top = (m.endpoints || [])[0];
+    return `<b>${esc(m.method)} colony</b> · ${fmtNum(m.total)} req<br>`
+      + `<span style="color:${hl.state === "critical" ? "var(--c-danger,#b3402f)" : hl.state === "degraded" ? "var(--c-amber,#c98a2b)" : "var(--c-ok,#2f6f3e)"}">${hl.succ}% success · ${hl.state}</span>`
+      + (hl.lat != null ? `<br>~${fmtNum(hl.lat)} ms typical` : "")
+      + (top ? `<br>top · ${esc(top.path)} (${top.pct}%)` : "")
+      + (spike ? `<br><span style="opacity:.7">${spike}</span>` : "")
+      + `<br><span style="opacity:.6">click → inspect colony</span>`;
+  }
+  function _wireHiveColony(host, opts) {
+    opts = opts || {};
+    const svg = host.querySelector(".tf-hive-svg"); if (!svg) return;
+    const byMethod = {}; (DATA.matrix || []).forEach(m => byMethod[m.method] = m);
+    const focus = (method) => { svg.classList.add("tf-hive-diffuse"); svg.querySelectorAll(".tf-hive-colony").forEach(g => g.classList.toggle("tf-hive-focus", g.getAttribute("data-colony") === method)); };
+    const unfocus = () => { svg.classList.remove("tf-hive-diffuse"); svg.querySelectorAll(".tf-hive-focus").forEach(g => g.classList.remove("tf-hive-focus")); };
+    host.querySelectorAll(".tf-hive-hit").forEach(h => {
+      const method = h.getAttribute("data-m"), isCore = h.getAttribute("data-core"), st = h.getAttribute("data-s");
+      h.style.cursor = "pointer";
       h.addEventListener("mousemove", (e) => {
-        const v = +h.getAttribute("data-v"); if (!v) return;
-        tip(true, e.clientX, e.clientY, `<b>${esc(h.getAttribute("data-m"))} · ${esc(h.getAttribute("data-s"))}</b><br>${fmtNum(v)} request(s)<br><span style="opacity:.7">click → these requests</span>`);
-        hexes.forEach(o => { o.style.opacity = o === h ? "1" : "0.32"; });
-        h.style.transform = "scale(1.08)"; h.style.transformOrigin = "center"; h.style.transformBox = "fill-box";
+        const m = byMethod[method]; if (!m) return;
+        tip(true, e.clientX, e.clientY, isCore ? _hiveCoreTip(m) : _hiveCellTip(m, st));
+        focus(method);
+        const g = h.closest(".tf-hive-cellg, .tf-hive-coreg"); if (g) g.classList.add("tf-hive-pop");
       });
-      h.addEventListener("mouseleave", () => { tip(false); hexes.forEach(o => { o.style.opacity = "1"; o.style.transform = ""; }); });
+      h.addEventListener("mouseleave", () => { tip(false); unfocus(); const g = h.closest(".tf-hive-pop"); if (g) g.classList.remove("tf-hive-pop"); });
       h.addEventListener("click", () => {
+        const m = byMethod[method]; if (!m) return;
+        if (isCore) {
+          if (opts.onColony) opts.onColony(method);
+          else _openExpander("hive", host.closest(".ov-card"));
+          return;
+        }
         const v = +h.getAttribute("data-v"); if (!v || !DATA.hero || !DATA.hero.buckets.length) return;
         const first = DATA.hero.buckets[0], last = DATA.hero.buckets[DATA.hero.buckets.length - 1];
-        openRequestContainer({ sinceMs: first.t_ms, untilMs: last.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: h.getAttribute("data-m") + " · " + h.getAttribute("data-s"), method: h.getAttribute("data-m"), status: h.getAttribute("data-s") });
+        openRequestContainer({ sinceMs: first.t_ms, untilMs: last.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: method + " · " + st, method, status: st });
       });
+    });
+  }
+  // live pulse on a colony (no rebuild — keeps the layout/animations stable)
+  function _hivePulse(method) {
+    document.querySelectorAll(`.tf-hive-colony[data-colony="${(method || "").replace(/"/g, "")}"]`).forEach(g => {
+      g.classList.remove("tf-hive-ping"); void g.offsetWidth; g.classList.add("tf-hive-ping");
+      const ring = g.querySelector(".tf-hive-core-ring");
+      if (ring) { try { ring.animate([{ strokeOpacity: 0.9, strokeWidth: 3 }, { strokeOpacity: 0.5, strokeWidth: 1.4 }], { duration: 620, easing: "ease-out" }); } catch (_) {} }
     });
   }
   function renderHive(intro) {
     const host = $("tf-hive-body"); if (!host || !DATA) return;
-    host.innerHTML = hiveSvg(DATA.matrix || [], 0);
-    _wireHive(host);
-    if (intro && window.APIN && APIN.fx) host.querySelectorAll(".tf-hex").forEach((h, i) => { try { h.animate([{ opacity: 0, transform: "scale(.4)" }, { opacity: 1, transform: "scale(1)" }], { duration: 360, delay: Math.min(700, i * 36), easing: "cubic-bezier(.22,1,.36,1)", fill: "backwards" }); } catch (_) {} });
+    host.innerHTML = hiveColonySvg(DATA.matrix || [], { expanded: false });
+    _wireHiveColony(host, {});
+    if (intro && window.APIN && APIN.fx) {
+      host.querySelectorAll(".tf-hive-colony").forEach((g, i) => { try { g.animate([{ opacity: 0, transform: "scale(.72)" }, { opacity: 1, transform: "scale(1)" }], { duration: 460, delay: Math.min(640, i * 90), easing: "cubic-bezier(.22,1,.36,1)", fill: "backwards" }); } catch (_) {} });
+    }
   }
 
   // ════════════════════ ⑤ TRAFFIC CLOCK — polar local-hour dial ═══════════
@@ -544,22 +811,42 @@
       const rr = h.n === 0 ? r0 + 2 : r1;
       wedges += `<path class="tf-wedge" data-h="${i}" d="${_wedgePath(cx, cy, r0, rr, a0, a1)}" fill="${fill}" fill-opacity="${op}"/>`;
     });
-    [0, 6, 12, 18].forEach(hh => { const [lx, ly] = _polar(cx, cy, rmax + 12, hh / 24); labels += `<text x="${lx.toFixed(1)}" y="${(ly + 3).toFixed(1)}" text-anchor="middle" style="font:9px 'JetBrains Mono',monospace;fill:var(--ink-soft)">${String(hh).padStart(2, "0")}</text>`; });
-    const hubTxt = clock.busiest_h != null ? `peak ${String(clock.busiest_h).padStart(2, "0")}h` : "";
-    return `<svg class="tf-clock-svg" viewBox="0 0 ${size} ${size}" style="max-width:${size}px;margin:0 auto">
+    // cardinal labels in 12-hour form (12 AM / 6 AM / 12 PM / 6 PM)
+    [0, 6, 12, 18].forEach(hh => { const [lx, ly] = _polar(cx, cy, rmax + 14, hh / 24); labels += `<text x="${lx.toFixed(1)}" y="${(ly + 3).toFixed(1)}" text-anchor="middle" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-soft)">${((hh % 12) || 12) + (hh < 12 ? " AM" : " PM")}</text>`; });
+    const peakShort = clock.busiest_h != null ? (((clock.busiest_h % 12) || 12) + " " + (clock.busiest_h < 12 ? "AM" : "PM")) : "";
+    return `<svg class="tf-clock-svg" viewBox="0 0 ${size} ${size}" style="max-width:${size}px;margin:0 auto;overflow:visible">
       ${rings}${wedges}${labels}
       <line id="tf-clock-hand" x1="${cx}" y1="${cy}" x2="${cx}" y2="${(cy - rmax - 4).toFixed(1)}" stroke="${col.ink}" stroke-width="2" stroke-linecap="round" transform="rotate(0 ${cx} ${cy})"/>
+      <rect id="tf-clock-now-bg" rx="9" width="0" height="0" fill="var(--ink)"/>
+      <text id="tf-clock-now" text-anchor="middle" style="font:600 9px 'JetBrains Mono',monospace;fill:var(--paper)"></text>
       <circle cx="${cx}" cy="${cy}" r="${(r0 - 4).toFixed(1)}" fill="var(--paper)" stroke="var(--paper-edge)"/>
-      <text x="${cx}" y="${(cy + 3).toFixed(1)}" text-anchor="middle" style="font:9px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${hubTxt}</text></svg>`;
+      <text x="${cx}" y="${(cy - 2).toFixed(1)}" text-anchor="middle" style="font:7.5px 'JetBrains Mono',monospace;fill:var(--ink-mute)">peak</text>
+      <text x="${cx}" y="${(cy + 9).toFixed(1)}" text-anchor="middle" style="font:600 9px 'JetBrains Mono',monospace;fill:var(--ink-soft)">${peakShort}</text></svg>`;
   }
   function _startClockHand() {
     if (_clockTick) clearInterval(_clockTick);
     const move = () => {
       const hand = $("tf-clock-hand"); if (!hand) return;
       const now = new Date(); const frac = (now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600) / 24;
-      const cx = hand.getAttribute("x1");
+      const cx = +hand.getAttribute("x1"), cy = +hand.getAttribute("y1"), y2 = +hand.getAttribute("y2");
       hand.style.transition = "transform 1s linear";
-      hand.setAttribute("transform", `rotate(${(frac * 360).toFixed(2)} ${cx} ${cx})`);
+      hand.setAttribute("transform", `rotate(${(frac * 360).toFixed(2)} ${cx} ${cy})`);
+      // live time chip riding the hand's tip — a pill sized to fit the text
+      const lbl = $("tf-clock-now"), bg = $("tf-clock-now-bg");
+      if (lbl) {
+        const tipR = (cy - y2) + 15, ang = frac * 2 * Math.PI;
+        const tx = cx + tipR * Math.sin(ang), ty = cy - tipR * Math.cos(ang);
+        const txt = fmtClockNow(now);            // e.g. "11:32 PM"
+        const w = txt.length * 5.4 + 12, hgt = 16;
+        lbl.textContent = txt;
+        lbl.style.transition = "all 1s linear";
+        lbl.setAttribute("x", tx.toFixed(1)); lbl.setAttribute("y", (ty + 3.2).toFixed(1));
+        if (bg) {
+          bg.style.transition = "all 1s linear";
+          bg.setAttribute("x", (tx - w / 2).toFixed(1)); bg.setAttribute("y", (ty - hgt / 2).toFixed(1));
+          bg.setAttribute("width", w.toFixed(1)); bg.setAttribute("height", hgt);
+        }
+      }
     };
     move(); _clockTick = setInterval(move, 1000);
   }
@@ -568,16 +855,41 @@
     const d = new Date(); d.setHours(hh, 0, 0, 0); if (d > new Date()) d.setDate(d.getDate() - 1);
     return { sinceMs: d.getTime(), untilMs: d.getTime() + 3600e3 };
   }
+  // the window the clock aggregates over (matches the active granularity)
+  function _clockWindow() {
+    const win = GRAN_WIN_MS[GRAN] || GRAN_WIN_MS.day;
+    const now = Date.now();
+    return { sinceMs: now - win, untilMs: now };
+  }
+  // drill a clock hour: the clock is hour-of-day across the whole window, so the
+  // container filters every request in that LOCAL hour (not just today's).
+  function _drillHourOfDay(hh) {
+    const w = _clockWindow();
+    openRequestContainer({ sinceMs: w.sinceMs, untilMs: w.untilMs, label: fmt12(hh) + " · hour of day", localHour: hh });
+  }
+  // drill a weekday×hour cell: target the most-recent matching weekday that
+  // actually has traffic (from the calendar), then filter to that local hour —
+  // reliable even though the 28-day window exceeds the 200-row request fetch.
+  function _drillWeekdayHour(wd, hh) {
+    const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const days = ((DATA.calendar || {}).days || []).filter(d => d.n > 0)
+      .filter(d => { const dt = new Date(d.date + "T00:00:00"); return ((dt.getDay() + 6) % 7) === wd; })
+      .sort((a, b) => a.date < b.date ? 1 : -1);
+    let ms;
+    if (days.length) ms = new Date(days[0].date + "T00:00:00").getTime();
+    else { const t = new Date(); t.setHours(0, 0, 0, 0); ms = t.getTime() - ((((t.getDay() + 6) % 7) - wd + 7) % 7) * 86400e3; }
+    openRequestContainer({ sinceMs: ms, untilMs: ms + 86400e3, label: WD[wd] + " " + new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" }) + " · " + fmt12(hh), localHour: hh });
+  }
   function _wireClock(host, intro, onWedge) {
     const svg = host.querySelector("svg"); if (!svg) return;
     svg.querySelectorAll(".tf-wedge").forEach(w => {
       w.addEventListener("mousemove", (e) => {
         const h = (DATA.clock.hours || [])[+w.getAttribute("data-h")]; if (!h) return;
-        tip(true, e.clientX, e.clientY, `<b>${String(h.h).padStart(2, "0")}:00–${String((h.h + 1) % 24).padStart(2, "0")}:00</b><br>${fmtNum(h.n)} req · ${h.err_pct}% err`);
+        tip(true, e.clientX, e.clientY, `<b>${fmt12(h.h)} – ${fmt12((h.h + 1) % 24)}</b><br>${fmtNum(h.n)} req · ${h.err_pct}% err`);
         svg.querySelectorAll(".tf-wedge").forEach(o => o.style.opacity = o === w ? "1" : "0.4");
       });
       w.addEventListener("mouseleave", () => { tip(false); svg.querySelectorAll(".tf-wedge").forEach(o => o.style.opacity = "1"); });
-      w.addEventListener("click", () => { const hh = +w.getAttribute("data-h"); if (onWedge) onWedge(hh); else { const win = _hourWindow(hh); openRequestContainer({ sinceMs: win.sinceMs, untilMs: win.untilMs, label: String(hh).padStart(2, "0") + ":00" }); } });
+      w.addEventListener("click", () => { const hh = +w.getAttribute("data-h"); if (onWedge) onWedge(hh); else _drillHourOfDay(hh); });
     });
     _startClockHand();
     if (intro) svg.querySelectorAll(".tf-wedge").forEach((w, i) => { try { w.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 360, delay: Math.min(820, i * 32), easing: "cubic-bezier(.22,1,.36,1)", fill: "backwards" }); } catch (_) {} });
@@ -592,52 +904,299 @@
   }
 
   // ════════════════════ ⑥ BYTES FLOW — mirror area ════════════════════════
-  // Independent-scale sparkbar row: each series scaled to its OWN max so a
-  // tiny series (egress) is still visible next to a huge one (ingress).
-  function _byteSparkbar(buckets, key, color) {
-    const n = buckets.length || 1, W = 520, H = 26, sw = W / n;
-    const max = Math.max(1, ...buckets.map(b => b[key] || 0));
-    const peakI = buckets.reduce((m, b, i) => (b[key] || 0) > (buckets[m][key] || 0) ? i : m, 0);
-    let bars = "";
-    buckets.forEach((b, i) => {
-      const v = b[key] || 0, h = v > 0 ? Math.max(2, (v / max) * (H - 4)) : 0.8;
-      bars += `<rect class="tf-byb" data-i="${i}" data-k="${key}" x="${(i * sw + 0.6).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${Math.max(1, sw - 1.2).toFixed(1)}" height="${h.toFixed(1)}" rx="1" fill="${color}" fill-opacity="${v > 0 ? 0.82 : 1}"/>`;
-    });
-    const pk = `<text x="${(peakI * sw + sw / 2).toFixed(1)}" y="9" text-anchor="middle" style="font:7.5px 'JetBrains Mono',monospace;fill:${color}">${fmtBytes(max)}</text>`;
-    return `<svg class="tf-byspark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px">${bars}${pk}</svg>`;
+  // ════════════════════ ⑥ BANDWIDTH — radial ring · river · channels ══════
+  const ING = "#52b788";              // ingress = accent green (inner ring)
+  const EGR = "#2c6e63";              // egress  = deep teal-ink (outer ring)
+  const _rateStr = (bps) => bps <= 0 ? "idle" : bps >= 1048576 ? (bps / 1048576).toFixed(1) + " MB/s" : bps >= 1024 ? (bps / 1024).toFixed(0) + " KB/s" : Math.round(bps) + " B/s";
+  function _liveRate() {
+    const now = Date.now(); _rateWin = _rateWin.filter(e => now - e.t < 3000);
+    if (!_rateWin.length) return 0;
+    return _rateWin.reduce((s, e) => s + e.bytes, 0) / 3;   // bytes per second over 3s window
   }
-  function transferSummary(by) {
-    const tot = (by.total_in || 0) + (by.total_out || 0) || 1;
-    const inPct = Math.round(100 * (by.total_in || 0) / tot), outPct = 100 - inPct;
-    const col = _C();
-    return `<div class="tf-xfer">
-      <div class="tf-xfer-nums">
-        <div class="tf-xfer-side"><span class="tf-xfer-arrow" style="color:${col.accent}">▲</span><div><div class="tf-xfer-val">${fmtBytes(by.total_in)}</div><div class="tf-xfer-lbl">ingress · ${fmtBytes(by.avg_in)}/req</div></div></div>
-        <div class="tf-xfer-side tf-xfer-out"><div style="text-align:right"><div class="tf-xfer-val">${fmtBytes(by.total_out)}</div><div class="tf-xfer-lbl">egress · ${fmtBytes(by.avg_out)}/req</div></div><span class="tf-xfer-arrow" style="color:${col.ok}">▼</span></div>
-      </div>
-      <div class="tf-xfer-prop" title="ingress ${inPct}% · egress ${outPct}%">
-        <span class="tf-xfer-in" style="width:${inPct}%;background:${col.accent}"></span>
-        <span class="tf-xfer-out2" style="width:${outPct}%;background:${col.ok}"></span>
-      </div>
-      <div class="tf-xfer-proplbl"><span style="color:${col.accent}">in ${inPct}%</span><span>${_ratioStr(by.total_in, by.total_out)}</span><span style="color:${col.ok}">out ${outPct}%</span></div>
-      <div class="tf-byspark-row"><span class="tf-byspark-tag" style="color:${col.accent}">in</span>${_byteSparkbar(by.buckets, "bin", col.accent)}</div>
-      <div class="tf-byspark-row"><span class="tf-byspark-tag" style="color:${col.ok}">out</span>${_byteSparkbar(by.buckets, "bout", col.ok)}</div>
-    </div>`;
+  // ── radial bandwidth ring: clockwise time, inner=ingress, outer=egress ──
+  function bandwidthRing(by, size) {
+    size = size || 210; const cx = size / 2, cy = size / 2;
+    const hubR = size * 0.205, inB = hubR + 5, inLen = size * 0.115, outB = inB + inLen + 7, outLen = size * 0.115;
+    const buckets = by.buckets || [], n = buckets.length || 1;
+    const maxIn = Math.max(1, ...buckets.map(b => b.bin || 0)), maxOut = Math.max(1, ...buckets.map(b => b.bout || 0));
+    const step = 2 * Math.PI / n, gap = Math.min(0.045, step * 0.2);
+    let guides = "", inSeg = "", outSeg = "", hits = "";
+    [inB, outB + outLen].forEach(r => { guides += `<circle cx="${cx}" cy="${cy}" r="${r.toFixed(1)}" fill="none" stroke="rgba(26,22,18,0.06)" stroke-width="1"/>`; });
+    buckets.forEach((b, i) => {
+      const a0 = -Math.PI / 2 + i * step + gap, a1 = -Math.PI / 2 + (i + 1) * step - gap;
+      const inN = (b.bin || 0) / maxIn, outN = (b.bout || 0) / maxOut;
+      const inR1 = inB + Math.max(b.bin ? 0.1 : 0.02, inN) * inLen, outR1 = outB + Math.max(b.bout ? 0.1 : 0.02, outN) * outLen;
+      inSeg += `<path class="tf-ring-seg${inN > 0.6 ? " tf-ring-hot" : ""}" d="${_wedgePath(cx, cy, inB, inR1, a0, a1)}" fill="${ING}" fill-opacity="${(0.4 + 0.6 * inN).toFixed(2)}" style="--gc:${ING}"/>`;
+      outSeg += `<path class="tf-ring-seg${outN > 0.6 ? " tf-ring-hot" : ""}" d="${_wedgePath(cx, cy, outB, outR1, a0, a1)}" fill="${EGR}" fill-opacity="${(0.4 + 0.6 * outN).toFixed(2)}" style="--gc:${EGR}"/>`;
+      hits += `<path class="tf-ring-hit" data-i="${i}" data-dir="in" d="${_wedgePath(cx, cy, inB - 2, inB + inLen + 2, a0, a1)}" fill="transparent"/>`;
+      hits += `<path class="tf-ring-hit" data-i="${i}" data-dir="out" d="${_wedgePath(cx, cy, outB - 2, outB + outLen + 3, a0, a1)}" fill="transparent"/>`;
+    });
+    const orbit = (rmid, cls, count, dur, dir) => {
+      let dots = "";
+      for (let k = 0; k < count; k++) { const ang = (k / count) * 2 * Math.PI, px = cx + rmid * Math.cos(ang), py = cy + rmid * Math.sin(ang); dots += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="1.5" fill="#fff" fill-opacity="0.85"/>`; }
+      return `<g class="${cls}">${dots}<animateTransform attributeName="transform" type="rotate" from="${dir > 0 ? 0 : 360} ${cx} ${cy}" to="${dir > 0 ? 360 : 0} ${cx} ${cy}" dur="${dur}s" repeatCount="indefinite"/></g>`;
+    };
+    const particles = orbit(inB + inLen * 0.5, "tf-orbit-in", 6, 9, 1) + orbit(outB + outLen * 0.5, "tf-orbit-out", 7, 13, -1);
+    const sweep = `<g class="tf-ring-sweep"><path d="${_wedgePath(cx, cy, inB, outB + outLen, -Math.PI / 2, -Math.PI / 2 + 1.0)}" fill="url(#tfSweep)"/><animateTransform attributeName="transform" type="rotate" from="0 ${cx} ${cy}" to="360 ${cx} ${cy}" dur="7s" repeatCount="indefinite"/></g>`;
+    const defs = `<defs><radialGradient id="tfSweep"><stop offset="0.4" stop-color="${ING}" stop-opacity="0"/><stop offset="1" stop-color="${ING}" stop-opacity="0.16"/></radialGradient></defs>`;
+    const pulse = `<circle class="tf-ring-pulse" cx="${cx}" cy="${cy}" r="${inB}" fill="none" stroke="${ING}" stroke-width="2" opacity="0"/>`;
+    return `<svg class="tf-ring-svg" viewBox="0 0 ${size} ${size}" data-in-base="${inB}" data-out-edge="${(outB + outLen).toFixed(1)}" data-cx="${cx}" style="max-width:${size}px;width:100%;overflow:visible">${defs}${guides}${sweep}${inSeg}${outSeg}${particles}${pulse}${hits}</svg>`;
+  }
+  function _ringPulse() {
+    // Pulse EVERY live ring (card + open expand) — IDs would collide, so class.
+    document.querySelectorAll(".tf-ring-pulse").forEach(p => {
+      const svg = p.closest("svg"); const r0 = +(svg && svg.getAttribute("data-in-base") || 30), r1 = +(svg && svg.getAttribute("data-out-edge") || 100);
+      try { p.animate([{ r: r0, opacity: 0.55, strokeWidth: 3 }, { r: r1 + 8, opacity: 0, strokeWidth: 1 }], { duration: 720, easing: "cubic-bezier(.22,1,.36,1)" }); } catch (_) {}
+    });
+  }
+  // ── river / stream graph: mirrored, smoothed, gradient-filled ──────────
+  function _smoothPath(pts) {
+    if (pts.length < 2) return pts.length ? `M ${pts[0][0]} ${pts[0][1]}` : "";
+    let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6, c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    }
+    return d;
+  }
+  function riverSvg(buckets) {
+    const W = 520, H = 152, mid = H / 2, pad = 10, n = buckets.length || 1;
+    const maxIn = Math.max(1, ...buckets.map(b => b.bin || 0)), maxOut = Math.max(1, ...buckets.map(b => b.bout || 0));
+    const X = (i) => pad + (n <= 1 ? (W - 2 * pad) / 2 : (i / (n - 1)) * (W - 2 * pad));
+    const upY = (v) => mid - (v / maxIn) * (mid - 14), dnY = (v) => mid + (v / maxOut) * (mid - 14);
+    const inLine = _smoothPath(buckets.map((b, i) => [X(i), upY(b.bin || 0)]));
+    const outLine = _smoothPath(buckets.map((b, i) => [X(i), dnY(b.bout || 0)]));
+    const inArea = `${inLine} L ${X(n - 1).toFixed(1)} ${mid} L ${X(0).toFixed(1)} ${mid} Z`;
+    const outArea = `${outLine} L ${X(n - 1).toFixed(1)} ${mid} L ${X(0).toFixed(1)} ${mid} Z`;
+    const stride = Math.max(1, Math.ceil(n / 6)); let xlab = "";
+    buckets.forEach((b, i) => { if (i % stride === 0) xlab += `<text x="${X(i).toFixed(1)}" y="${H - 2}" text-anchor="middle" style="font:8px 'JetBrains Mono',monospace;fill:var(--ink-mute)">${esc(b.label)}</text>`; });
+    return `<svg class="tf-river-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;overflow:visible">
+      <defs><linearGradient id="tfRivIn" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="${ING}" stop-opacity="0.04"/><stop offset="1" stop-color="${ING}" stop-opacity="0.42"/></linearGradient>
+      <linearGradient id="tfRivOut" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${EGR}" stop-opacity="0.04"/><stop offset="1" stop-color="${EGR}" stop-opacity="0.42"/></linearGradient></defs>
+      <path class="tf-river-band" d="${inArea}" fill="url(#tfRivIn)"/><path d="${inLine}" fill="none" stroke="${ING}" stroke-width="1.7"/>
+      <path class="tf-river-band" d="${outArea}" fill="url(#tfRivOut)"/><path d="${outLine}" fill="none" stroke="${EGR}" stroke-width="1.7"/>
+      <line x1="${pad}" y1="${mid}" x2="${W - pad}" y2="${mid}" stroke="var(--paper-edge)" stroke-width="1"/>
+      <text x="2" y="11" style="font:8px 'JetBrains Mono',monospace;fill:${ING}">in ▲</text><text x="2" y="${H - 12}" style="font:8px 'JetBrains Mono',monospace;fill:${EGR}">out ▼</text>
+      <line class="tf-river-cursor" id="tf-river-cursor" x1="0" y1="0" x2="0" y2="${H}" stroke="var(--ink)" stroke-opacity="0" stroke-width="1" stroke-dasharray="3 3"/>
+      ${xlab}<rect id="tf-river-hit" x="0" y="0" width="${W}" height="${H}" fill="transparent"/></svg>`;
+  }
+  function _wireRiver(host, by) {
+    const hit = host.querySelector("#tf-river-hit"), cur = host.querySelector("#tf-river-cursor"); if (!hit) return;
+    const n = (by.buckets || []).length || 1;
+    hit.addEventListener("mousemove", (e) => {
+      const r = hit.getBoundingClientRect(); if (!r.width) return;
+      const i = Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left) / r.width) * (n - 1))));
+      const b = by.buckets[i]; if (!b) return;
+      const x = 10 + (n <= 1 ? 250 : (i / (n - 1)) * 500);
+      if (cur) { cur.setAttribute("x1", x); cur.setAttribute("x2", x); cur.setAttribute("stroke-opacity", "0.5"); }
+      tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}${b.sub ? " · " + esc(b.sub) : ""}</b><br><span style="color:${ING}">▲ in ${fmtBytes(b.bin)}</span> · <span style="color:${EGR}">▼ out ${fmtBytes(b.bout)}</span>`);
+    });
+    hit.addEventListener("mouseleave", () => { tip(false); if (cur) cur.setAttribute("stroke-opacity", "0"); });
+  }
+  function _wireRing(host, by) {
+    host.querySelectorAll(".tf-ring-hit").forEach(h => {
+      const i = +h.getAttribute("data-i"), dir = h.getAttribute("data-dir");
+      h.style.cursor = "pointer";
+      h.addEventListener("mousemove", (e) => {
+        const b = by.buckets[i]; if (!b) return;
+        const headline = dir === "in" ? `<span style="color:${ING}">▲ ingress ${fmtBytes(b.bin)}</span>` : `<span style="color:${EGR}">▼ egress ${fmtBytes(b.bout)}</span>`;
+        tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}${b.sub ? " · " + esc(b.sub) : ""}</b><br>${headline}<br><span style="opacity:.6">in ${fmtBytes(b.bin)} · out ${fmtBytes(b.bout)}</span>`);
+        host.querySelectorAll(".tf-ring-svg").forEach(s => s.classList.add("tf-ring-dim"));
+        host.querySelectorAll(`.tf-ring-hit[data-i="${i}"]`).forEach(x => x.classList.add("tf-ring-hit-on"));
+      });
+      h.addEventListener("mouseleave", () => { tip(false); host.querySelectorAll(".tf-ring-svg").forEach(s => s.classList.remove("tf-ring-dim")); h.classList.remove("tf-ring-hit-on"); host.querySelectorAll(".tf-ring-hit-on").forEach(x => x.classList.remove("tf-ring-hit-on")); });
+      h.addEventListener("click", () => { const b = by.buckets[i]; if (b) openRequestContainer({ sinceMs: b.t_ms, untilMs: b.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: b.label + (b.sub ? " " + b.sub : "") }); });
+    });
+  }
+  function _bytesLive() {
+    // Update ALL rings on screen (card + open expand) — class, not id.
+    const rate = _liveRate();
+    document.querySelectorAll(".tf-ring-hub-rate").forEach(re => {
+      re.textContent = _rateStr(rate); re.classList.toggle("tf-rate-on", rate > 0);
+      const wrap = re.closest(".tf-ring-wrap"), svg = wrap && wrap.querySelector(".tf-ring-svg");
+      if (svg) svg.style.setProperty("--rglow", Math.min(9, rate / 180000 * 8).toFixed(1) + "px");
+    });
+    if (DATA && DATA.bytes) {
+      const tot = fmtBytes((DATA.bytes.total_in || 0) + (DATA.bytes.total_out || 0));
+      document.querySelectorAll(".tf-ring-hub-total").forEach(t => { t.textContent = tot; });
+    }
   }
   function renderBytes(intro) {
     const host = $("tf-bytes-body"); if (!host || !DATA) return;
     const by = DATA.bytes || { buckets: [] };
     if (!by.buckets.length || (by.total_in === 0 && by.total_out === 0)) { host.innerHTML = `<div class="tf-empty">No payload data in this range.</div>`; return; }
-    host.innerHTML = transferSummary(by);
-    // hover the sparkbars for per-bucket detail
-    host.querySelectorAll(".tf-byb").forEach(bar => {
-      bar.addEventListener("mousemove", (e) => {
-        const b = by.buckets[+bar.getAttribute("data-i")]; if (!b) return;
-        tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}${b.sub ? " · " + esc(b.sub) : ""}</b><br>in ${fmtBytes(b.bin)} · out ${fmtBytes(b.bout)}`);
+    const toggle = `<div class="ov-range tf-by-toggle" id="tf-by-toggle"><button data-m="ring"${_byMode === "ring" ? ' aria-pressed="true"' : ""}>ring</button><button data-m="river"${_byMode === "river" ? ' aria-pressed="true"' : ""}>river</button></div>`;
+    const legend = `<div class="tf-bytes-legend"><span style="color:${ING}">▲ in ${fmtBytes(by.total_in)} · ${fmtBytes(by.avg_in)}/req</span><span style="color:${EGR}">▼ out ${fmtBytes(by.total_out)} · ${fmtBytes(by.avg_out)}/req</span>${_ratioStr(by.total_in, by.total_out) ? `<span>${_ratioStr(by.total_in, by.total_out)}</span>` : ""}</div>`;
+    if (_byMode === "ring") {
+      host.innerHTML = toggle +
+        `<div class="tf-ring-wrap">${bandwidthRing(by, 210)}<div class="tf-ring-hub"><div class="tf-ring-hub-total">${fmtBytes((by.total_in || 0) + (by.total_out || 0))}</div><div class="tf-ring-hub-rate">idle</div></div></div>` + legend;
+      _wireRing(host, by); _bytesLive();
+      if (intro && window.APIN && APIN.fx) host.querySelectorAll(".tf-ring-seg").forEach((s, k) => { try { s.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 340, delay: Math.min(520, k * 9), easing: "ease", fill: "backwards" }); } catch (_) {} });
+    } else {
+      host.innerHTML = toggle + `<div class="tf-river-wrap">${riverSvg(by.buckets)}</div>` + legend;
+      _wireRiver(host, by);
+      if (intro && window.APIN && APIN.fx) host.querySelectorAll(".tf-river-band").forEach(p => { try { p.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 480, easing: "ease" }); } catch (_) {} });
+    }
+    host.querySelectorAll("#tf-by-toggle button").forEach(b => b.addEventListener("click", () => { if (b.getAttribute("data-m") === _byMode) return; _byMode = b.getAttribute("data-m"); renderBytes(false); }));
+  }
+
+  // ── endpoint channels: animated directional flow pipes per path ─────────
+  // ingress marches rightward (▶), egress marches leftward (◀). Lane fill
+  // length ∝ that direction's share of the busiest endpoint; marching speed
+  // ∝ intensity so heavier pipes visibly flow faster.
+  function endpointChannels(by) {
+    const eps = (by.by_endpoint || []).slice()
+      .sort((a, b) => (b.bin + b.bout) - (a.bin + a.bout)).slice(0, 8);
+    if (!eps.length) return `<div class="tf-empty">no endpoint payload data</div>`;
+    const maxIn = Math.max(1, ...eps.map(e => e.bin)), maxOut = Math.max(1, ...eps.map(e => e.bout));
+    const spd = (v, mx) => (2.4 - 1.8 * Math.min(1, v / mx)).toFixed(2);   // s · faster when heavier
+    const lane = (cls, v, mx, col) => {
+      const w = (Math.max(v ? 5 : 0, (v / mx) * 100)).toFixed(1);
+      return `<span class="tf-chan-track"><i class="tf-chan-flow ${cls}" style="width:${w}%;--spd:${spd(v, mx)}s;--fc:${col}"></i>`
+        + `<b class="tf-chan-node ${v ? "tf-chan-node-on" : ""}" style="--fc:${col}"></b></span>`
+        + `<span class="tf-chan-val" style="color:${col}">${fmtBytes(v)}</span>`;
+    };
+    return `<div class="tf-chan-wrap">` + eps.map(e =>
+      `<div class="tf-chan" data-path="${esc(e.path)}" data-in="${e.bin}" data-out="${e.bout}" data-n="${e.n || 0}">
+        <span class="tf-chan-path" title="${esc(e.path)}">${esc(e.path)}</span>
+        <span class="tf-chan-dir" style="color:${ING}">IN ▶</span>${lane("tf-chan-in", e.bin, maxIn, ING)}
+        <span class="tf-chan-dir" style="color:${EGR}">OUT ◀</span>${lane("tf-chan-out", e.bout, maxOut, EGR)}
+      </div>`).join("") + `</div>`;
+  }
+  function _wireChannels(host, by) {
+    host.querySelectorAll(".tf-chan").forEach(row => {
+      const path = row.getAttribute("data-path"), bin = +row.getAttribute("data-in"), bout = +row.getAttribute("data-out"), n = +row.getAttribute("data-n");
+      const inSh = by.total_in ? Math.round(100 * bin / by.total_in) : 0, outSh = by.total_out ? Math.round(100 * bout / by.total_out) : 0;
+      row.addEventListener("mousemove", (e) => {
+        tip(true, e.clientX, e.clientY, `<b>${esc(path)}</b><br><span style="color:${ING}">▶ in ${fmtBytes(bin)}</span> · ${inSh}% of ingress<br><span style="color:${EGR}">◀ out ${fmtBytes(bout)}</span> · ${outSh}% of egress<br><span style="opacity:.6">${fmtNum(n)} request(s) · click → these</span>`);
+        host.querySelectorAll(".tf-chan").forEach(o => o.classList.toggle("tf-chan-dim", o !== row));
       });
-      bar.addEventListener("mouseleave", () => tip(false));
+      row.addEventListener("mouseleave", () => { tip(false); host.querySelectorAll(".tf-chan").forEach(o => o.classList.remove("tf-chan-dim")); });
+      row.style.cursor = "pointer";
+      row.addEventListener("click", () => {
+        if (!DATA.hero || !DATA.hero.buckets.length) return;
+        const first = DATA.hero.buckets[0], last = DATA.hero.buckets[DATA.hero.buckets.length - 1];
+        openRequestContainer({ sinceMs: first.t_ms, untilMs: last.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: path, path });
+      });
     });
-    if (intro && window.APIN && APIN.fx) host.querySelectorAll(".tf-byb").forEach((p, k) => { try { p.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: Math.min(400, k * 8), easing: "ease", fill: "backwards" }); } catch (_) {} });
+  }
+
+  // ── bytes insight engine: scored, 50+ phrasings across 10 families ──────
+  function _bytesInsights(by) {
+    const eps = (by.by_endpoint || []).slice();
+    const buckets = (by.buckets || []).filter(b => (b.bin + b.bout) > 0);
+    const tin = by.total_in || 0, tout = by.total_out || 0, tot = tin + tout;
+    if (!tot) return [{ score: 1, text: "No payload has crossed this key in the selected window yet." }];
+    // deterministic-but-personal variant picker (seeded by this key's totals)
+    const seed = ((tin % 97) * 31 + (tout % 89) * 17 + eps.length * 7) >>> 0;
+    const pick = (arr, salt) => arr[(seed + (salt || 0)) % arr.length];
+    const out = [];
+    const topIn = eps.slice().sort((a, b) => b.bin - a.bin)[0];
+    const topOut = eps.slice().sort((a, b) => b.bout - a.bout)[0];
+    // ① ingress concentration
+    if (topIn && tin) {
+      const sh = Math.round(100 * topIn.bin / tin);
+      out.push({ score: 30 + sh, text: pick([
+        `Ingress concentrated heavily on <b>${esc(topIn.path)}</b> — ${sh}% of everything uploaded.`,
+        `<b>${esc(topIn.path)}</b> absorbs ${sh}% of inbound payload, the dominant intake route.`,
+        `Most uploads (${sh}%) funnel through <b>${esc(topIn.path)}</b>.`,
+        `${sh}% of bytes received arrived at <b>${esc(topIn.path)}</b>.`,
+        `<b>${esc(topIn.path)}</b> is the heaviest ingress endpoint, drawing ${sh}% of input.`,
+      ], sh) });
+    }
+    // ② egress concentration
+    if (topOut && tout) {
+      const sh = Math.round(100 * topOut.bout / tout);
+      out.push({ score: 28 + sh, text: pick([
+        `<b>${esc(topOut.path)}</b> dominates egress, returning ${sh}% of all bytes sent.`,
+        `Outbound traffic centres on <b>${esc(topOut.path)}</b> — ${sh}% of responses by size.`,
+        `${sh}% of egress flows out through <b>${esc(topOut.path)}</b>.`,
+        `The bulk of downloads (${sh}%) leaves via <b>${esc(topOut.path)}</b>.`,
+        `<b>${esc(topOut.path)}</b> is the primary response payload source (${sh}% of out).`,
+      ], sh + 1) });
+    }
+    // ③ in/out balance
+    const ratio = tin ? tout / tin : (tout ? Infinity : 0);
+    if (ratio >= 4) out.push({ score: 60, text: pick([
+      `Downloads dominate: egress outweighs ingress about ${ratio.toFixed(1)}× — a read-heavy workload.`,
+      `Outbound dwarfs inbound (${ratio.toFixed(1)}×); clients pull far more than they push.`,
+      `Egress runs ${ratio.toFixed(1)}× ingress — responses are much larger than requests.`,
+      `This key is download-skewed — ${ratio.toFixed(1)}× more bytes leave than arrive.`,
+    ], 2) });
+    else if (ratio > 0 && ratio <= 0.25) out.push({ score: 60, text: pick([
+      `Outbound traffic unusually low relative to input — uploads dominate (${(1 / ratio).toFixed(1)}× ingress).`,
+      `Ingress outweighs egress ${(1 / ratio).toFixed(1)}× — a write/upload-heavy pattern.`,
+      `Clients push far more than they receive (${(1 / ratio).toFixed(1)}× more in than out).`,
+      `Responses are tiny against the payloads sent — ${(1 / ratio).toFixed(1)}× upload skew.`,
+    ], 3) });
+    else if (ratio >= 0.7 && ratio <= 1.4) out.push({ score: 34, text: pick([
+      `Ingress and egress are well balanced — roughly a byte out for every byte in.`,
+      `Symmetric flow: inbound and outbound payloads track each other closely.`,
+      `In and out volumes mirror one another — an echo-shaped transfer profile.`,
+    ], 4) });
+    // ④ peak timing
+    if (buckets.length) {
+      const pk = buckets.slice().sort((a, b) => (b.bin + b.bout) - (a.bin + a.bout))[0];
+      const lbl = esc(pk.label) + (pk.sub ? " " + esc(pk.sub) : "");
+      out.push({ score: 26, text: pick([
+        `Traffic peaked sharply around <b>${lbl}</b> with ${fmtBytes(pk.bin + pk.bout)} moved.`,
+        `The heaviest transfer window was <b>${lbl}</b> (${fmtBytes(pk.bin + pk.bout)}).`,
+        `Most data crossed near <b>${lbl}</b> — a clear volume spike.`,
+        `Bandwidth crested at <b>${lbl}</b>, ${fmtBytes(pk.bin + pk.bout)} in that bucket alone.`,
+      ], 5) });
+    }
+    // ⑤ largest single request
+    if (by.largest) {
+      const lg = by.largest, big = (lg.bin || 0) + (lg.bout || 0);
+      out.push({ score: 22, text: pick([
+        `One request stands out: <b>${esc(lg.method || "")} ${esc(lg.path || "")}</b> moved ${fmtBytes(big)} on its own.`,
+        `Heaviest single call was <b>${esc(lg.method || "")} ${esc(lg.path || "")}</b> at ${fmtBytes(big)}.`,
+        `A lone <b>${esc(lg.path || "")}</b> request carried ${fmtBytes(big)} — the biggest payload seen.`,
+      ], 6) });
+    }
+    // ⑥ average payload size
+    const avg = by.avg_in || 0, avgo = by.avg_out || 0;
+    if (avg || avgo) out.push({ score: 16, text: pick([
+      `Typical exchange: ${fmtBytes(avg)} in, ${fmtBytes(avgo)} out per request.`,
+      `Per call this key averages ${fmtBytes(avg)} received and ${fmtBytes(avgo)} returned.`,
+      `Mean payload sits at ${fmtBytes(avg)} inbound / ${fmtBytes(avgo)} outbound.`,
+    ], 7) });
+    // ⑦ payload spread (burstiness)
+    if (by.pct && by.pct.in_p95 && by.pct.in_p50 && by.pct.in_p95 > by.pct.in_p50 * 4) {
+      out.push({ score: 24, text: pick([
+        `Upload sizes are bursty — p95 (${fmtBytes(by.pct.in_p95)}) towers over the median (${fmtBytes(by.pct.in_p50)}).`,
+        `Most requests are small (${fmtBytes(by.pct.in_p50)} median) but the top 5% reach ${fmtBytes(by.pct.in_p95)}.`,
+        `A long tail of large uploads: median ${fmtBytes(by.pct.in_p50)}, p95 ${fmtBytes(by.pct.in_p95)}.`,
+      ], 8) });
+    }
+    // ⑧ quiet windows
+    const zero = (by.buckets || []).length - buckets.length;
+    if (zero > 0 && (by.buckets || []).length) {
+      const pctQ = Math.round(100 * zero / by.buckets.length);
+      if (pctQ >= 35) out.push({ score: 18, text: pick([
+        `Transfer is intermittent — ${pctQ}% of buckets carried no payload at all.`,
+        `Quiet for much of the window: ${pctQ}% of slots saw zero bytes.`,
+        `Traffic arrives in pockets; ${pctQ}% of the timeline was idle.`,
+      ], 9) });
+    }
+    // ⑨ trend (first vs second half)
+    if (buckets.length >= 4) {
+      const all = by.buckets, h = Math.floor(all.length / 2);
+      const a = all.slice(0, h).reduce((s, b) => s + b.bin + b.bout, 0);
+      const c = all.slice(h).reduce((s, b) => s + b.bin + b.bout, 0);
+      if (a && c) {
+        if (c > a * 1.6) out.push({ score: 20, text: pick([`Bandwidth is climbing — the latter half moved ${(c / a).toFixed(1)}× the data of the first.`, `Transfer is accelerating toward the present (${(c / a).toFixed(1)}× ramp).`, `Recent buckets are heavier — a rising data trend.`], 10) });
+        else if (a > c * 1.6) out.push({ score: 20, text: pick([`Bandwidth is tapering — recent buckets moved ${(c / a * 100).toFixed(0)}% of the early volume.`, `Transfer is cooling off after a heavier opening stretch.`, `Data flow has been winding down through the window.`], 11) });
+      }
+    }
+    // ⑩ headline volume (always available, low score)
+    out.push({ score: 8, text: pick([
+      `${fmtBytes(tot)} crossed this key — ${fmtBytes(tin)} in, ${fmtBytes(tout)} out.`,
+      `Total throughput for the window: ${fmtBytes(tot)} (${fmtBytes(tin)} ▲ / ${fmtBytes(tout)} ▼).`,
+      `This key moved ${fmtBytes(tot)} of payload across the period.`,
+    ], 12) });
+    return out.sort((a, b) => b.score - a.score);
   }
 
   // ════════════════════ LIVE (per-SSE-event, rAF-coalesced) ═══════════════
@@ -672,13 +1231,35 @@
         if (last.total > (DATA.stats.busiest_count || 0)) { DATA.stats.busiest_count = last.total; DATA.stats.busiest_label = last.label; }
       }
     }
-    // hive matrix: bump method × status cell
+    // hive matrix: bump method × status cell + enriched colony fields
     if (DATA.matrix) {
       const m = (ev.method || "?").toUpperCase();
       let row = DATA.matrix.find(x => x.method === m);
-      if (!row) { row = { method: m, n2: 0, n4: 0, n5: 0, total: 0 }; DATA.matrix.push(row); }
+      if (!row) { row = { method: m, n2: 0, n4: 0, n5: 0, total: 0, lat_avg: null, lat_bands: { fast: 0, med: 0, slow: 0 }, cells: {}, endpoints: [], series: [] }; DATA.matrix.push(row); }
       row[sb] += 1; row.total = row.n2 + row.n4 + row.n5;
+      // per-cell count + latency band (sb is "n2"/"n4"/"n5" → cell key "2"/"4"/"5")
+      const sk = sb.slice(1), lat = +ev.latency_ms;
+      const cell = (row.cells = row.cells || {})[sk] || (row.cells[sk] = { n: 0, lat: null, lf: 0, lm: 0, ls: 0 });
+      cell.n += 1;
+      if (!isNaN(lat)) {
+        cell.lat = cell.lat == null ? lat : Math.round(cell.lat + (lat - cell.lat) / cell.n);
+        const bb = lat < 100 ? "lf" : lat < 500 ? "lm" : "ls"; cell[bb] = (cell[bb] || 0) + 1;
+        const mb = lat < 100 ? "fast" : lat < 500 ? "med" : "slow";
+        (row.lat_bands = row.lat_bands || { fast: 0, med: 0, slow: 0 })[mb] += 1;
+      }
+      // last series bucket (aligned to hero grid)
+      if (Array.isArray(row.series) && row.series.length) {
+        const lb = row.series[row.series.length - 1]; lb[sb] = (lb[sb] || 0) + 1; lb.n = (lb.n || 0) + 1;
+      }
+      // endpoint contributors
+      if (ev.path) {
+        const ep = (row.endpoints = row.endpoints || []).find(e => e.path === ev.path);
+        if (ep) { ep.n += 1; if (isErr) ep.e = (ep.e || 0) + 1; } else row.endpoints.push({ path: ev.path, n: 1, e: isErr ? 1 : 0, pct: 0 });
+        row.endpoints.sort((a, b) => b.n - a.n);
+        row.endpoints.forEach(e => e.pct = row.total ? Math.round(100 * e.n / row.total) : 0);
+      }
       DATA.matrix.sort((a, b) => b.total - a.total);
+      _hivePulseMethod = m;   // pulse this colony on the next render frame
     }
     if (DATA.clock) {
       const lh = new Date().getHours(); const hr = (DATA.clock.hours || [])[lh];
@@ -689,6 +1270,7 @@
       let day = (DATA.calendar.days || []).find(d => d.date === key);
       if (!day) { day = { date: key, n: 0, e: 0 }; (DATA.calendar.days = DATA.calendar.days || []).push(day); }
       day.n += 1; if (isErr) day.e += 1; if (day.n > DATA.calendar.max) DATA.calendar.max = day.n;
+      _calSweep = true;   // light-sweep today's cell on the next calendar render
     }
     if (DATA.bytes && DATA.bytes.buckets.length) {
       const lb = DATA.bytes.buckets[DATA.bytes.buckets.length - 1];
@@ -698,6 +1280,8 @@
       DATA.bytes.avg_in = tr ? Math.round(DATA.bytes.total_in / tr) : 0;
       DATA.bytes.avg_out = tr ? Math.round(DATA.bytes.total_out / tr) : 0;
       DATA.bytes.ratio = DATA.bytes.total_in ? Math.round(10 * DATA.bytes.total_out / DATA.bytes.total_in) / 10 : null;
+      _rateWin.push({ t: Date.now(), bytes: (+ev.bytes_in || 0) + (+ev.bytes_out || 0) });
+      _byPulse++;   // emit a throughput ring-pulse on the next render frame
     }
     _dirty = { hero: 1, kpis: 1, clock: 1, cal: 1, bytes: 1, hive: 1 };
     if (!_rerenderRaf) _rerenderRaf = requestAnimationFrame(_flushRender);
@@ -709,8 +1293,15 @@
     if (_dirty.kpis) renderKpis();
     if (_dirty.clock) renderClock(false);
     if (_dirty.cal) renderCalendar(false);
-    if (_dirty.hive) renderHive(false);
-    if (_dirty.bytes) renderBytes(false);
+    // Hive: pulse the active colony (glow propagation) without a full rebuild,
+    // so connectors/breathing/textures don't restart. Sizes reconcile on the
+    // 1.8 s debounced refresh().
+    if (_dirty.hive) { if (_hivePulseMethod) { _hivePulse(_hivePulseMethod); _hivePulseMethod = null; } }
+    // Bytes: tick the live counters + emit a throughput pulse, but DON'T rebuild
+    // the SVG — a full rebuild would restart every SMIL orbit/sweep + marching
+    // pipe from frame zero, producing the "stop-motion" stutter we're avoiding.
+    // Segment lengths reconcile on the 1.8 s debounced refresh() instead.
+    if (_dirty.bytes) { _bytesLive(); if (_byPulse) { _ringPulse(); _byPulse = 0; } }
     _dirty = {};
     if (_openExpand && _openExpand.update) {
       const open = !(window.APIN && APIN.lightbox && APIN.lightbox.isOpen) || APIN.lightbox.isOpen();
@@ -848,14 +1439,14 @@
   function expandKpiPeak(panel) {
     const s = DATA.stats || {}, c = DATA.clock || { hours: [] };
     const ranked = (c.hours || []).filter(h => h.n > 0).sort((a, b) => b.n - a.n).slice(0, 6)
-      .map(h => ({ label: String(h.h).padStart(2, "0") + ":00", v: h.n, click: "h" + h.h }));
+      .map(h => ({ label: fmt12(h.h), v: h.n, click: "h" + h.h}));
     panel.innerHTML =
       `<div class="tfx-bignum"><span>${fmtNum(s.peak_per_min)}</span><span class="tfx-bignum-lbl">peak requests in a single minute</span></div>
-       <div class="tfx-facts"><span>busiest hour <b>${c.busiest_h != null ? String(c.busiest_h).padStart(2, "0") + ":00" : "—"}</b></span><span>busiest bucket <b>${esc(s.busiest_label)}</b> (${fmtNum(s.busiest_count)})</span></div>
+       <div class="tfx-facts"><span>busiest hour <b>${c.busiest_h != null ? fmt12(c.busiest_h) : "—"}</b></span><span>busiest bucket <b>${esc(s.busiest_label)}</b> (${fmtNum(s.busiest_count)})</span></div>
        ${_sec("per-minute · busiest hour")}<div id="tfx-peak-min" class="tf-empty">loading…</div>
        ${_sec("busiest hours · click → requests")}${ranked.length ? _hbars(ranked, _C().accent) : `<div class="tf-empty">no data</div>`}
        ${_sec("verdict")}<p class="tfx-insight" id="tfx-peak-verdict">…</p>`;
-    panel.querySelectorAll(".tfx-hbar[data-click]").forEach(b => b.addEventListener("click", () => { const hh = +b.getAttribute("data-click").slice(1); const w = _hourWindow(hh); openRequestContainer({ sinceMs: w.sinceMs, untilMs: w.untilMs, label: String(hh).padStart(2, "0") + ":00" }); }));
+    panel.querySelectorAll(".tfx-hbar[data-click]").forEach(b => b.addEventListener("click", () => { const hh = +b.getAttribute("data-click").slice(1); _drillHourOfDay(hh); }));
     if (c.busiest_h != null) {
       const w = _hourWindow(c.busiest_h);
       _fetchWindow(w.sinceMs, w.untilMs).then(rows => {
@@ -962,44 +1553,239 @@
     _openExpand = { kind: "calendar", update: paint };
   }
 
+  // ── colony health strip: last ≤12 buckets, colored by mode, recent pulses ─
+  function _colonyHealthStrip(series, mode) {
+    const buckets = (series || []).slice(-12);
+    if (!buckets.length || !buckets.some(b => b.n > 0)) return `<span class="tfx-hs-empty">no recent activity</span>`;
+    const col = _C(), maxN = Math.max(1, ...buckets.map(b => b.n));
+    const lastActive = buckets.map(b => b.n > 0).lastIndexOf(true);
+    return `<span class="tfx-hs">` + buckets.map((b, i) => {
+      if (!b.n) return `<span class="tfx-hs-cell tfx-hs-dorm" title="quiet"></span>`;
+      let fill, op = 1;
+      if (mode === "volume") { fill = col.accent; op = 0.25 + 0.75 * (b.n / maxN); }
+      else {
+        const ep = b.n ? (b.n4 + b.n5) / b.n : 0;
+        if (mode === "success") { const sp = 1 - ep; fill = sp >= 0.95 ? col.ok : sp >= 0.8 ? col.amber : col.danger; }
+        else { fill = ep < 0.05 ? col.ok : ep < 0.2 ? col.amber : col.danger; }
+      }
+      const ping = i === lastActive ? " tfx-hs-ping" : "";
+      return `<span class="tfx-hs-cell${ping}" style="background:${fill};opacity:${op.toFixed(2)};--gc:${fill}" title="${b.n} req · ${Math.round(100 * (b.n4 + b.n5) / b.n)}% err"></span>`;
+    }).join("") + `</span>`;
+  }
+  // ── method intelligence: smart observability bullets (no table) ──────────
+  function _methodIntel(m) {
+    const hl = _methHealth(m), bands = m.lat_bands || {}, lt = (bands.fast || 0) + (bands.med || 0) + (bands.slow || 0);
+    const slowSh = lt ? (bands.slow || 0) / lt : 0, fastSh = lt ? (bands.fast || 0) / lt : 0;
+    const top = (m.endpoints || [])[0], bullets = [];
+    if (hl.succ === 0 && m.total >= 3) {
+      bullets.push({ t: "0 successful requests", k: "danger" });
+      bullets.push({ t: m.n4 > m.n5 ? "consistent 4xx — likely auth / bad path" : "server-side 5xx failures", k: "danger" });
+    } else {
+      bullets.push({ t: `${hl.succ}% success`, k: hl.succ >= 90 ? "ok" : hl.succ >= 70 ? "amber" : "danger" });
+      if (m.n5 > 0) bullets.push({ t: `${fmtNum(m.n5)} server error${m.n5 > 1 ? "s" : ""} (5xx)`, k: "danger" });
+      else if (m.n4 > 0 && hl.errPct >= 10) bullets.push({ t: `${hl.errPct}% client errors (4xx)`, k: "amber" });
+    }
+    if (hl.lat != null) {
+      if (slowSh >= 0.4) bullets.push({ t: `elevated latency · ~${fmtNum(hl.lat)} ms`, k: "amber" });
+      else if (fastSh >= 0.7) bullets.push({ t: `fast & stable · ~${fmtNum(hl.lat)} ms`, k: "ok" });
+      else bullets.push({ t: `~${fmtNum(hl.lat)} ms typical`, k: "neutral" });
+    }
+    if (top) bullets.push({ t: `top route · ${top.path} (${top.pct}%)`, k: "neutral" });
+    return { hl, bullets };
+  }
+  // ── endpoint contributors as flow-lanes (not rows) ───────────────────────
+  function _endpointLanes(m) {
+    const eps = (m.endpoints || []).slice(0, 6);
+    if (!eps.length) return `<div class="tf-empty">no endpoint data</div>`;
+    const col = _C(), max = Math.max(1, ...eps.map(e => e.n));
+    return `<div class="tfx-lanes">` + eps.map(e => {
+      const w = (e.n / max * 100).toFixed(1), errPct = e.n ? Math.round(100 * (e.e || 0) / e.n) : 0;
+      const fc = errPct >= 20 ? col.danger : errPct > 0 ? col.amber : col.accent;
+      return `<div class="tfx-lane" data-path="${esc(e.path)}" data-m="${esc(m.method)}">
+        <span class="tfx-lane-path" title="${esc(e.path)}">${esc(e.path)}</span>
+        <span class="tfx-lane-track"><i class="tfx-lane-flow" style="width:${w}%;--fc:${fc}"></i></span>
+        <span class="tfx-lane-pct">${e.pct}%</span><span class="tfx-lane-n">${fmtNum(e.n)}</span></div>`;
+    }).join("") + `</div>`;
+  }
+  // ── temporal stream: stacked ok/amber/danger + scrub cursor + hit rects ──
+  function _temporalStream(series) {
+    const s = series || []; const n = s.length; if (n < 2) return `<div class="tf-empty">not enough history</div>`;
+    const col = _C(), W = 520, H = 92, pad = 8, maxN = Math.max(1, ...s.map(b => b.n));
+    const X = (i) => pad + (i / (n - 1)) * (W - 2 * pad), Y = (v) => H - pad - (v / maxN) * (H - 2 * pad);
+    const area = (key, fill, op) => { let d = `M ${X(0).toFixed(1)} ${(H - pad).toFixed(1)}`; s.forEach((b, i) => { d += ` L ${X(i).toFixed(1)} ${Y(key(b)).toFixed(1)}`; }); d += ` L ${X(n - 1).toFixed(1)} ${(H - pad).toFixed(1)} Z`; return `<path class="tfx-stream-band" d="${d}" fill="${fill}" fill-opacity="${op}"/>`; };
+    let spikes = "", hits = "";
+    const bw = (W - 2 * pad) / n;
+    s.forEach((b, i) => {
+      if (b.n5 > 0) spikes += `<circle class="tfx-stream-spike" cx="${X(i).toFixed(1)}" cy="${Y(b.n).toFixed(1)}" r="2.6" fill="${col.danger}"/>`;
+      hits += `<rect class="tfx-stream-hit" data-i="${i}" x="${(X(i) - bw / 2).toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H}" fill="transparent"/>`;
+    });
+    return `<svg class="tfx-stream-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;overflow:visible">
+      ${area(b => b.n, col.ok, 0.5)}${area(b => b.n4 + b.n5, col.amber, 0.62)}${area(b => b.n5, col.danger, 0.72)}
+      <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="var(--paper-edge)"/>${spikes}
+      <line class="tfx-stream-cursor" id="tfx-stream-cursor" x1="0" y1="0" x2="0" y2="${H}" stroke="var(--ink)" stroke-opacity="0" stroke-width="1" stroke-dasharray="3 3"/>${hits}</svg>`;
+  }
+  // ── status evolution mini-hive: one hex per bucket (errors spread/recover) ─
+  function _statusEvolution(series) {
+    const s = (series || []).filter(b => b.n >= 0); const act = s.filter(b => b.n > 0);
+    if (!act.length) return `<div class="tf-empty">no evolution yet</div>`;
+    const col = _C(), maxN = Math.max(1, ...s.map(b => b.n)), R = 9, gap = 4, ox = R + 2, oy = R + 3;
+    let cells = "";
+    s.forEach((b, i) => {
+      const cx = ox + i * (R * 1.5 + gap), cy = oy + (i % 2 ? R * 0.5 : 0);
+      if (!b.n) { cells += `<g class="tfx-evo-cell" data-i="${i}"><path d="${_hexPath(cx, cy, R * 0.62)}" fill="none" stroke="var(--ink-mute)" stroke-opacity="0.25" stroke-width="0.7" stroke-dasharray="1.5 2"/><path class="tfx-evo-hit" data-i="${i}" d="${_hexPath(cx, cy, R + 2)}" fill="transparent"/></g>`; return; }
+      const ep = (b.n4 + b.n5) / b.n, fill = b.n5 > 0 && ep >= 0.2 ? col.danger : ep >= 0.2 ? col.amber : ep > 0 ? col.amber : col.ok;
+      const op = 0.4 + 0.6 * (b.n / maxN);
+      cells += `<g class="tfx-evo-cell" data-i="${i}" style="--gc:${fill}"><path class="tfx-evo-hex" d="${_hexPath(cx, cy, R)}" fill="${fill}" fill-opacity="${op.toFixed(2)}" stroke="${fill}" stroke-width="${b.n5 > 0 ? 1.4 : 0.6}" stroke-opacity="0.75"/><path class="tfx-evo-hit" data-i="${i}" d="${_hexPath(cx, cy, R + 2)}" fill="transparent"/></g>`;
+    });
+    const W = ox + s.length * (R * 1.5 + gap) + R, H = oy + R * 1.5 + 5;
+    return `<svg class="tfx-evo-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMinYMid meet" style="max-height:${H}px;width:100%;overflow:visible">${cells}</svg>`;
+  }
+  // ── insights for the inspection temporal visuals ─────────────────────────
+  function _streamInsight(series, buckets) {
+    const s = series || []; const act = s.map((b, i) => ({ b, i })).filter(x => x.b.n > 0);
+    if (!act.length) return "No activity recorded for this colony in the window.";
+    const lbl = (i) => buckets && buckets[i] ? (buckets[i].label + (buckets[i].sub ? " " + buckets[i].sub : "")) : "bucket " + (i + 1);
+    const peak = act.slice().sort((a, b) => b.b.n - a.b.n)[0];
+    const errBk = act.filter(x => (x.b.n4 + x.b.n5) > 0).sort((a, b) => (b.b.n4 + b.b.n5) - (a.b.n4 + a.b.n5))[0];
+    const sev = act.filter(x => x.b.n5 > 0);
+    let t = `Busiest at <b>${esc(lbl(peak.i))}</b> (${fmtNum(peak.b.n)} req).`;
+    if (sev.length) t += ` Server errors surfaced ${sev.length === 1 ? "once, around" : "across " + sev.length + " buckets near"} <b>${esc(lbl(sev[sev.length - 1].i))}</b>.`;
+    else if (errBk && (errBk.b.n4 + errBk.b.n5) / errBk.b.n >= 0.2) t += ` Client errors peaked around <b>${esc(lbl(errBk.i))}</b> (${Math.round(100 * (errBk.b.n4 + errBk.b.n5) / errBk.b.n)}%).`;
+    else t += " No error spikes — clean throughout.";
+    return t;
+  }
+  function _evoInsight(series) {
+    const s = (series || []).filter(b => b.n > 0); if (!s.length) return "";
+    const errBuckets = s.filter(b => (b.n4 + b.n5) > 0).length;
+    const tail = s.slice(-3), tailErr = tail.some(b => (b.n4 + b.n5) / b.n >= 0.2);
+    const head = s.slice(0, Math.max(1, s.length - 3)), headErr = head.some(b => (b.n4 + b.n5) / b.n >= 0.2);
+    if (!errBuckets) return "Status held healthy across every active bucket.";
+    if (headErr && !tailErr) return "Errors appeared earlier and the colony recovered — stabilising now.";
+    if (!headErr && tailErr) return "Recently degrading — errors are concentrated in the latest buckets.";
+    if (s.some(b => b.n5 > 0)) return "Server errors recur intermittently — not yet stable.";
+    return "Client errors scattered through the window; no sustained outage.";
+  }
+
   function expandHive(panel) {
-    const paint = () => {
-      const col = _C();
-      const rows = (DATA.matrix || []).filter(m => m.total > 0);
-      const grand = rows.reduce((a, m) => a + m.total, 0) || 1;
-      const succ = (m) => m.total ? Math.round(100 * m.n2 / m.total) : 0;
-      // per-method table (total · 2xx · 4xx · 5xx · success% · share)
-      const trows = rows.map(m => {
-        const s = succ(m), sCls = s >= 80 ? "ok" : s >= 50 ? "amber" : "danger";
-        return `<div class="tfx-hv-row" data-m="${esc(m.method)}"><span class="meth ${_methClass(m.method)}">${esc(m.method)}</span>
-          <span class="tfx-hv-n">${fmtNum(m.total)}</span><span class="tfx-hv-n" style="color:${col.ok}">${fmtNum(m.n2)}</span>
-          <span class="tfx-hv-n" style="color:${col.amber}">${fmtNum(m.n4)}</span><span class="tfx-hv-n" style="color:${col.danger}">${fmtNum(m.n5)}</span>
-          <span class="tfx-hv-succ tfx-hv-${sCls}">${s}%</span><span class="tfx-hv-n">${Math.round(100 * m.total / grand)}%</span></div>`;
-      }).join("");
-      // insight: worst + best by success rate (require a few requests)
-      const meaningful = rows.filter(m => m.total >= 3);
-      const worst = meaningful.slice().sort((a, b) => succ(a) - succ(b))[0];
-      const best = meaningful.slice().sort((a, b) => succ(b) - succ(a))[0];
-      let insight = "Not enough traffic to assess per-method health yet.";
-      if (worst && best && worst !== best) {
-        insight = `<b>${esc(best.method)}</b> is the healthiest at ${succ(best)}% success. `;
-        if (succ(worst) === 0) insight += `<b>${esc(worst.method)}</b> never succeeds — all ${fmtNum(worst.total)} calls returned 4xx/5xx (bad path or missing scope?).`;
-        else insight += `<b>${esc(worst.method)}</b> is the weakest at ${succ(worst)}% success.`;
-      } else if (best) insight = `<b>${esc(best.method)}</b> runs at ${succ(best)}% success.`;
-      panel.innerHTML =
-        `<div id="tfx-hive"></div>
-         ${_sec("per-method breakdown · click a row for its requests")}
-         <div class="tfx-hv-row tfx-hv-head"><span>method</span><span class="tfx-hv-n">total</span><span class="tfx-hv-n">2xx</span><span class="tfx-hv-n">4xx</span><span class="tfx-hv-n">5xx</span><span class="tfx-hv-succ">success</span><span class="tfx-hv-n">share</span></div>
-         ${trows || `<div class="tf-empty">no data</div>`}
-         ${_sec("insight")}<p class="tfx-insight">${insight}</p>`;
-      $("tfx-hive").innerHTML = hiveSvg(DATA.matrix || []);
-      _wireHive($("tfx-hive"));
-      panel.querySelectorAll(".tfx-hv-row[data-m]").forEach(b => b.addEventListener("click", () => {
-        const m = b.getAttribute("data-m"); const h = DATA.hero || { buckets: [] }; if (!h.buckets.length) return;
-        openRequestContainer({ sinceMs: h.buckets[0].t_ms, untilMs: h.buckets[h.buckets.length - 1].t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: m + " · all", method: m });
-      }));
+    let sel = null, hmode = "error";   // selected colony · health-strip mode
+    const rowsNow = () => (DATA.matrix || []).filter(m => m.total > 0);
+    const overallState = () => {
+      const rows = rowsNow(); if (!rows.length) return { txt: "no traffic", k: "neutral" };
+      const t = rows.reduce((a, m) => a + m.total, 0), e = rows.reduce((a, m) => a + m.n4 + m.n5, 0), sev = rows.reduce((a, m) => a + m.n5, 0);
+      const ep = t ? e / t : 0;
+      if (sev > 0 && ep >= 0.15) return { txt: "critical", k: "danger" };
+      if (ep >= 0.1) return { txt: "degraded", k: "amber" };
+      return { txt: "stable", k: "ok" };
     };
-    paint(); _openExpand = { kind: "hive", update: paint };
+    const buildShell = () => {
+      const rows = rowsNow(), st = overallState();
+      const total = rows.reduce((a, m) => a + m.total, 0);
+      panel.innerHTML =
+        `<div class="tfx-hv2-head">
+           <span class="tfx-hv2-live"><i></i>live</span>
+           <span class="tfx-hv2-period">${esc(GRAN_LABEL[GRAN] || "")} · ${fmtNum(total)} requests</span>
+           <span class="tfx-hv2-state tfx-hv2-${st.k}">${st.txt}</span>
+         </div>
+         <div id="tfx-hive" class="tfx-hv2-hive"></div>
+         <div class="tfx-sec-row">${_sec("method intelligence · click a colony to inspect")}
+           <div class="ov-range tfx-hs-mode" id="tfx-hs-mode"><button data-m="error" aria-pressed="true">error</button><button data-m="success">success</button><button data-m="volume">volume</button></div></div>
+         <div class="tfx-intel" id="tfx-intel"></div>
+         <div id="tfx-inspect"></div>`;
+      // hero hive (built once; live pulses target it via _hivePulse)
+      $("tfx-hive").innerHTML = hiveColonySvg(DATA.matrix || [], { expanded: true });
+      _wireHiveColony($("tfx-hive"), { onColony: (mm) => { sel = mm; renderIntel(); renderInspect(); } });
+      $("tfx-hs-mode").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+        $("tfx-hs-mode").querySelectorAll("button").forEach(x => x.removeAttribute("aria-pressed")); b.setAttribute("aria-pressed", "true");
+        hmode = b.getAttribute("data-m"); renderIntel();
+      }));
+      if (!sel && rows.length) sel = rows[0].method;
+      renderIntel(); renderInspect();
+    };
+    const renderIntel = () => {
+      const host = $("tfx-intel"); if (!host) return;
+      const rows = rowsNow();
+      host.innerHTML = rows.map(m => {
+        const { hl, bullets } = _methodIntel(m);
+        return `<div class="tfx-card tfx-card-${hl.state}${m.method === sel ? " tfx-card-sel" : ""}" data-m="${esc(m.method)}">
+          <div class="tfx-card-head"><span class="meth ${_methClass(m.method)}">${esc(m.method)}</span><span class="tfx-card-total">◉ ${fmtNum(m.total)}</span></div>
+          <ul class="tfx-card-bul">${bullets.map(b => `<li class="tfx-bul-${b.k}">${esc(b.t)}</li>`).join("")}</ul>
+          <div class="tfx-card-strip">${_colonyHealthStrip(m.series, hmode)}</div></div>`;
+      }).join("") || `<div class="tf-empty">no methods</div>`;
+      host.querySelectorAll(".tfx-card[data-m]").forEach(c => c.addEventListener("click", () => { sel = c.getAttribute("data-m"); renderIntel(); renderInspect(); }));
+    };
+    const renderInspect = () => {
+      const host = $("tfx-inspect"); if (!host) return;
+      const m = rowsNow().find(x => x.method === sel);
+      if (!m) { host.innerHTML = ""; return; }
+      const h = DATA.hero || { buckets: [] };
+      const bk = h.buckets || [];
+      host.innerHTML =
+        `${_sec("colony inspection · " + esc(m.method))}
+         <div class="tfx-insp-grid">
+           <div><div class="tfx-insp-lbl">endpoint contributors</div>${_endpointLanes(m)}</div>
+           <div><div class="tfx-insp-lbl">temporal activity · hover to scrub</div>${_temporalStream(m.series)}
+             <p class="tfx-insight tfx-insp-ins">${_streamInsight(m.series, bk)}</p>
+             <div class="tfx-insp-lbl" style="margin-top:8px">status evolution</div>${_statusEvolution(m.series)}
+             <p class="tfx-insight tfx-insp-ins">${esc(_evoInsight(m.series))}</p></div>
+         </div>
+         <button class="tfx-drill-btn" id="tfx-insp-all">open all ${esc(m.method)} requests →</button>`;
+      const bLabel = (i) => bk[i] ? (esc(bk[i].label) + (bk[i].sub ? " " + esc(bk[i].sub) : "")) : "bucket " + (i + 1);
+      const bucketDrill = (i) => {
+        const b = bk[i]; if (!b) return;
+        openRequestContainer({ sinceMs: b.t_ms, untilMs: b.t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: m.method + " · " + bLabel(i), method: m.method });
+      };
+      const seriesTip = (e, i) => {
+        const s = (m.series || [])[i]; if (!s) return;
+        const err = s.n4 + s.n5, ep = s.n ? Math.round(100 * err / s.n) : 0;
+        tip(true, e.clientX, e.clientY, `<b>${bLabel(i)}</b><br>${fmtNum(s.n)} req · <span style="color:var(--c-ok,#2f6f3e)">${s.n2} ok</span>`
+          + (s.n4 ? ` · <span style="color:var(--c-amber,#c98a2b)">${s.n4} 4xx</span>` : "")
+          + (s.n5 ? ` · <span style="color:var(--c-danger,#b3402f)">${s.n5} 5xx</span>` : "")
+          + `<br>${ep}% errors${s.n ? " · click → requests" : ""}`);
+      };
+      // temporal stream: scrub cursor + tooltip + click drill
+      const cursor = host.querySelector("#tfx-stream-cursor");
+      host.querySelectorAll(".tfx-stream-hit").forEach(r => {
+        const i = +r.getAttribute("data-i");
+        r.style.cursor = "pointer";
+        r.addEventListener("mousemove", (e) => {
+          seriesTip(e, i);
+          if (cursor) { const x = r.getAttribute("x"), w = +r.getAttribute("width"); const cx = (+x + w / 2).toFixed(1); cursor.setAttribute("x1", cx); cursor.setAttribute("x2", cx); cursor.setAttribute("stroke-opacity", "0.5"); }
+        });
+        r.addEventListener("mouseleave", () => { tip(false); if (cursor) cursor.setAttribute("stroke-opacity", "0"); });
+        r.addEventListener("click", () => bucketDrill(i));
+      });
+      // status evolution: hover glow + tooltip + click drill
+      host.querySelectorAll(".tfx-evo-hit").forEach(hit => {
+        const i = +hit.getAttribute("data-i");
+        hit.style.cursor = "pointer";
+        hit.addEventListener("mousemove", (e) => { seriesTip(e, i); const g = hit.closest(".tfx-evo-cell"); if (g) g.classList.add("tfx-evo-pop"); });
+        hit.addEventListener("mouseleave", () => { tip(false); const g = hit.closest(".tfx-evo-pop"); if (g) g.classList.remove("tfx-evo-pop"); });
+        hit.addEventListener("click", () => bucketDrill(i));
+      });
+      host.querySelectorAll(".tfx-lane[data-path]").forEach(l => l.addEventListener("click", () => {
+        if (!h.buckets.length) return;
+        openRequestContainer({ sinceMs: h.buckets[0].t_ms, untilMs: h.buckets[h.buckets.length - 1].t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: m.method + " · " + l.getAttribute("data-path"), method: m.method, path: l.getAttribute("data-path") });
+      }));
+      host.querySelectorAll(".tfx-lane[data-path]").forEach(l => {
+        l.addEventListener("mousemove", (e) => {
+          const p = l.getAttribute("data-path"); const ep = (m.endpoints || []).find(x => x.path === p); if (!ep) return;
+          const errPct = ep.n ? Math.round(100 * (ep.e || 0) / ep.n) : 0;
+          tip(true, e.clientX, e.clientY, `<b>${esc(p)}</b><br>${fmtNum(ep.n)} req · ${ep.pct}% of ${esc(m.method)}${errPct ? ` · ${errPct}% err` : ""}<br><span style="opacity:.6">click → these requests</span>`);
+        });
+        l.addEventListener("mouseleave", () => tip(false));
+      });
+      const allBtn = $("tfx-insp-all");
+      if (allBtn) allBtn.addEventListener("click", () => { if (!h.buckets.length) return; openRequestContainer({ sinceMs: h.buckets[0].t_ms, untilMs: h.buckets[h.buckets.length - 1].t_ms + (DATA.bucket_ms || GRAN_MS[GRAN]), label: m.method + " · all", method: m.method }); });
+    };
+    buildShell();
+    // live update: refresh header/cards/inspection text without rebuilding the
+    // hive SVG (keeps breathing/diffuse stable); per-event glow via _hivePulse.
+    _openExpand = { kind: "hive", update: () => {
+      const st = overallState(); const sEl = panel.querySelector(".tfx-hv2-state");
+      if (sEl) { sEl.className = "tfx-hv2-state tfx-hv2-" + st.k; sEl.textContent = st.txt; }
+      const pEl = panel.querySelector(".tfx-hv2-period"); if (pEl) pEl.textContent = `${GRAN_LABEL[GRAN] || ""} · ${fmtNum(rowsNow().reduce((a, m) => a + m.total, 0))} requests`;
+      renderIntel(); renderInspect();
+    } };
   }
 
   // weekday × hour heatmap (7 rows Mon–Sun × 24 cols) — consumes DATA.clock.wkhr
@@ -1013,7 +1799,7 @@
     for (let r = 0; r < 7; r++) for (let h = 0; h < 24; h++) {
       const v = (m[r] && m[r][h]) || 0, x = ox + h * (cell + gap), y = oy + r * (cell + gap);
       const op = v ? 0.2 + 0.8 * Math.min(1, v / max) : 1, fill = v ? col.accent : "rgba(120,110,90,.10)";
-      cells += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" fill="${fill}" fill-opacity="${op.toFixed(2)}"><title>${WD[r]} ${String(h).padStart(2, "0")}:00 · ${v} req</title></rect>`;
+      cells += `<rect class="tf-wkhr-cell" data-r="${r}" data-h="${h}" data-v="${v}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" fill="${fill}" fill-opacity="${op.toFixed(2)}" style="${v ? "cursor:pointer" : ""}"/>`;
     }
     return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMinYMid meet" style="max-height:${H}px;width:100%">${lbls}${cells}</svg>`;
   }
@@ -1030,29 +1816,39 @@
       const topHours = hours.filter(h => h.n > 0).slice().sort((a, b) => b.n - a.n).slice(0, 5);
       const wkhr = c.wkhr;   // [7][24] from backend (T15)
       const insight = c.busiest_h != null
-        ? `Traffic clusters around <b>${String(c.busiest_h).padStart(2, "0")}:00</b> — ${bizPct >= 60 ? "mostly business hours" : bizPct <= 30 ? "mostly off-hours" : "spread across the day"} (${bizPct}% within 9–17).`
+        ? `Traffic clusters around <b>${fmt12(c.busiest_h)}</b> — ${bizPct >= 60 ? "mostly business hours" : bizPct <= 30 ? "mostly off-hours" : "spread across the day"} (${bizPct}% within 9–17).`
         : "Rhythm emerges as traffic accrues.";
       $("tfx-clkdetail").innerHTML =
-        `<div class="tfx-facts" style="flex-direction:column;gap:7px"><span>busiest hour <b>${c.busiest_h != null ? String(c.busiest_h).padStart(2, "0") + ":00" : "—"}</b></span><span>quietest active <b>${quiet ? String(quiet.h).padStart(2, "0") + ":00" : "—"}</b></span><span>business hrs (9–17) <b>${bizPct}%</b></span><span>total <b>${fmtNum(tot)}</b></span></div>
-         ${_sec("top hours · click → requests")}${topHours.length ? _hbars(topHours.map(h => ({ label: String(h.h).padStart(2, "0") + ":00", v: h.n, click: "h" + h.h })), _C().accent) : `<div class="tf-empty">no data</div>`}
+        `<div class="tfx-facts" style="flex-direction:column;gap:7px"><span>busiest hour <b>${c.busiest_h != null ? fmt12(c.busiest_h) : "—"}</b></span><span>quietest active <b>${quiet ? fmt12(quiet.h) : "—"}</b></span><span>business hrs (9–17) <b>${bizPct}%</b></span><span>total <b>${fmtNum(tot)}</b></span></div>
+         ${_sec("top hours · click → requests")}${topHours.length ? _hbars(topHours.map(h => ({ label: fmt12(h.h), v: h.n, click: "h" + h.h})), _C().accent) : `<div class="tf-empty">no data</div>`}
          ${wkhr ? `${_sec("weekday × hour")}<div id="tfx-wkhr"></div>` : ""}
          ${_sec("insight")}<p class="tfx-insight">${insight}</p>
          <p class="tfx-clk-hint">click an hour wedge for its 60-minute breakdown.</p>`;
-      $("tfx-clkdetail").querySelectorAll(".tfx-hbar[data-click]").forEach(b => b.addEventListener("click", () => { const hh = +b.getAttribute("data-click").slice(1); const w = _hourWindow(hh); openRequestContainer({ sinceMs: w.sinceMs, untilMs: w.untilMs, label: String(hh).padStart(2, "0") + ":00" }); }));
-      if (wkhr && $("tfx-wkhr")) $("tfx-wkhr").innerHTML = _wkhrHeatmap(wkhr);
+      $("tfx-clkdetail").querySelectorAll(".tfx-hbar[data-click]").forEach(b => b.addEventListener("click", () => { const hh = +b.getAttribute("data-click").slice(1); _drillHourOfDay(hh); }));
+      if (wkhr && $("tfx-wkhr")) {
+        const host = $("tfx-wkhr"); host.innerHTML = _wkhrHeatmap(wkhr);
+        const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        host.querySelectorAll(".tf-wkhr-cell").forEach(cell => {
+          const rr = +cell.getAttribute("data-r"), hh = +cell.getAttribute("data-h"), v = +cell.getAttribute("data-v");
+          cell.addEventListener("mousemove", (e) => { tip(true, e.clientX, e.clientY, `<b>${WD[rr]} ${fmt12(hh)}</b><br>${fmtNum(v)} request(s)${v ? "<br><span style=\"opacity:.7\">click → these requests</span>" : ""}`); cell.style.opacity = "0.75"; });
+          cell.addEventListener("mouseleave", () => { tip(false); cell.style.opacity = ""; });
+          if (v) cell.addEventListener("click", () => _drillWeekdayHour(rr, hh));
+        });
+      }
     };
     const detailHour = (hh) => {
       const h = (DATA.clock.hours || [])[hh]; if (!h) return;
-      // 60-min breakdown for that hour (today/yesterday) from the requests log
-      const win = _hourWindow(hh);
+      // 60-min breakdown for that hour-of-day, aggregated across the whole
+      // clock window (the clock is hour-of-day, not a single date).
+      const win = _clockWindow();
       $("tfx-clkdetail").innerHTML =
-        `<div class="tfx-hour-head"><b>${String(hh).padStart(2, "0")}:00 – ${String((hh + 1) % 24).padStart(2, "0")}:00</b><button class="tfx-back" id="tfx-clk-back">← all hours</button></div>
-         <div class="tfx-facts"><span>${fmtNum(h.n)} requests</span><span>${h.err_pct}% errors</span></div>
-         ${_sec("per-minute")}<div id="tfx-min" class="tf-empty">loading…</div>
+        `<div class="tfx-hour-head"><b>${fmt12(hh)} – ${fmt12((hh + 1) % 24)}</b><button class="tfx-back" id="tfx-clk-back">← all hours</button></div>
+         <div class="tfx-facts"><span>${fmtNum(h.n)} requests · ${GRAN_LABEL[GRAN]}</span><span>${h.err_pct}% errors</span></div>
+         ${_sec("per-minute · within this hour")}<div id="tfx-min" class="tf-empty">loading…</div>
          <button class="tfx-drill-btn" id="tfx-clk-drill">open request container →</button>`;
       $("tfx-clk-back").addEventListener("click", overview);
-      $("tfx-clk-drill").addEventListener("click", () => openRequestContainer({ sinceMs: win.sinceMs, untilMs: win.untilMs, label: String(hh).padStart(2, "0") + ":00" }));
-      api(`/api/account/keys/${encodeURIComponent(PID)}/requests?since=${encodeURIComponent(_utcStr(win.sinceMs))}&until=${encodeURIComponent(_utcStr(win.untilMs))}&limit=200`).then(({ body }) => {
+      $("tfx-clk-drill").addEventListener("click", () => _drillHourOfDay(hh));
+      api(`/api/account/keys/${encodeURIComponent(PID)}/requests?since=${encodeURIComponent(_utcStr(win.sinceMs))}&until=${encodeURIComponent(_utcStr(win.untilMs))}&local_hour=${hh}&tz_off=${TZOFF}&limit=200`).then(({ body }) => {
         const rows = (body && body.data && body.data.items) || [];
         const mins = new Array(60).fill(0), merr = new Array(60).fill(0);
         rows.forEach(r => { const d = new Date((r.timestamp || "").replace(" ", "T") + "Z"); if (isNaN(d)) return; const m = d.getMinutes(); mins[m]++; if ((+r.status_code || 0) >= 400) merr[m]++; });
@@ -1076,40 +1872,54 @@
   }
 
   function expandBytes(panel) {
+    panel.innerHTML =
+      `<div class="tfx-by-top">
+         <div class="tfx-by-ringcol">
+           <div class="tf-ring-wrap tf-ring-wrap-lg" id="tfx-by-ring"></div>
+           <div class="tf-bytes-legend" id="tfx-by-legend"></div>
+         </div>
+         <div class="tfx-by-rivercol">${_sec("flow over time · river")}<div class="tf-river-wrap" id="tfx-by-river"></div></div>
+       </div>
+       ${_sec("endpoint channels · ingress ▶ · egress ◀")}<div id="tfx-by-chan"></div>
+       <div id="tfx-by-extra"></div>
+       ${_sec("insight · click to cycle")}<p class="tfx-insight tf-by-phrase" id="tfx-by-phrase" title="click for another reading"></p>`;
+    const renderPhrase = (by) => {
+      const ins = _bytesInsights(by);
+      if (_byPhraseIdx >= ins.length) _byPhraseIdx = 0;
+      const el = $("tfx-by-phrase"); if (el) el.innerHTML = ins[_byPhraseIdx].text + (ins.length > 1 ? ` <span class="tf-by-phrase-dot">${_byPhraseIdx + 1}/${ins.length}</span>` : "");
+    };
     const paint = () => {
       const by = DATA.bytes || { buckets: [], by_endpoint: [] };
-      const col = _C();
-      const eps = (by.by_endpoint || []).slice();
-      const epInMax = Math.max(1, ...eps.map(e => e.bin)), epOutMax = Math.max(1, ...eps.map(e => e.bout));
-      const rows = eps.length ? eps.map(e =>
-        `<div class="tfx-ep2"><span class="tfx-ep2-path" title="${esc(e.path)}">${esc(e.path)}</span>
-          <span class="tfx-ep2-bar"><i style="width:${(e.bin / epInMax * 100).toFixed(1)}%;background:${col.accent}"></i></span><span class="tfx-ep2-v" style="color:${col.accent}">${fmtBytes(e.bin)}</span>
-          <span class="tfx-ep2-bar"><i style="width:${(e.bout / epOutMax * 100).toFixed(1)}%;background:${col.ok}"></i></span><span class="tfx-ep2-v" style="color:${col.ok}">${fmtBytes(e.bout)}</span></div>`).join("")
-        : `<div class="tf-empty">no endpoint data</div>`;
-      const topIn = eps.slice().sort((a, b) => b.bin - a.bin)[0];
-      const topOut = eps.slice().sort((a, b) => b.bout - a.bout)[0];
-      const inPctTop = by.total_in ? Math.round(100 * ((topIn || {}).bin || 0) / by.total_in) : 0;
-      const outPctTop = by.total_out ? Math.round(100 * ((topOut || {}).bout || 0) / by.total_out) : 0;
-      const lg = by.largest;   // backend (T15): {id,method,path,bin,bout,ts}
-      const pct = by.pct;      // backend (T15): {in_p50,in_p95,out_p50}
-      panel.innerHTML =
-        `<div class="tfx-facts"><span style="color:${col.accent}">▲ in <b>${fmtBytes(by.total_in)}</b> · ${fmtBytes(by.avg_in)}/req</span><span style="color:${col.ok}">▼ out <b>${fmtBytes(by.total_out)}</b> · ${fmtBytes(by.avg_out)}/req</span>${_ratioStr(by.total_in, by.total_out) ? `<span><b>${_ratioStr(by.total_in, by.total_out)}</b></span>` : ""}</div>
-         ${_sec("over time · independent scales")}
-         <div class="tf-byspark-row"><span class="tf-byspark-tag" style="color:${col.accent}">in</span>${_byteSparkbar(by.buckets, "bin", col.accent)}</div>
-         <div class="tf-byspark-row"><span class="tf-byspark-tag" style="color:${col.ok}">out</span>${_byteSparkbar(by.buckets, "bout", col.ok)}</div>
-         ${_sec("where bytes go · per endpoint")}
-         <div class="tfx-ep2 tfx-ep2-head"><span>endpoint</span><span>ingress</span><span></span><span>egress</span><span></span></div>${rows}
-         ${lg ? `${_sec("largest single request")}<div class="tfx-largest"><b>${esc(lg.method || "")} ${esc(lg.path || "")}</b> · in ${fmtBytes(lg.bin)} · out ${fmtBytes(lg.bout)} · ${esc(_local(lg.ts || ""))}<button class="tfx-drill-btn" id="tfx-lg-open">open request →</button></div>` : ""}
-         ${pct ? `${_sec("payload sizes")}<div class="tfx-facts"><span>in p50 <b>${fmtBytes(pct.in_p50)}</b></span><span>in p95 <b>${fmtBytes(pct.in_p95)}</b></span><span>out p50 <b>${fmtBytes(pct.out_p50)}</b></span></div>` : ""}
-         ${_sec("insight")}<p class="tfx-insight">${(topIn || topOut) ? `<b>${esc((topIn || {}).path || "—")}</b> drives ${inPctTop}% of ingress; <b>${esc((topOut || {}).path || "—")}</b> dominates egress (${outPctTop}% of out).` : "Not enough payload data yet."}</p>`;
-      const lo = $("tfx-lg-open");
-      if (lo && lg) lo.addEventListener("click", () => { if (window.APIN && APIN.keyDetail && APIN.keyDetail.openRequest) APIN.keyDetail.openRequest(lg.id); });
-      panel.querySelectorAll(".tf-byb").forEach(bar => {
-        bar.addEventListener("mousemove", (e) => { const b = by.buckets[+bar.getAttribute("data-i")]; if (!b) return; tip(true, e.clientX, e.clientY, `<b>${esc(b.label)}</b><br>in ${fmtBytes(b.bin)} · out ${fmtBytes(b.bout)}`); });
-        bar.addEventListener("mouseleave", () => tip(false));
-      });
+      // radial ring (larger) + center hub
+      const ring = $("tfx-by-ring");
+      if (ring) {
+        ring.innerHTML = `${bandwidthRing(by, 300)}<div class="tf-ring-hub"><div class="tf-ring-hub-total">${fmtBytes((by.total_in || 0) + (by.total_out || 0))}</div><div class="tf-ring-hub-rate">idle</div></div>`;
+        _wireRing(ring, by); _bytesLive();
+      }
+      const lg2 = $("tfx-by-legend");
+      if (lg2) lg2.innerHTML = `<span style="color:${ING}">▲ in ${fmtBytes(by.total_in)} · ${fmtBytes(by.avg_in)}/req</span><span style="color:${EGR}">▼ out ${fmtBytes(by.total_out)} · ${fmtBytes(by.avg_out)}/req</span>${_ratioStr(by.total_in, by.total_out) ? `<span>${_ratioStr(by.total_in, by.total_out)}</span>` : ""}`;
+      // river
+      const riv = $("tfx-by-river");
+      if (riv) { riv.innerHTML = riverSvg(by.buckets || []); _wireRiver(riv, by); }
+      // endpoint channels
+      const ch = $("tfx-by-chan");
+      if (ch) { ch.innerHTML = endpointChannels(by); _wireChannels(ch, by); }
+      // largest single request + payload percentiles
+      const lg = by.largest, pct = by.pct;
+      const ex = $("tfx-by-extra");
+      if (ex) {
+        ex.innerHTML =
+          (lg ? `${_sec("largest single request")}<div class="tfx-largest"><b>${esc(lg.method || "")} ${esc(lg.path || "")}</b> · <span style="color:${ING}">in ${fmtBytes(lg.bin)}</span> · <span style="color:${EGR}">out ${fmtBytes(lg.bout)}</span> · ${esc(_local(lg.ts || ""))}<button class="tfx-drill-btn" id="tfx-lg-open">open request →</button></div>` : "")
+          + (pct ? `${_sec("payload sizes")}<div class="tfx-facts"><span>in p50 <b>${fmtBytes(pct.in_p50)}</b></span><span>in p95 <b>${fmtBytes(pct.in_p95)}</b></span><span>out p50 <b>${fmtBytes(pct.out_p50)}</b></span></div>` : "");
+        const lo = $("tfx-lg-open");
+        if (lo && lg) lo.addEventListener("click", () => { if (window.APIN && APIN.requestDrawer && lg.id != null) APIN.requestDrawer.open(lg.id); else if (window.APIN && APIN.keyDetail && APIN.keyDetail.openRequest) APIN.keyDetail.openRequest(lg.id); });
+      }
+      renderPhrase(by);
     };
-    paint(); _openExpand = { kind: "bytes", update: paint };
+    paint();
+    const ph = $("tfx-by-phrase");
+    if (ph) ph.addEventListener("click", () => { _byPhraseIdx++; renderPhrase(DATA.bytes || { buckets: [] }); });
+    _openExpand = { kind: "bytes", update: () => { _bytesLive(); } };   // live: tick counters only, keep SMIL/marching alive
   }
 
   const EXPANDERS = {
@@ -1176,12 +1986,16 @@
     if (DATA) renderAll(false);   // instant from cache (no re-intro)
     refresh();
     if (LIVE) startSSE();
+    // decay the live MB/s readout once a second even when no events arrive,
+    // so the rate gracefully falls back to "idle" and the glow fades out.
+    if (!_rateTimer) _rateTimer = setInterval(() => { if (_active) _bytesLive(); }, 1000);
   }
   function deactivate() {
     _active = false;
     stopSSE();
     if (_clockTick) { clearInterval(_clockTick); _clockTick = null; }
     if (_liveTimer) { clearTimeout(_liveTimer); _liveTimer = null; }
+    if (_rateTimer) { clearInterval(_rateTimer); _rateTimer = null; }
     if (_rerenderRaf) { cancelAnimationFrame(_rerenderRaf); _rerenderRaf = null; }
   }
 

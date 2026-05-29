@@ -1176,10 +1176,16 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
             ("SELECT minute_ts, requests FROM api_key_usage_minute "
              "WHERE key_id=? AND minute_ts>=? ORDER BY requests DESC LIMIT 1",
              (public_id, cut_min)),
-            # method × status-bucket matrix (the honeycomb hive)
+            # method × status-bucket matrix (the honeycomb hive) — now carries
+            # per-cell latency: avg + fast/med/slow band counts (<100 / <500 / >=500 ms)
+            # so each cell can encode a latency class (texture) and each colony a band.
             ("SELECT method, "
              "CASE WHEN status_code>=500 THEN 5 WHEN status_code>=400 THEN 4 ELSE 2 END AS sb, "
-             "COUNT(*) AS n FROM api_key_request_log WHERE key_id=? AND timestamp>=? "
+             "COUNT(*) AS n, AVG(latency_ms) AS lat, "
+             "SUM(CASE WHEN latency_ms<100 THEN 1 ELSE 0 END) AS lf, "
+             "SUM(CASE WHEN latency_ms>=100 AND latency_ms<500 THEN 1 ELSE 0 END) AS lm, "
+             "SUM(CASE WHEN latency_ms>=500 THEN 1 ELSE 0 END) AS ls "
+             "FROM api_key_request_log WHERE key_id=? AND timestamp>=? "
              "GROUP BY method, sb", (public_id, cut)),
             ("SELECT public_id, name FROM api_keys WHERE user_id=? AND deleted_at IS NULL",
              (user_id,)),
@@ -1199,6 +1205,18 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
              "FROM api_key_request_log WHERE key_id=? AND timestamp>=? "
              "AND (bytes_in IS NOT NULL OR bytes_out IS NOT NULL) LIMIT 5000",
              (public_id, cut)),
+            # method × endpoint contributors — for the colony inspection panel
+            ("SELECT method, path, COUNT(*) AS n, "
+             "SUM(CASE WHEN status_code>=400 THEN 1 ELSE 0 END) AS e "
+             "FROM api_key_request_log WHERE key_id=? AND timestamp>=? "
+             "GROUP BY method, path", (public_id, cut)),
+            # method × time-bucket × status — colony health strip + temporal stream
+            (f"SELECT method, {bexpr} AS b, "
+             "SUM(CASE WHEN status_code>=200 AND status_code<400 THEN 1 ELSE 0 END) AS n2, "
+             "SUM(CASE WHEN status_code>=400 AND status_code<500 THEN 1 ELSE 0 END) AS n4, "
+             "SUM(CASE WHEN status_code>=500 THEN 1 ELSE 0 END) AS n5, COUNT(*) AS n "
+             "FROM api_key_request_log WHERE key_id=? AND timestamp>=? GROUP BY method, b",
+             (modifier, public_id, cut)),
         ]
         if hasattr(c, "batch_read"):
             try:
@@ -1209,7 +1227,8 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
         else:
             res = [_rows(s, a) for s, a in READS]
         (bucket_rows, cal_rows, clock_rows, ep_rows, peak_rows, matrix_rows,
-         key_rows, wkhr_rows, largest_rows, pctval_rows) = res
+         key_rows, wkhr_rows, largest_rows, pctval_rows,
+         methodep_rows, methodseries_rows) = res
 
         key = next((r for r in key_rows if r.get("public_id") == public_id), None)
         if key is None:
@@ -1290,15 +1309,66 @@ def _build_key_traffic(user_id: int, public_id: str, granularity: str,
                 for i in range(nb)]
         out["hero"] = {"buckets": hero, "max": max((h["total"] for h in hero), default=0)}
 
-        # method × status-bucket matrix (honeycomb hive)
-        mtx = {}
+        # method × status-bucket matrix (honeycomb hive) — enriched with per-cell
+        # latency bands, per-method endpoint contributors, and a status-over-time
+        # series aligned to the hero bucket grid (powers the connected colony UI).
+        mtx = {}   # method -> {sb -> {n,lat,lf,lm,ls}}
         for r in matrix_rows:
             m = (r.get("method") or "?").upper()
-            sbk = "n" + str(r.get("sb") or 2)
-            mtx.setdefault(m, {"n2": 0, "n4": 0, "n5": 0})[sbk] += int(r.get("n") or 0)
-        out["matrix"] = [{"method": m, "n2": v["n2"], "n4": v["n4"], "n5": v["n5"],
-                          "total": v["n2"] + v["n4"] + v["n5"]}
-                         for m, v in sorted(mtx.items(), key=lambda kv: -(kv[1]["n2"] + kv[1]["n4"] + kv[1]["n5"]))]
+            sb = int(r.get("sb") or 2)
+            mtx.setdefault(m, {})[sb] = {
+                "n": int(r.get("n") or 0),
+                "lat": round(float(r["lat"])) if r.get("lat") is not None else None,
+                "lf": int(r.get("lf") or 0), "lm": int(r.get("lm") or 0),
+                "ls": int(r.get("ls") or 0),
+            }
+        # per-method endpoint contributors
+        ep_by_method = {}
+        for r in methodep_rows:
+            m = (r.get("method") or "?").upper()
+            ep_by_method.setdefault(m, []).append(
+                {"path": r.get("path"), "n": int(r.get("n") or 0), "e": int(r.get("e") or 0)})
+        # per-method status-over-time series, aligned to the hero grid (nb buckets)
+        ser_by_method = {}
+        for r in methodseries_rows:
+            m = (r.get("method") or "?").upper()
+            b = r.get("b")
+            if granularity == "week":
+                b = _wk_key(b)
+            i = idx.get(b)
+            if i is None:
+                continue
+            arr = ser_by_method.setdefault(
+                m, [{"n2": 0, "n4": 0, "n5": 0, "n": 0} for _ in range(nb)])
+            arr[i]["n2"] += int(r.get("n2") or 0); arr[i]["n4"] += int(r.get("n4") or 0)
+            arr[i]["n5"] += int(r.get("n5") or 0); arr[i]["n"] += int(r.get("n") or 0)
+
+        matrix_out = []
+        for m, cells in mtx.items():
+            n2 = cells.get(2, {}).get("n", 0)
+            n4 = cells.get(4, {}).get("n", 0)
+            n5 = cells.get(5, {}).get("n", 0)
+            total = n2 + n4 + n5
+            lf = sum(cells.get(s, {}).get("lf", 0) for s in (2, 4, 5))
+            lm = sum(cells.get(s, {}).get("lm", 0) for s in (2, 4, 5))
+            ls = sum(cells.get(s, {}).get("ls", 0) for s in (2, 4, 5))
+            lat_pairs = [(cells[s]["lat"], cells[s]["n"]) for s in cells
+                         if cells[s].get("lat") is not None and cells[s].get("n")]
+            lat_avg = (round(sum(l * n for l, n in lat_pairs) / sum(n for _, n in lat_pairs))
+                       if lat_pairs else None)
+            eps = sorted(ep_by_method.get(m, []), key=lambda e: -e["n"])[:6]
+            for e in eps:
+                e["pct"] = round(100 * e["n"] / total) if total else 0
+            matrix_out.append({
+                "method": m, "n2": n2, "n4": n4, "n5": n5, "total": total,
+                "lat_avg": lat_avg, "lat_bands": {"fast": lf, "med": lm, "slow": ls},
+                "cells": {str(s): cells[s] for s in cells},
+                "endpoints": eps,
+                "series": ser_by_method.get(
+                    m, [{"n2": 0, "n4": 0, "n5": 0, "n": 0} for _ in range(nb)]),
+            })
+        matrix_out.sort(key=lambda x: -x["total"])
+        out["matrix"] = matrix_out
 
         bytes_buckets = [{"label": labels[i], "sub": subs[i], "t_ms": tms[i], "bin": bina[i], "bout": bouta[i]}
                          for i in range(nb)]
@@ -1417,20 +1487,763 @@ async def get_key_traffic(request: Request, public_id: str,
     return data
 
 
+# ════════════════════════════════════════════════════════════════════════
+# 9.N.T19 · ENDPOINTS tab — per-endpoint table, method×status matrix, treemap
+# data, and call-sequence affinity (consecutive request ordering per key).
+# One batched read of the request log; everything else computed in Python.
+# ════════════════════════════════════════════════════════════════════════
+_ENDPOINTS_WIN = {"1h": 60, "24h": 1440, "7d": 10080}
+
+
+def _ep_pearson(a, b):
+    """Pearson correlation of two equal-length series (0 if undefined)."""
+    import math as _m
+    n = len(a)
+    if n == 0 or len(b) != n:
+        return 0.0
+    ma, mb = sum(a) / n, sum(b) / n
+    num = sum((x - ma) * (y - mb) for x, y in zip(a, b))
+    da = _m.sqrt(sum((x - ma) ** 2 for x in a))
+    db = _m.sqrt(sum((y - mb) ** 2 for y in b))
+    if da == 0 or db == 0:
+        return 0.0
+    return num / (da * db)
+
+
+def _ep_archetype(ep, branch_n):
+    """Human archetype + 3 trait lines from class + shape signals.
+    cls drives the headline; fanout/payload/branch nuance the traits."""
+    cls = ep.get("cls", "default")
+    avg_b = ep.get("avg_bytes", 0)
+    fanout = ep.get("fanout", 0)
+    out_links = branch_n
+    heavy_payload = avg_b >= 256 * 1024
+    is_hub = out_links >= 3 or fanout >= 40
+    if cls == "heavy_inference":
+        name = "Compute Heavy"
+    elif cls == "quick_inference":
+        name = "Inference"
+    elif cls == "metadata":
+        name = "Metadata" if not is_hub else "Gateway"
+    else:
+        name = "Gateway" if is_hub else "Utility"
+    traits = []
+    traits.append("High payloads" if heavy_payload
+                  else "Light payloads" if avg_b < 8 * 1024 else "Moderate payloads")
+    traits.append("Long execution" if cls in ("heavy_inference", "quick_inference")
+                  else "Fast execution")
+    traits.append(f"{out_links} downstream" if out_links
+                  else ("Wide reach" if fanout >= 40 else "Low fanout"))
+    return name, traits
+
+
+# Operational-weather vocabulary (NOT literal weather):
+#   Calm · Steady · Busy · Strained · Critical (+ Dormant)
+def _ep_weather(ep, total, recent_share):
+    """Returns {state, score 0..100, reasons[], tone}. Each reason carries
+    the actual numbers so the UI hovercard can explain *why*."""
+    from scripts.apin_v2 import key_health as _kh
+    T = _kh.ENDPOINT_CLASS_T_MS.get(ep.get("cls", "default"), 2000)
+    n = ep.get("n", 0)
+    err = ep.get("err_rate", 0.0)
+    p95 = ep.get("p95", 0)
+    burst = ep.get("burst", 0.0)
+    share = (n / total) if total else 0.0
+    lat_ratio = (p95 / T) if T else 0.0
+    reasons = []
+    # numbers behind the verdict
+    if n:
+        reasons.append(f"{n} requests · {round(100 * share, 1)}% of this key's traffic")
+    if err > 0:
+        reasons.append(f"{round(100 * err, 1)}% errors over the window")
+    if p95:
+        reasons.append(f"p95 {p95} ms = {round(lat_ratio, 1)}× the {T} ms target")
+    if burst >= 0.4:
+        reasons.append(f"peak bucket {round(1 + burst * 4, 1)}× the average (bursty)")
+    # state machine — most severe wins.
+    # Dormant = genuinely low-volume / mostly silent (not just a quiet recent
+    # window on an otherwise busy endpoint — that stays Steady/Busy/Strained).
+    if n < 3 or (recent_share <= 0.0 and share < 0.05 and n < 25):
+        state, score, tone = "Dormant", 50, "mute"
+        reasons.insert(0, "Little or no recent traffic")
+    elif err >= 0.10 or lat_ratio >= 4.0:
+        state, score, tone = "Critical", max(8, 40 - int(err * 100)), "crit"
+    elif err >= 0.03 or lat_ratio >= 2.0 or burst >= 0.6:
+        state, score, tone = "Strained", 62, "warn"
+    elif share >= 0.25:
+        state, score, tone = "Busy", 80, "busy"
+    elif share < 0.05 and err < 0.01 and lat_ratio < 1.0:
+        state, score, tone = "Calm", 94, "calm"
+    else:
+        state, score, tone = "Steady", 88, "ok"
+    # one-line trend intelligence (direction of travel)
+    sp = ep.get("spark", [])
+    half = len(sp) // 2 or 1
+    first, second = sum(sp[:half]), sum(sp[half:])
+    if second > first * 1.4 and first >= 0:
+        trend = "Traffic rising"
+    elif second < first * 0.6:
+        trend = "Traffic cooling"
+    else:
+        trend = "Traffic steady"
+    se = ep.get("spark_err", [])
+    err_trend = ("Error trend ↑" if sum(se[half:]) > sum(se[:half])
+                 else "Error trend ↓" if sum(se[:half]) > sum(se[half:])
+                 else "Errors flat")
+    return {"state": state, "score": score, "tone": tone,
+            "reasons": reasons,
+            "intel": [trend, err_trend,
+                      "Latency normal" if lat_ratio < 1.0 else
+                      "Latency elevated" if lat_ratio < 2.0 else "Latency high"]}
+
+
+def _ep_intel(ep, total, max_n, out_links_by_path):
+    """Second-pass enrichment: weather, archetype, genome metric-vector,
+    traits, traffic_share. Pure function of the already-built endpoint dict."""
+    from scripts.apin_v2 import key_health as _kh
+    n = ep.get("n", 0) or 0
+    T = _kh.ENDPOINT_CLASS_T_MS.get(ep.get("cls", "default"), 2000)
+    err = ep.get("err_rate", 0.0)
+    p95 = ep.get("p95", 0)
+    avg_b = ep.get("avg_bytes", 0)
+    retry = ep.get("retry", 0)
+    burst = ep.get("burst", 0.0)
+    branch_n = len(ep.get("methods", {})) + out_links_by_path.get(ep.get("path"), 0)
+    coupling = round(abs(_ep_pearson(ep.get("spark", []), ep.get("spark_err", []))), 3)
+    # recent activity = share of traffic in the last quarter of the window
+    sp = ep.get("spark", [])
+    q = max(1, len(sp) // 4)
+    recent_share = (sum(sp[-q:]) / sum(sp)) if sum(sp) else 0.0
+    share = (n / total) if total else 0.0
+    # genome metric-vector — every axis 0..1, deterministic; the sigil reads these
+    genome = {
+        "seed": ep.get("path", "?"),
+        "traffic": round(min(1.0, (n / max_n) ** 0.6), 3) if max_n else 0.0,
+        "err_break": round(min(1.0, err / 0.2), 3),
+        "latency_osc": round(min(1.0, p95 / (T * 4)) if T else 0.0, 3),
+        "branches": int(max(2, min(8, branch_n))),
+        "payload_density": round(min(1.0, (avg_b / (256 * 1024)) ** 0.5), 3),
+        "retry_frag": round(min(1.0, (retry / n) * 8) if n else 0.0, 3),
+        "burst": round(min(1.0, burst), 3),
+        "coupling": coupling,
+    }
+    archetype, arch_traits = _ep_archetype(ep, out_links_by_path.get(ep.get("path"), 0))
+    weather = _ep_weather(ep, total, recent_share)
+    dens = "High" if avg_b >= 256 * 1024 else "Low" if avg_b < 8 * 1024 else "Medium"
+    flow_stability = round(100 * (1 - min(1.0, burst)) * (0.6 + 0.4 * (1 - min(1.0, err / 0.2))))
+    return {
+        "weather": weather,
+        "archetype": archetype,
+        "archetype_traits": arch_traits,
+        "genome": genome,
+        "traffic_share": round(100 * share, 1),
+        "coupling": coupling,
+        "traits": {
+            "branch_complexity": genome["branches"],
+            "payload_density": dens,
+            "flow_stability": flow_stability,
+        },
+    }
+
+
+def _build_key_endpoints(user_id: int, public_id: str, window: str,
+                         tz_off: int) -> dict:
+    """All Endpoints-tab data in one read. window = 1h|24h|7d."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    win_min = _ENDPOINTS_WIN.get(window, 1440)
+    try:
+        tz_off = int(tz_off)
+    except Exception:
+        tz_off = 0
+    tz_off = max(-840, min(840, tz_off))
+    now = _dt.now(_tz.utc)
+    cut = (now - _td(minutes=win_min)).strftime("%Y-%m-%d %H:%M:%S.%f")
+    out = {"public_id": public_id, "window": window, "tz_off": tz_off}
+
+    NB = 24                                   # sparkline buckets across window
+    now_ms = int(now.timestamp() * 1000)
+    win_start_ms = now_ms - win_min * 60 * 1000
+    bucket_ms = max(1, (win_min * 60 * 1000) // NB)
+
+    def _ts_ms(ts):
+        try:
+            return int(_dt.strptime((ts or "")[:19], "%Y-%m-%d %H:%M:%S")
+                       .replace(tzinfo=_tz.utc).timestamp() * 1000)
+        except Exception:
+            return now_ms
+
+    def _pctile(vals, p):
+        if not vals:
+            return 0
+        s = sorted(vals)
+        k = min(len(s) - 1, int(round((p / 100.0) * (len(s) - 1))))
+        return int(s[k])
+
+    with auth_db.get_conn() as c:
+        def _rows(sql, args=()):
+            try:
+                return [dict(r) for r in c.execute(sql, args).fetchall()]
+            except Exception as e:
+                log.warning("endpoints query failed: %s", e)
+                return []
+        krows = _rows("SELECT public_id, name FROM api_keys "
+                      "WHERE user_id=? AND public_id=? AND deleted_at IS NULL",
+                      (user_id, public_id))
+        if not krows:
+            return {"not_found": True, "public_id": public_id, "window": window}
+        rows = _rows(
+            "SELECT id, timestamp, method, path, status_code, latency_ms, ip, "
+            "COALESCE(bytes_in,0) AS bin, COALESCE(bytes_out,0) AS bout "
+            "FROM api_key_request_log WHERE key_id=? AND timestamp>=? ORDER BY id",
+            (public_id, cut))
+
+    from scripts.apin_v2 import key_health as _kh
+    eps = {}        # path -> aggregate
+    methods = {}    # method -> {n2,n4,n5}
+    seq = []        # chronological (path, ts_ms, sb) for affinity + retry
+    for r in rows:
+        path = r.get("path") or "?"
+        method = (r.get("method") or "?").upper()
+        sc = int(r.get("status_code") or 0)
+        sb = 5 if sc >= 500 else 4 if sc >= 400 else 2
+        e = eps.get(path)
+        if e is None:
+            e = eps[path] = {"n": 0, "n2": 0, "n4": 0, "n5": 0, "lat": [],
+                             "bin": 0, "bout": 0, "methods": {},
+                             "spark": [0] * NB, "spark_err": [0] * NB,
+                             "hours": [0] * 24, "ips": set()}
+        e["n"] += 1
+        e["n" + str(sb)] += 1
+        lm = r.get("latency_ms")
+        if lm is not None:
+            try:
+                e["lat"].append(float(lm))
+            except Exception:
+                pass
+        e["bin"] += int(r.get("bin") or 0)
+        e["bout"] += int(r.get("bout") or 0)
+        e["methods"][method] = e["methods"].get(method, 0) + 1
+        ip = r.get("ip")
+        if ip:
+            e["ips"].add(ip)
+        tms = _ts_ms(r.get("timestamp"))
+        bi = int((tms - win_start_ms) // bucket_ms)
+        if bi < 0:
+            bi = 0
+        elif bi >= NB:
+            bi = NB - 1
+        e["spark"][bi] += 1
+        if sb != 2:
+            e["spark_err"][bi] += 1
+        # local hour-of-day (viewer tz) for the temporal rhythm clock
+        e["hours"][int((tms / 1000 + tz_off * 60) // 3600) % 24] += 1
+        mm = methods.get(method)
+        if mm is None:
+            mm = methods[method] = {"n2": 0, "n4": 0, "n5": 0}
+        mm["n" + str(sb)] += 1
+        seq.append((path, tms, sb))
+
+    # retry pressure: a failed request immediately followed by the same path
+    GAP_MS = 30 * 60 * 1000
+    retry = {}
+    for i in range(len(seq) - 1):
+        a, ta, sa = seq[i]
+        b, tb, sb2 = seq[i + 1]
+        if a == b and sa != 2 and (tb - ta) <= GAP_MS:
+            retry[a] = retry.get(a, 0) + 1
+
+    endpoints = []
+    for path, e in eps.items():
+        n = e["n"]
+        err = e["n4"] + e["n5"]
+        dom = max(e["methods"].items(), key=lambda kv: kv[1])[0] if e["methods"] else "?"
+        # burstiness: peak-bucket vs mean (coefficient of concentration), 0..1
+        sp = e["spark"]
+        active = [v for v in sp if v > 0]
+        mean_sp = (sum(sp) / len(active)) if active else 0
+        burst = round(min(1.0, (max(sp) / mean_sp - 1) / 4), 2) if mean_sp > 0 else 0.0
+        endpoints.append({
+            "path": path, "method": dom, "methods": e["methods"],
+            "cls": _kh.classify_endpoint(path),
+            "n": n, "n2": e["n2"], "n4": e["n4"], "n5": e["n5"],
+            "err_pct": round(100 * err / n, 1) if n else 0.0,
+            "err_rate": (err / n) if n else 0.0,
+            "p50": _pctile(e["lat"], 50), "p95": _pctile(e["lat"], 95),
+            "bytes_in": e["bin"], "bytes_out": e["bout"],
+            "avg_bytes": round((e["bin"] + e["bout"]) / n) if n else 0,
+            "spark": e["spark"], "spark_err": e["spark_err"],
+            "hours": e["hours"], "fanout": len(e["ips"]),
+            "retry": retry.get(path, 0), "burst": burst,
+        })
+    endpoints.sort(key=lambda x: -x["n"])
+    out["endpoints"] = endpoints
+    out["total"] = sum(e["n"] for e in endpoints)
+    out["bucket_ms"] = bucket_ms
+
+    out["matrix"] = [
+        {"method": m, "n2": v["n2"], "n4": v["n4"], "n5": v["n5"],
+         "total": v["n2"] + v["n4"] + v["n5"]}
+        for m, v in sorted(methods.items(),
+                           key=lambda kv: -(kv[1]["n2"] + kv[1]["n4"] + kv[1]["n5"]))]
+
+    # call-sequence affinity: consecutive requests within a 30-min gap, no self-loops
+    trans = {}
+    for i in range(len(seq) - 1):
+        a, ta, _sa = seq[i]
+        b, tb, _sb = seq[i + 1]
+        if a == b or (tb - ta) > GAP_MS:
+            continue
+        trans[(a, b)] = trans.get((a, b), 0) + 1
+    links = sorted(({"from": a, "to": b, "count": n} for (a, b), n in trans.items()),
+                   key=lambda x: -x["count"])[:30]
+    out["affinity"] = {"links": links}
+
+    # ── second pass: per-endpoint intelligence (weather/archetype/genome) ──
+    # out-degree (distinct downstream paths) per source — feeds branch count
+    out_links_by_path = {}
+    for (a, _b) in trans.keys():
+        out_links_by_path[a] = out_links_by_path.get(a, 0) + 1
+    total_n = out["total"] or 0
+    max_n = max((e["n"] for e in endpoints), default=1) or 1
+    for ep in endpoints:
+        ep.update(_ep_intel(ep, total_n, max_n, out_links_by_path))
+
+    out["key"] = {"name": krows[0].get("name")}
+    return out
+
+
+@router.get("/{public_id}/endpoints")
+@api_endpoint("/api/account/keys/{public_id}/endpoints")
+async def get_key_endpoints(request: Request, public_id: str,
+                            window: str = Query("24h"),
+                            tz_off: int = Query(0)):
+    """9.N.T19 · One-shot Endpoints-tab payload: per-endpoint table, method×
+    status matrix, treemap data, and call-sequence affinity."""
+    import asyncio as _aio
+    user = _get_session_user(request)
+    if window not in _ENDPOINTS_WIN:
+        window = "24h"
+    data = await _aio.to_thread(_build_key_endpoints, int(user["id"]),
+                                public_id, window, tz_off)
+    if data.get("not_found"):
+        raise ApiError("not_found", f"key {public_id!r} not found.")
+    return data
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 9.N.T27b · ENDPOINT PROFILE — deep, fine-grained per-endpoint intelligence.
+# Reads the raw request log (per-request rows) for ONE path + window and
+# derives: named callers (by user-agent + IP), in/out constellation,
+# minute-level life-story events, a fine minute timeseries, and instruments.
+# Lazy-fetched when an endpoint is pinned / its profile is expanded.
+# ════════════════════════════════════════════════════════════════════════
+def _ua_short(ua):
+    """Collapse a user-agent string to a recognisable client name."""
+    s = (ua or "").strip()
+    if not s:
+        return "unknown"
+    # take the first product token (before whitespace), strip version noise
+    head = s.split()[0]
+    name = head.split("/")[0]
+    ver = head.split("/")[1].split(".")[0] if "/" in head else ""
+    name = name[:28] or "client"
+    return f"{name} {ver}".strip()
+
+
+def _build_key_endpoint_profile(user_id: int, public_id: str, path: str,
+                                window: str, tz_off: int) -> dict:
+    """Deep profile for a single endpoint path over the window."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from scripts.apin_v2 import key_health as _kh
+    win_min = _ENDPOINTS_WIN.get(window, 1440)
+    try:
+        tz_off = int(tz_off)
+    except Exception:
+        tz_off = 0
+    tz_off = max(-840, min(840, tz_off))
+    now = _dt.now(_tz.utc)
+    cut = (now - _td(minutes=win_min)).strftime("%Y-%m-%d %H:%M:%S.%f")
+    now_ms = int(now.timestamp() * 1000)
+    win_start_ms = now_ms - win_min * 60 * 1000
+
+    def _ts_ms(ts):
+        try:
+            return int(_dt.strptime((ts or "")[:19], "%Y-%m-%d %H:%M:%S")
+                       .replace(tzinfo=_tz.utc).timestamp() * 1000)
+        except Exception:
+            return now_ms
+
+    def _pctile(vals, p):
+        if not vals:
+            return 0
+        s = sorted(vals)
+        k = min(len(s) - 1, int(round((p / 100.0) * (len(s) - 1))))
+        return int(s[k])
+
+    with auth_db.get_conn() as c:
+        def _rows(sql, args=()):
+            try:
+                return [dict(r) for r in c.execute(sql, args).fetchall()]
+            except Exception as e:
+                log.warning("endpoint-profile query failed: %s", e)
+                return []
+        krows = _rows("SELECT public_id, name FROM api_keys "
+                      "WHERE user_id=? AND public_id=? AND deleted_at IS NULL",
+                      (user_id, public_id))
+        if not krows:
+            return {"not_found": True, "public_id": public_id}
+        rows = _rows(
+            "SELECT timestamp, method, path, status_code, latency_ms, ip, ua, "
+            "COALESCE(bytes_in,0) AS bin, COALESCE(bytes_out,0) AS bout "
+            "FROM api_key_request_log WHERE key_id=? AND timestamp>=? ORDER BY id",
+            (public_id, cut))
+
+    # split into this-path rows + a chronological sequence for affinity
+    mine, seq = [], []
+    for r in rows:
+        p = r.get("path") or "?"
+        seq.append((p, _ts_ms(r.get("timestamp")),
+                    int(r.get("status_code") or 0)))
+        if p == path:
+            mine.append(r)
+    total_key = len(rows)
+    n = len(mine)
+    if n == 0:
+        return {"not_found": True, "public_id": public_id, "path": path,
+                "window": window, "empty": True}
+
+    # ── named callers (by user-agent) + distinct IPs ──
+    by_ua, ips = {}, set()
+    n2 = n4 = n5 = 0
+    lat, bin_t, bout_t = [], 0, 0
+    methods = {}
+    for r in mine:
+        sc = int(r.get("status_code") or 0)
+        sb = 5 if sc >= 500 else 4 if sc >= 400 else 2
+        if sb == 2:
+            n2 += 1
+        elif sb == 4:
+            n4 += 1
+        else:
+            n5 += 1
+        lm = r.get("latency_ms")
+        if lm is not None:
+            try:
+                lat.append(float(lm))
+            except Exception:
+                pass
+        bin_t += int(r.get("bin") or 0)
+        bout_t += int(r.get("bout") or 0)
+        m = (r.get("method") or "?").upper()
+        methods[m] = methods.get(m, 0) + 1
+        ip = r.get("ip")
+        if ip:
+            ips.add(ip)
+        ua = _ua_short(r.get("ua"))
+        u = by_ua.get(ua)
+        if u is None:
+            u = by_ua[ua] = {"name": ua, "n": 0, "err": 0}
+        u["n"] += 1
+        if sb != 2:
+            u["err"] += 1
+    callers = sorted(by_ua.values(), key=lambda x: -x["n"])[:6]
+    for cu in callers:
+        cu["err_pct"] = round(100 * cu["err"] / cu["n"], 1) if cu["n"] else 0.0
+
+    # ── constellation: in/out neighbours via consecutive-call affinity ──
+    GAP_MS = 30 * 60 * 1000
+    out_edges, in_edges = {}, {}
+    for i in range(len(seq) - 1):
+        a, ta, _sa = seq[i]
+        b, tb, _sb = seq[i + 1]
+        if a == b or (tb - ta) > GAP_MS:
+            continue
+        if a == path:
+            out_edges[b] = out_edges.get(b, 0) + 1
+        if b == path:
+            in_edges[a] = in_edges.get(a, 0) + 1
+    mk = lambda d: sorted(({"path": p, "count": c} for p, c in d.items()),
+                          key=lambda x: -x["count"])[:5]
+    constellation = {"incoming": mk(in_edges), "outgoing": mk(out_edges),
+                     "callers": len(ips)}
+
+    # ── fine minute timeseries + life-story events ──
+    NB2 = min(max(20, win_min), 180)         # 1-min for 1h, ~5-min for 24h, ~56-min for 7d
+    bms = max(1, (win_min * 60 * 1000) // NB2)
+    series_n = [0] * NB2
+    series_err = [0] * NB2
+    series_lat = [[] for _ in range(NB2)]
+    for r in mine:
+        tms = _ts_ms(r.get("timestamp"))
+        bi = int((tms - win_start_ms) // bms)
+        bi = 0 if bi < 0 else NB2 - 1 if bi >= NB2 else bi
+        series_n[bi] += 1
+        sc = int(r.get("status_code") or 0)
+        if sc >= 400:
+            series_err[bi] += 1
+        lm = r.get("latency_ms")
+        if lm is not None:
+            try:
+                series_lat[bi].append(float(lm))
+            except Exception:
+                pass
+    series_p95 = [_pctile(b, 95) for b in series_lat]
+    T = _kh.ENDPOINT_CLASS_T_MS.get(_kh.classify_endpoint(path), 2000)
+    active = sorted(v for v in series_n if v > 0)
+    baseline = active[len(active) // 2] if active else 0     # median active bucket
+
+    events, bad_run = [], 0
+    for i in range(NB2):
+        ts_ms = win_start_ms + i * bms + bms // 2
+        nb, eb, p95b = series_n[i], series_err[i], series_p95[i]
+        unhealthy = (eb >= 3 and nb and eb / nb >= 0.2) or (p95b >= 2 * T)
+        if nb >= 5 and baseline and nb >= 2.5 * baseline:
+            events.append({"ts": ts_ms, "kind": "spike", "label": "Traffic spike",
+                           "detail": f"{nb} requests this window ({round(nb / baseline, 1)}× typical)",
+                           "sev": min(100, int(40 + nb / baseline * 10))})
+        if eb >= 3 and nb and eb / nb >= 0.2:
+            events.append({"ts": ts_ms, "kind": "error", "label": "Error burst",
+                           "detail": f"{eb} errors of {nb} requests ({round(100 * eb / nb)}%)",
+                           "sev": min(100, 50 + eb * 4)})
+        if p95b >= 2 * T:
+            events.append({"ts": ts_ms, "kind": "latency", "label": "Latency rise",
+                           "detail": f"p95 {p95b} ms ({round(p95b / T, 1)}× the {T} ms target)",
+                           "sev": min(100, int(45 + p95b / T * 8))})
+        if unhealthy:
+            bad_run += 1
+        else:
+            if bad_run >= 2 and nb > 0:
+                events.append({"ts": ts_ms, "kind": "recovery", "label": "Recovered",
+                               "detail": "errors and latency returned to normal",
+                               "sev": 35})
+            bad_run = 0
+    # keep the 8 most severe, then chronological for display
+    events = sorted(events, key=lambda e: -e["sev"])[:8]
+    events.sort(key=lambda e: e["ts"])
+
+    err = n4 + n5
+    return {
+        "public_id": public_id, "path": path, "window": window, "tz_off": tz_off,
+        "method": max(methods.items(), key=lambda kv: kv[1])[0] if methods else "?",
+        "methods": methods, "cls": _kh.classify_endpoint(path),
+        "n": n, "n2": n2, "n4": n4, "n5": n5,
+        "err_pct": round(100 * err / n, 1) if n else 0.0,
+        "err_rate": (err / n) if n else 0.0,
+        "p50": _pctile(lat, 50), "p95": _pctile(lat, 95), "p99": _pctile(lat, 99),
+        "bytes_in": bin_t, "bytes_out": bout_t,
+        "avg_bytes": round((bin_t + bout_t) / n) if n else 0,
+        "traffic_share": round(100 * n / total_key, 1) if total_key else 0.0,
+        "callers": callers, "constellation": constellation,
+        "series": {"n": series_n, "err": series_err, "p95": series_p95,
+                   "bucket_ms": bms, "start_ms": win_start_ms},
+        "events": events,
+        "key": {"name": krows[0].get("name")},
+    }
+
+
+@router.get("/{public_id}/endpoint-profile")
+@api_endpoint("/api/account/keys/{public_id}/endpoint-profile")
+async def get_key_endpoint_profile(request: Request, public_id: str,
+                                   path: str = Query(...),
+                                   window: str = Query("24h"),
+                                   tz_off: int = Query(0)):
+    """9.N.T27b · Deep per-endpoint profile: callers, constellation,
+    minute-level life-story events, fine timeseries, instruments."""
+    import asyncio as _aio
+    user = _get_session_user(request)
+    if window not in _ENDPOINTS_WIN:
+        window = "24h"
+    data = await _aio.to_thread(_build_key_endpoint_profile, int(user["id"]),
+                                public_id, path, window, tz_off)
+    if data.get("not_found") and not data.get("empty"):
+        raise ApiError("not_found", f"key {public_id!r} not found.")
+    return data
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 9.N.T28a · API GALAXY — session-reconstructed journeys.
+# Sessionises the raw log by caller (ip+ua) within a 30-min gap, mines
+# frequent multi-hop routes, attaches a REAL exemplar session's timing for
+# accurate time-compressed replay, and returns the session-derived edge graph
+# plus the hub (highest-degree node). Powers the orbital constellation +
+# Common Routes + Route Replay in the expanded API Galaxy.
+# ════════════════════════════════════════════════════════════════════════
+_SESSION_GAP_MS = 30 * 60 * 1000
+
+
+def _build_key_routes(user_id: int, public_id: str, window: str, tz_off: int) -> dict:
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from collections import Counter
+    win_min = _ENDPOINTS_WIN.get(window, 1440)
+    now = _dt.now(_tz.utc)
+    cut = (now - _td(minutes=win_min)).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+    def _ts_ms(ts):
+        try:
+            return int(_dt.strptime((ts or "")[:19], "%Y-%m-%d %H:%M:%S")
+                       .replace(tzinfo=_tz.utc).timestamp() * 1000)
+        except Exception:
+            return int(now.timestamp() * 1000)
+
+    with auth_db.get_conn() as c:
+        def _rows(sql, args=()):
+            try:
+                return [dict(r) for r in c.execute(sql, args).fetchall()]
+            except Exception as e:
+                log.warning("routes query failed: %s", e)
+                return []
+        krows = _rows("SELECT public_id FROM api_keys "
+                      "WHERE user_id=? AND public_id=? AND deleted_at IS NULL",
+                      (user_id, public_id))
+        if not krows:
+            return {"not_found": True, "public_id": public_id}
+        rows = _rows(
+            "SELECT timestamp, method, path, status_code, latency_ms, ip, ua "
+            "FROM api_key_request_log WHERE key_id=? AND timestamp>=? ORDER BY id",
+            (public_id, cut))
+
+    # ── group by caller, split into sessions by gap, collapse immediate repeats ──
+    by_caller = {}
+    for r in rows:
+        caller = (r.get("ip") or "?", _ua_short(r.get("ua")))
+        by_caller.setdefault(caller, []).append({
+            "path": r.get("path") or "?", "ts": _ts_ms(r.get("timestamp")),
+            "status": int(r.get("status_code") or 0),
+            "lat": int(r.get("latency_ms") or 0),
+        })
+    journeys = []           # each = ordered list of step dicts
+    for caller, evs in by_caller.items():
+        evs.sort(key=lambda e: e["ts"])
+        cur, last = [], None
+        for ev in evs:
+            if last is not None and ev["ts"] - last > _SESSION_GAP_MS:
+                if len(cur) >= 2:
+                    journeys.append(cur)
+                cur = []
+            if not cur or cur[-1]["path"] != ev["path"]:    # collapse immediate repeats
+                cur.append(ev)
+            last = ev["ts"]
+        if len(cur) >= 2:
+            journeys.append(cur)
+    total_sessions = len(journeys)
+
+    # ── mine frequent contiguous routes (len 2..4) ──
+    occ = Counter()             # route tuple -> raw occurrences
+    sess_hits = Counter()       # route tuple -> sessions containing it
+    for j in journeys:
+        paths = [s["path"] for s in j]
+        seen = set()
+        for L in (2, 3, 4):
+            for i in range(len(paths) - L + 1):
+                tup = tuple(paths[i:i + L])
+                occ[tup] += 1
+                seen.add(tup)
+        for tup in seen:
+            sess_hits[tup] += 1
+
+    # rank: longer + frequent first; drop a route fully contained in a kept longer one
+    def _is_sub(a, b):          # is tuple a a contiguous subsequence of b?
+        if len(a) >= len(b):
+            return False
+        return any(b[i:i + len(a)] == a for i in range(len(b) - len(a) + 1))
+    ranked = sorted(occ.keys(), key=lambda t: (-(occ[t] * (len(t) - 1)), -len(t)))
+    chosen = []
+    for t in ranked:
+        if any(_is_sub(t, k) for k in chosen):
+            continue
+        chosen.append(t)
+        if len(chosen) >= 6:
+            break
+
+    # ── for each chosen route, pull a REAL exemplar session's timing ──
+    def _exemplar(route):
+        best = None
+        for j in journeys:
+            paths = [s["path"] for s in j]
+            for i in range(len(paths) - len(route) + 1):
+                if tuple(paths[i:i + len(route)]) == route:
+                    span = j[i:i + len(route)]
+                    # richer (more timing signal) exemplar wins
+                    score = sum(s["lat"] for s in span)
+                    if best is None or score > best[0]:
+                        best = (score, span)
+        if not best:
+            return []
+        span = best[1]
+        steps, prev = [], None
+        for s in span:
+            steps.append({"path": s["path"], "status": s["status"],
+                          "latency_ms": s["lat"],
+                          "dt_ms": 0 if prev is None else max(0, s["ts"] - prev)})
+            prev = s["ts"]
+        return steps
+
+    routes = []
+    for t in chosen:
+        routes.append({
+            "seq": list(t), "count": occ[t],
+            "share": round(100 * sess_hits[t] / total_sessions, 1) if total_sessions else 0.0,
+            "steps": _exemplar(t),
+        })
+
+    # ── session-derived edge graph + hub ──
+    edge = Counter()
+    for j in journeys:
+        for a, b in zip(j, j[1:]):
+            if a["path"] != b["path"]:
+                edge[(a["path"], b["path"])] += 1
+    edges = [{"from": a, "to": b, "count": n}
+             for (a, b), n in sorted(edge.items(), key=lambda kv: -kv[1])[:48]]
+    deg = Counter()
+    for (a, b), n in edge.items():
+        deg[a] += n
+        deg[b] += n
+    hub = max(deg.items(), key=lambda kv: kv[1])[0] if deg else None
+
+    return {
+        "public_id": public_id, "window": window,
+        "sessions_total": total_sessions, "hub": hub,
+        "routes": routes, "edges": edges,
+    }
+
+
+@router.get("/{public_id}/routes")
+@api_endpoint("/api/account/keys/{public_id}/routes")
+async def get_key_routes(request: Request, public_id: str,
+                         window: str = Query("24h"), tz_off: int = Query(0)):
+    """9.N.T28a · Session-reconstructed journeys: common multi-hop routes
+    (with real exemplar replay timing), edge graph, and hub."""
+    import asyncio as _aio
+    user = _get_session_user(request)
+    if window not in _ENDPOINTS_WIN:
+        window = "24h"
+    data = await _aio.to_thread(_build_key_routes, int(user["id"]),
+                                public_id, window, tz_off)
+    if data.get("not_found"):
+        raise ApiError("not_found", f"key {public_id!r} not found.")
+    return data
+
+
 @router.get("/{public_id}/requests")
 @api_endpoint("/api/account/keys/{public_id}/requests")
 async def get_key_requests(request: Request, public_id: str,
                             limit: int = Query(50, ge=1, le=200),
                             cursor: Optional[int] = Query(None, ge=1),
                             since: Optional[str] = Query(None),
-                            until: Optional[str] = Query(None)):
+                            until: Optional[str] = Query(None),
+                            local_hour: Optional[int] = Query(None, ge=0, le=23),
+                            local_weekday: Optional[int] = Query(None, ge=0, le=6),
+                            tz_off: int = Query(0)):
     """Phase 8 Wave D: per-request log for the detail page. Newest first.
-    9.N.T: optional since/until (UTC 'YYYY-MM-DD HH:MM:SS' or ms epoch) time
-    filter so Traffic drill-downs land on a specific bucket/day."""
+    9.N.T: optional since/until time filter so Traffic drill-downs land on a
+    specific bucket/day. 9.N.T(round 3): optional local_hour / local_weekday
+    (+tz_off, viewer minutes) so clock 'hour of day' and weekday×hour drills
+    return the matching requests across the whole window, server-side."""
     user = _get_session_user(request)
     items = auth_db.list_key_requests(
         user_id=int(user["id"]), public_id=public_id,
-        limit=limit, cursor=cursor, since_iso=since, until_iso=until)
+        limit=limit, cursor=cursor, since_iso=since, until_iso=until,
+        local_hour=local_hour, local_weekday=local_weekday, tz_off=tz_off)
     return {"items": items, "count": len(items), "public_id": public_id,
             "since": since, "until": until}
 

@@ -6388,6 +6388,12 @@ def _add_account_console_routes(app):
         "apin_splash.js",          # 9.N.8h — splash overlay dismiss logic
         "console_key_overview.js", # 9.N.9 — per-key bento Overview widgets
         "console_key_traffic.js",  # 9.N.T — per-key Traffic tab widgets
+        "console_key_endpoints.js", # 9.N.T19/20 — per-key Endpoints tab widgets
+        "console_usage_empty.js",   # 9.N.T29 — Usage seed→sprout empty state
+        "console_endpoint_genome.js", # 9.N.T27 — hand-drawn endpoint identity sigil
+        "console_endpoint_galaxy.js", # 9.N.T28 — API Galaxy orbital/neural/flow viz
+        "console_key_terrain3d.js", # 9.N.T25 — WebGL 3D endpoint terrain (lazy)
+        "three.min.js",            # 9.N.T25 — vendored Three.js r149 (lazy-loaded)
         "apin_request_drawer.js",  # 9.N.T9 — shared request-detail drawer
         "apin_request_drawer.css", # 9.N.T9 — shared drawer styles
     }
@@ -6396,37 +6402,39 @@ def _add_account_console_routes(app):
     @app.get("/static/{filename}")
     async def v2_static_js(filename: str, request: Request):
         from fastapi.responses import Response
-        import hashlib
+        import hashlib, gzip
         if filename not in _STATIC_JS_ALLOWLIST:
             return Response(status_code=404,
                             content=f"{filename}: not on allowlist".encode())
         path = _STATIC_JS_DIR / filename
         cache = _STATIC_JS_CACHE.setdefault(
-            filename, {"mtime": 0.0, "body": None, "etag": None})
+            filename, {"mtime": 0.0, "body": None, "etag": None, "gz": None})
         try:
             mt = path.stat().st_mtime
             if (cache["mtime"] != mt) or (cache["body"] is None):
                 cache["body"]  = path.read_bytes()
                 cache["mtime"] = mt
+                cache["gz"]    = None            # invalidate gzip cache on change
                 cache["etag"]  = (
                     '"' + hashlib.sha256(cache["body"]).hexdigest()[:12] + '"'
                 )
+            # three.min.js is a vendored, immutable lib (busted via ?v=) → cache
+            # hard so repeat terrain opens are instant. Our own files revalidate.
+            cc = ("public, max-age=31536000, immutable" if filename == "three.min.js"
+                  else "public, max-age=0, must-revalidate")
             inm = request.headers.get("if-none-match")
             if inm and inm == cache["etag"]:
-                return Response(status_code=304, headers={
-                    "ETag": cache["etag"],
-                    "Cache-Control": "public, max-age=0, must-revalidate",
-                })
+                return Response(status_code=304, headers={"ETag": cache["etag"], "Cache-Control": cc})
             _media = "text/css" if filename.endswith(".css") else "application/javascript"
-            return Response(
-                content=cache["body"],
-                media_type=_media,
-                headers={
-                    "Cache-Control": "public, max-age=0, must-revalidate",
-                    "ETag": cache["etag"],
-                    "X-Content-Type-Options": "nosniff",
-                },
-            )
+            hdr = {"Cache-Control": cc, "ETag": cache["etag"],
+                   "X-Content-Type-Options": "nosniff", "Vary": "Accept-Encoding"}
+            # gzip on the wire — Three.js 608 KB → ~150 KB; cached once per file.
+            if "gzip" in request.headers.get("accept-encoding", "") and len(cache["body"]) > 1400:
+                if cache["gz"] is None:
+                    cache["gz"] = gzip.compress(cache["body"], 6)
+                hdr["Content-Encoding"] = "gzip"
+                return Response(content=cache["gz"], media_type=_media, headers=hdr)
+            return Response(content=cache["body"], media_type=_media, headers=hdr)
         except FileNotFoundError:
             return Response(status_code=404, content=f"{filename} not found".encode())
 

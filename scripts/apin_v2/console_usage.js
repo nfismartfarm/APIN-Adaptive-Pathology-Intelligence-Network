@@ -26,6 +26,14 @@
   };
   let availableKeys = [];
   let recentCursor = null;
+  // 9.N.T29 · empty-state (seed→sprout) support
+  let _lastLifetime = null;        // {ever,total,last_ts,last_id,last_method,last_path,last_status}
+  let _accountLifetime = null;     // unfiltered (account-wide) lifetime, lazily fetched
+  let _lastWinRequests = 0;        // windowed request count (for cross-metric hint)
+  let _emptyHero = null;           // active hero handle (for teardown)
+  let _heroActive = false;         // true while the empty hero is shown (live-react)
+  const RANGE_MS = { '15m': 9e5, '1h': 36e5, '6h': 216e5, '24h': 864e5, '7d': 6048e5, '30d': 25920e5 };
+  const RANGE_LADDER = ['15m', '1h', '6h', '24h', '7d', '30d'].map(id => ({ id: id, label: id, ms: RANGE_MS[id] }));
 
   // ─── helpers ──────────────────────────────────────────────────────────
   function $(id) { return document.getElementById(id); }
@@ -647,7 +655,9 @@
     if (filterState.endpoint) qs.set('endpoint', filterState.endpoint);
     const { body } = await api('/api/account/usage/summary?' + qs);
     if (!body || !body.ok) return;
+    if (body.data.lifetime) _lastLifetime = body.data.lifetime;   // 9.N.T29
     const k = body.data.kpis;
+    _lastWinRequests = (k.requests && k.requests.current) || 0;   // 9.N.T29 cross-metric hint
     const prevLbl = 'vs prev ' + filterState.range;
     setKpi('requests', fmtNum(k.requests.current), k.requests.delta_pct, prevLbl);
     setKpi('errors', fmtNum(k.errors.current), k.errors.delta_pct, prevLbl, { goodIfDown: true });
@@ -716,6 +726,21 @@
     };
     $('ts-title').textContent = (titleMap[filterState.mode] || 'Requests') + ' · ' + filterState.range;
 
+    // 9.N.T29 · empty window → seed→sprout hero (replaces the chart)
+    const _buckets = (payload && payload.buckets) || [];
+    const _isEmpty = _buckets.length === 0 || _buckets.every(b => {
+      const v = (b && b.values) || {}; return Object.keys(v).every(kk => !v[kk]);
+    });
+    const _scrub = $('ts-scrubber');
+    if (_isEmpty && window.APIN && APIN.usageEmpty) {
+      if (_scrub) _scrub.style.display = 'none';
+      await _renderUsageEmpty(host);
+      return;
+    }
+    if (_scrub) _scrub.style.display = '';
+    _heroActive = false;
+    if (_emptyHero) { try { _emptyHero.destroy(); } catch (_) {} _emptyHero = null; }
+
     const chartMode = (filterState.mode === 'by_status' || filterState.mode === 'by_endpoint')
       ? 'stacked' : 'line';
     APIN.charts.timeseries(host, payload, {
@@ -739,6 +764,93 @@
     });
   }
 
+  // ─── 9.N.T29 · empty-state hero helpers ───────────────────────────────
+  function _keyName(kid) {
+    const k = (availableKeys || []).find(x => (x.public_id || x.id) === kid);
+    return k ? (k.name || kid) : kid;
+  }
+  function _activeFilterChips() {
+    const c = [];
+    if (filterState.key_id) c.push('key = ' + _keyName(filterState.key_id));
+    if (filterState.env) c.push('env = ' + filterState.env);
+    if (filterState.status) c.push('status = ' + filterState.status);
+    if (filterState.endpoint) c.push('endpoint contains "' + filterState.endpoint + '"');
+    return c;
+  }
+  async function _fetchAccountLifetime() {
+    if (_accountLifetime) return _accountLifetime;
+    try {
+      const { body } = await api('/api/account/usage/summary?range=' + filterState.range);
+      _accountLifetime = (body && body.ok) ? (body.data.lifetime || null) : null;
+    } catch (_) {}
+    return _accountLifetime;
+  }
+  function _usageTestPing(btn) {
+    // reuse a bearer token the user already pasted in the Sandbox this session
+    let token = null;
+    try {
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const k = sessionStorage.key(i);
+        if (k && k.indexOf('sandbox_bearer_for_') === 0) { token = sessionStorage.getItem(k); if (token) break; }
+      }
+    } catch (_) {}
+    if (!token) {                       // none cached → Sandbox is where auth lives
+      if (btn) btn.textContent = 'opening Sandbox…';
+      setTimeout(() => { location.href = '/account/api/sandbox'; }, 500);
+      return;
+    }
+    if (!btn) return;
+    const orig = btn.textContent; btn.disabled = true; btn.textContent = 'pinging…';
+    fetch('/api/version', { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' } })
+      .then(r => { btn.textContent = 'sent · ' + r.status + ' — watch it appear'; })
+      .catch(() => { btn.textContent = 'ping failed'; })
+      .finally(() => { setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 2600); });
+  }
+  async function _renderUsageEmpty(host) {
+    if (_emptyHero) { try { _emptyHero.destroy(); } catch (_) {} _emptyHero = null; }
+    let lt = _lastLifetime;
+    if (!lt) {   // race: summary not back yet — fetch lifetime directly (only on empty)
+      try {
+        const qs = new URLSearchParams({ range: filterState.range });
+        if (filterState.key_id) qs.set('key_id', filterState.key_id);
+        if (filterState.env) qs.set('env', filterState.env);
+        const { body } = await api('/api/account/usage/summary?' + qs);
+        lt = (body && body.ok) ? (body.data.lifetime || null) : null; _lastLifetime = lt;
+      } catch (_) {}
+    }
+    const contentFilters = !!(filterState.endpoint || filterState.status);
+    const scopeFilters = !!(filterState.key_id || filterState.env);
+    let state;
+    if (contentFilters) state = 'filtered';
+    else if (!lt || !lt.ever) state = 'new';
+    else state = 'dormant';
+    const rangeLabelMap = { '15m': 'the last 15 minutes', '1h': 'the last hour', '6h': 'the last 6 hours', '24h': 'the last 24 hours', '7d': 'the last 7 days', '30d': 'the last 30 days' };
+    const metricLabelMap = { total: 'request', by_status: 'status', by_endpoint: 'endpoint', latency: 'latency', errors: 'error', bytes: 'byte' };
+    const ctx = {
+      state: state, range: filterState.range, rangeLabel: rangeLabelMap[filterState.range] || 'this window',
+      lifetime: lt, ranges: RANGE_LADDER, now: Date.now(),
+      filtersActive: contentFilters || scopeFilters,
+      filterChips: _activeFilterChips(),
+      sampleCurl: 'curl -H "Authorization: Bearer apin_live_…" ' + location.origin + '/api/version',
+      docsUrl: '/docs', quickstartUrl: '/account/api/quickstart', sandboxUrl: '/account/api/sandbox',
+      onSetRange: (id) => { filterState.range = id; recentCursor = null; if (typeof applyStateToUI === 'function') applyStateToUI(); applyFilters(); },
+      onClearFilters: () => { filterState.key_id = ''; filterState.env = ''; filterState.status = ''; filterState.endpoint = ''; recentCursor = null; if (typeof applyStateToUI === 'function') applyStateToUI(); applyFilters(); },
+      onSetMetric: (m) => { filterState.mode = (m === 'requests' ? 'total' : m); if (typeof applyStateToUI === 'function') applyStateToUI(); loadTimeseries(); },
+      onOpenRequest: (rid) => { if (window.APIN && APIN.requestDrawer) APIN.requestDrawer.open(rid); else if (typeof openRequestDetail === 'function') openRequestDetail(rid); },
+      onTestPing: (btn) => _usageTestPing(btn),
+    };
+    if (state === 'dormant' && filterState.mode !== 'total' && _lastWinRequests > 0) {
+      ctx.metricEmptyButOthers = { metric: metricLabelMap[filterState.mode] || 'these', other: 'requests', otherCount: _lastWinRequests };
+    }
+    // key-scope hint: filtered to an unused key while the account has traffic
+    if (state === 'new' && filterState.key_id) {
+      const acct = await _fetchAccountLifetime();
+      if (acct && acct.ever) { ctx.state = 'dormant'; ctx.keyScope = { name: _keyName(filterState.key_id), accountTotal: acct.total }; ctx.lifetime = { ever: false }; }
+    }
+    _heroActive = true;
+    _emptyHero = APIN.usageEmpty.hero(host, ctx);
+  }
+
   // ─── Top-N panels ────────────────────────────────────────────────────
   async function loadTop(dim, hostId, auxId, opts) {
     opts = opts || {};
@@ -755,6 +867,9 @@
     if (auxId) {
       const el = $(auxId);
       if (el) el.textContent = items.length + ' / ' + fmtNum(body.data.total_for_pct);
+    }
+    if (!items.length && window.APIN && APIN.usageEmpty) {   // 9.N.T29 ghost teaser
+      APIN.usageEmpty.ghost($(hostId), opts.ghost || 'rows'); return;
     }
     APIN.charts.topBar($(hostId), items, {
       color_token: opts.color_token || 'series-0',
@@ -830,6 +945,9 @@
     ].filter(x => x.value > 0);
     const total = items.reduce((a, x) => a + x.value, 0);
     if ($('donut-aux')) $('donut-aux').textContent = fmtNum(total) + ' requests';
+    if (!items.length && window.APIN && APIN.usageEmpty) {   // 9.N.T29 ghost teaser
+      APIN.usageEmpty.ghost($('donut-host'), 'donut'); return;
+    }
     APIN.charts.donut($('donut-host'), items, {
       size: 200, innerRatio: 0.62, totalLabel: 'reqs',
       onClickSlice: it => {
@@ -854,7 +972,8 @@
     }
     const lats = (body.data.items || []).map(x => Number(x.latency_ms)).filter(x => x > 0);
     if (lats.length === 0) {
-      $('hist-host').innerHTML = '<div class="placeholder">no latency data in this window</div>';
+      if (window.APIN && APIN.usageEmpty) APIN.usageEmpty.ghost($('hist-host'), 'bars');   // 9.N.T29
+      else $('hist-host').innerHTML = '<div class="placeholder">no latency data in this window</div>';
       return;
     }
     const edges = [0, 50, 100, 200, 500, 1000, 2000, 5000, Infinity];
@@ -1059,6 +1178,16 @@
     return match ? (match.name || null) : null;
   }
 
+  // 9.N.T29 · when a live request arrives while the empty hero is shown,
+  // reload once (debounced) so the sprout dissolves into the real charts.
+  let _heroReactT = null;
+  function _scheduleHeroReact() {
+    if (_heroReactT) return;
+    _heroReactT = setTimeout(() => {
+      _heroReactT = null;
+      if (_heroActive) { _heroActive = false; if (typeof applyFilters === 'function') applyFilters(); }
+    }, 900);
+  }
   function _subscribeRecentToLiveStream() {
     // The live-pulse accumulator + live-stream client both publish to the
     // shared bus. We hook directly into the accumulator's subscribe API
@@ -1066,6 +1195,7 @@
     const accum = window.APIN && APIN.livePulseData && APIN.livePulseData.accumulator;
     if (!accum || !accum.subscribe) return null;
     return accum.subscribe((ev, ts) => {
+      if (_heroActive) _scheduleHeroReact();   // 9.N.T29 · first request dissolves the empty hero
       if (!_recentLiveOn) return;
       // 9.N.8g · Generate synthetic id once (was inside object literal,
       // which made it impossible to use the same id as the cache key).
@@ -1350,9 +1480,10 @@
       const cached = window.APIN && APIN._liveEventCache && APIN._liveEventCache.get(rid);
       if (cached && cached.event) {
         const e = cached.event;
-        $('reqd-title').textContent = (e.method || '') + ' ' + (e.path || '');
-        $('reqd-sub').textContent = (e.timestamp || '') + ' UTC · key: ' + (e.key_name || e.key_public_id || '?')
-          + ' · (still buffering — full detail in ~5s)';
+        $('reqd-title').innerHTML = '<span class="reqd-tp">' + escHtml((e.method || '') + ' ' + (e.path || '')) + '</span>'
+          + '<span class="reqd-rno">Request · live</span>';
+        $('reqd-sub').textContent = ((window.APIN && APIN.time && APIN.time.localFull) ? APIN.time.localFull(e.timestamp) : (e.timestamp || ''))
+          + ' · key: ' + (e.key_name || e.key_public_id || '?') + ' · (still buffering — full detail in ~5s)';
         $('reqd-body').innerHTML =
           '<div class="reqd-status-bar">' +
             '<span class="meth ' + methClass(e.method) + '">' + escHtml(e.method || '') + '</span>' +
@@ -1395,8 +1526,10 @@
     const nodeSnip = body.data.as_node || '';
     const jsSnip   = body.data.as_js || '';
 
-    $('reqd-title').textContent = (r.method || '') + ' ' + (r.path || '');
-    $('reqd-sub').textContent = (r.timestamp || '') + ' UTC · key: ' + (r.key_name || r.key_public_id || '?');
+    $('reqd-title').innerHTML = '<span class="reqd-tp">' + escHtml((r.method || '') + ' ' + (r.path || '')) + '</span>'
+      + '<span class="reqd-rno">Request #' + escHtml(String(r.id != null ? r.id : rid)) + '</span>';
+    $('reqd-sub').textContent = ((window.APIN && APIN.time && APIN.time.localFull) ? APIN.time.localFull(r.timestamp) : (r.timestamp || ''))
+      + ' · key: ' + (r.key_name || r.key_public_id || '?');
 
     // Build status-bar header
     const sb = r.status_code || 0;

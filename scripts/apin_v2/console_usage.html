@@ -1107,6 +1107,89 @@ a:hover{color:var(--green-deep)}
   word-break:break-all}
 .reqd-headers-list dt{color:var(--ink-soft);text-transform:none;font-weight:500}
 .reqd-headers-list dd{color:var(--ink)}
+/* header: method+path left, request number aligned right (same serif font) */
+#reqd-title{display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap}
+#reqd-title .reqd-tp{min-width:0;overflow:hidden;text-overflow:ellipsis}
+#reqd-title .reqd-rno{font-size:0.62em;font-weight:500;color:var(--ink-mute);
+  white-space:nowrap;letter-spacing:0.02em;opacity:0.9}
+
+/* 9.N.T29 · tree-shedding-leaves empty state ─────────────────────────── */
+.us-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:4px;padding:20px 16px 26px;min-height:300px;}
+.us-sprout{width:230px;height:172px;flex:none;margin-bottom:2px;overflow:visible;}
+/* canopy breathes in the wind */
+.us-canopy{transform-box:fill-box;transform-origin:120px 96px;animation:usCanopySway 7s ease-in-out infinite;}
+@keyframes usCanopySway{0%,100%{transform:rotate(-1.4deg)}50%{transform:rotate(1.4deg)}}
+/* each leaf detaches, flutters down, fades, loops — drift set per-leaf via --lx1/--lx2 */
+.us-leaf-fall{transform-box:fill-box;transform-origin:center;opacity:0;
+  animation-name:usFall;animation-timing-function:cubic-bezier(.45,.05,.55,.95);
+  animation-iteration-count:infinite;}
+@keyframes usFall{
+  0%{transform:translate(0,0) rotate(0deg) scale(1);opacity:0;}
+  8%{opacity:.85;}
+  35%{transform:translate(var(--lx1,12px),34px) rotate(135deg) scale(.96);opacity:.85;}
+  65%{transform:translate(var(--lx2,-9px),64px) rotate(248deg) scale(.9);opacity:.62;}
+  88%{opacity:.22;}
+  100%{transform:translate(var(--lx1,12px),96px) rotate(360deg) scale(.84);opacity:0;}
+}
+.us-title{font-family:'Fraunces',Georgia,serif;font-size:19px;color:var(--ink);margin:2px 0 0;}
+.us-sub{font-family:'Fraunces',serif;font-style:italic;font-size:12.5px;color:var(--ink-soft);margin:0 0 8px;}
+.us-last{font:12px 'JetBrains Mono',monospace;color:var(--ink-soft);margin:2px 0 1px;}
+.us-last b,.us-when b{color:var(--ink);}
+.us-meth{color:var(--ink);font-weight:600;}
+.us-sc{font-size:10px;padding:0 6px;border-radius:8px;}
+.us-sc-ok{background:var(--green-soft,#d4edda);color:var(--green-deep,#2d6a4f);}
+.us-sc-amber{background:#fff3cd;color:var(--c-amber,#c98a2b);}
+.us-sc-danger{background:#f8d7da;color:var(--c-danger,#b3402f);}
+.us-when{font:10.5px 'JetBrains Mono',monospace;color:var(--ink-mute);margin:0 0 10px;}
+/* self-typing terminal */
+.us-term{width:min(440px,90%);background:var(--ink,#1a1612);border-radius:9px;padding:11px 13px;text-align:left;
+  font:11.5px/1.7 'JetBrains Mono',monospace;color:#e8e0cf;min-height:88px;box-shadow:0 4px 16px rgba(0,0,0,.18);margin:4px 0 10px;}
+.us-term-line{white-space:pre-wrap;word-break:break-all;}
+.us-term-line.cmd{color:#cfe8d6;}
+.us-term-line.ok{color:#8fe0b4;}
+.us-term-line.json{color:#d9cfa6;}
+.us-curl{display:flex;align-items:center;gap:8px;width:min(440px,90%);background:var(--paper-deep);
+  border:1px solid var(--paper-edge);border-radius:8px;padding:6px 8px 6px 11px;margin-bottom:12px;}
+.us-curl code{flex:1;font:10.5px 'JetBrains Mono',monospace;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.us-copybtn{flex:none;background:none;border:none;cursor:pointer;color:var(--ink-mute);width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;}
+.us-copybtn .icon{width:13px;height:13px;}
+.us-copybtn:hover{background:rgba(82,183,136,.1);color:var(--ink);}
+.us-copybtn.ok{color:var(--c-accent,#52b788);}
+.us-ctas{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:2px 0 4px;}
+.us-cta{display:inline-flex;align-items:center;gap:6px;font:600 11.5px 'JetBrains Mono',monospace;
+  padding:7px 13px;border-radius:8px;cursor:pointer;border:1px solid var(--paper-edge);background:var(--paper);color:var(--ink-soft);transition:all .15s ease;}
+.us-cta .icon{width:13px;height:13px;}
+.us-cta:hover{border-color:var(--c-accent,#52b788);color:var(--ink);}
+.us-cta.primary{background:var(--ink);color:var(--paper);border-color:transparent;}
+.us-cta.primary:hover{background:var(--green-deep,#2d6a4f);}
+.us-cta.ghost{background:none;}
+.us-listening{display:flex;align-items:center;gap:7px;justify-content:center;font:10.5px 'JetBrains Mono',monospace;color:var(--ink-mute);margin-top:10px;font-style:italic;}
+.us-dot{width:7px;height:7px;border-radius:50%;background:var(--c-accent,#52b788);animation:usDotPulse 1.8s ease-in-out infinite;}
+@keyframes usDotPulse{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1.15)}}
+/* window ladder */
+.us-ladder{display:flex;gap:6px;justify-content:center;margin:8px 0 6px;flex-wrap:wrap;}
+.us-rung{display:inline-flex;align-items:center;gap:5px;font:600 10.5px 'JetBrains Mono',monospace;
+  padding:4px 10px;border-radius:7px;cursor:pointer;border:1px solid var(--paper-edge);background:var(--paper);color:var(--ink-mute);}
+.us-rung i{width:6px;height:6px;border-radius:50%;background:var(--ink-mute);opacity:.4;}
+.us-rung.has{color:var(--ink-soft);}
+.us-rung.has i{background:var(--c-accent,#52b788);opacity:1;}
+.us-rung.cur{border-color:var(--ink);color:var(--ink);}
+.us-rung:hover{border-color:var(--c-accent,#52b788);color:var(--ink);}
+/* chips + hints */
+.us-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:6px 0 4px;}
+.us-chip{font:11px 'JetBrains Mono',monospace;color:var(--ink-soft);background:var(--paper-deep);border:1px solid var(--paper-edge);border-radius:14px;padding:3px 11px;}
+.us-hint{font:11px 'JetBrains Mono',monospace;color:var(--ink-mute);margin:8px 0 0;}
+.us-hint b{color:var(--ink);}
+.us-link{background:none;border:none;color:var(--c-accent,#52b788);cursor:pointer;font:inherit;padding:0;text-decoration:underline;}
+/* ghost teaser (small cards) */
+.us-ghost{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:18px;opacity:.9;}
+.us-ghost svg{width:80%;max-width:160px;height:auto;}
+.us-ghost-lbl{font:italic 10.5px 'Fraunces',serif;color:var(--ink-mute);}
+@media (prefers-reduced-motion: reduce){
+  .us-canopy,.us-leaf-fall,.us-dot{animation:none!important;}
+  .us-leaf-fall{opacity:.5;}
+}
 
 .reqd-pl-strip{display:flex;gap:10px;align-items:center;padding:6px 10px;
   background:var(--paper);border:1px solid var(--paper-edge);
@@ -1435,6 +1518,7 @@ tr.recent-row-fresh{animation:recent-row-arrive 600ms cubic-bezier(0.22,1,0.36,1
 <script src="/static/apin_live_pulse.js"></script>
 <script src="/static/apin_live_stream.js"></script>
 <script src="/static/apin_syntax.js"></script>
-<script src="/static/console_usage.js"></script>
+<script src="/static/console_usage_empty.js?v=9u2"></script>
+<script src="/static/console_usage.js?v=9u2"></script>
 </body>
 </html>

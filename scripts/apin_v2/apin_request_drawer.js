@@ -92,9 +92,10 @@
       const cached = window.APIN && APIN._liveEventCache && APIN._liveEventCache.get(rid);
       if (cached && cached.event) {
         const e = cached.event;
-        $('reqd-title').textContent = (e.method || '') + ' ' + (e.path || '');
-        $('reqd-sub').textContent = (e.timestamp || '') + ' UTC · key: ' + (e.key_name || e.key_public_id || '?')
-          + ' · (still buffering — full detail in ~5s)';
+        $('reqd-title').innerHTML = '<span class="reqd-tp">' + escHtml((e.method || '') + ' ' + (e.path || '')) + '</span>'
+          + '<span class="reqd-rno">Request · live</span>';
+        $('reqd-sub').textContent = ((window.APIN && APIN.time && APIN.time.localFull) ? APIN.time.localFull(e.timestamp) : (e.timestamp || ''))
+          + ' · key: ' + (e.key_name || e.key_public_id || '?') + ' · (still buffering — full detail in ~5s)';
         $('reqd-body').innerHTML =
           '<div class="reqd-status-bar">' +
             '<span class="meth ' + methClass(e.method) + '">' + escHtml(e.method || '') + '</span>' +
@@ -137,8 +138,10 @@
     const nodeSnip = body.data.as_node || '';
     const jsSnip   = body.data.as_js || '';
 
-    $('reqd-title').textContent = (r.method || '') + ' ' + (r.path || '');
-    $('reqd-sub').textContent = (r.timestamp || '') + ' UTC · key: ' + (r.key_name || r.key_public_id || '?');
+    $('reqd-title').innerHTML = '<span class="reqd-tp">' + escHtml((r.method || '') + ' ' + (r.path || '')) + '</span>'
+      + '<span class="reqd-rno">Request #' + escHtml(String(r.id != null ? r.id : rid)) + '</span>';
+    $('reqd-sub').textContent = ((window.APIN && APIN.time && APIN.time.localFull) ? APIN.time.localFull(r.timestamp) : (r.timestamp || ''))
+      + ' · key: ' + (r.key_name || r.key_public_id || '?');
 
     // Build status-bar header
     const sb = r.status_code || 0;
@@ -329,9 +332,21 @@
     }
     const order = ['auth', 'validate', 'handler', 'send'];
     const labels = { auth: 'auth', validate: 'validate', handler: 'handler', send: 'send' };
-    let total = 0;
-    for (const k of order) total += Number(stages[k] || 0);
-    if (total <= 0) total = Math.max(1, Number(totalLatMs) || 1);
+    let stageSum = 0;
+    for (const k of order) stageSum += Number(stages[k] || 0);
+    // Sub-millisecond requests (e.g. a cached GET /api/version) legitimately
+    // have a 0 ms breakdown across every stage. Four empty "0 ms · 0%" bars
+    // read as broken, so show an explicit note instead.
+    if (stageSum <= 0) {
+      const lat = Math.max(0, Number(totalLatMs) || 0);
+      return '<div class="reqd-section"><h4><svg class="icon"><use href="#i-clock"/></svg> Timeline' +
+        '<span class="reqd-tl-total">total: ' + lat + ' ms</span></h4>' +
+        '<div class="reqd-mute">' + (lat <= 1
+          ? 'completed in under 1 ms — no measurable per-stage breakdown.'
+          : 'per-stage breakdown not recorded for this request.') +
+        '</div></div>';
+    }
+    let total = stageSum;
     // Identify the hot stage (largest)
     let hot = order[0]; let hotV = -1;
     for (const k of order) {

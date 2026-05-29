@@ -183,6 +183,11 @@ async def usage_summary(request: Request,
         endpoint=endpoint,
         status=status,
     )
+    # 9.N.T29 · lifetime probe — lets the empty state distinguish a brand-new
+    # key (never any traffic) from a window that just happens to be quiet.
+    # Scoped to key/env (same as summary), not endpoint/status.
+    summary["lifetime"] = auth_db.compute_usage_lifetime(
+        user_id=user_id, key_id=key_id, env=env)
     return summary
 
 
