@@ -418,6 +418,23 @@ async def create_key(request: Request):
     }, {"X-APIN-No-Redact": "1"})
 
 
+@router.get("/_meta/my-ip")
+@api_endpoint("/api/account/keys/_meta/my-ip")
+async def my_ip(request: Request):
+    """GET /api/account/keys/_meta/my-ip — the caller's client IP.
+
+    Audit #7: backs the Settings "+ add my current IP" helper. Keeps the user's
+    IP on our own origin instead of calling a third-party echo service
+    (api.ipify.org), which leaked the IP and returned the public egress address
+    (wrong for local/proxied callers). Uses the actual TCP peer
+    (`request.client.host`) — the non-spoofable source — which is the correct
+    value to allowlist for same-origin callers. Two path segments after /keys,
+    so it never collides with the `/{public_id}` route. Session-gated."""
+    _get_session_user(request)  # raises if not signed in
+    ip = request.client.host if request.client else None
+    return {"ip": ip}
+
+
 @router.get("/{public_id}")
 @api_endpoint("/api/account/keys/{public_id}")
 async def get_key(request: Request, public_id: str):
@@ -459,6 +476,14 @@ async def patch_key(request: Request, public_id: str):
     if "quota_per_day" in body:
         updates["quota_per_day"] = _validate_quota(
             body["quota_per_day"], field="quota_per_day")
+    if "quota_period" in body:
+        # 9.P.1 · the window the quota amount applies to.
+        _qp = body["quota_period"]
+        if _qp not in ("hour", "day", "week", "month"):
+            raise ApiError(
+                "invalid_parameter",
+                "quota_period must be one of: hour, day, week, month.")
+        updates["quota_period"] = _qp
     if "expires_at" in body:
         updates["expires_at"] = _validate_expires_at(body["expires_at"])
     if "note" in body:
@@ -480,6 +505,9 @@ async def patch_key(request: Request, public_id: str):
     except auth_db.DuplicateKeyNameError as e:
         raise ApiError("duplicate_name", str(e),
                        details={"field": "name"}) from e
+    except ValueError as e:
+        # e.g. trying to edit a 'locked' group member's scopes directly.
+        raise ApiError("invalid_parameter", str(e)) from e
 
     if updated is None:
         raise ApiError(

@@ -40,3 +40,10 @@ reportlab>=4.0.0
 libsql-client>=0.3.1
 python-dotenv==1.2.2
 tqdm==4.67.3
+
+# ── Analytics geo map · offline GPS->region resolver (9.N.T31) ──────────────
+# Bundles a ~30MB cities KD-tree; scipy/numpy already present above.
+reverse_geocoder==1.5.1
+# IP->city reader for request-origin geo. The DB-IP City Lite mmdb is fetched
+# at build time by tools/fetch_ip_db.py (not committed).
+geoip2==5.2.0

@@ -13,3 +13,9 @@ python-dotenv>=1.0.1
 argon2-cffi>=23.1.0
 reportlab>=4.0.0
 libsql-client>=0.3.1
+# 9.N.T31 · offline GPS->region resolver for the Analytics geo map
+# (bundles a ~30MB cities KD-tree; depends on scipy/numpy already present)
+reverse_geocoder>=1.5.1
+# 9.N.T31 · IP->city reader for request-origin geo (DB-IP City Lite mmdb is
+# fetched separately by tools/fetch_ip_db.py — NOT committed).
+geoip2>=4.7.0

@@ -458,6 +458,54 @@ def _client_geo_from_headers(headers) -> dict:
     return out
 
 
+# 9.N.T33b · Image persistence for the Living Agricultural Observatory.
+# The user asked us to persist uploaded leaf photos for future scans so the
+# Prediction Inspector can show the real image (relaxing the older
+# privacy-by-design default of storing no pixels). We store a small JPEG
+# thumbnail — never the full-resolution upload — to keep row/blob sizes sane.
+_SCAN_STORE_MAX_DIM = 360      # long-edge px of the stored thumbnail
+_SCAN_STORE_JPEG_Q  = 72       # JPEG quality of the stored thumbnail
+_PERSIST_FALSEY = {"false", "0", "no", "off", "none", ""}
+
+
+def _persist_default(raw) -> bool:
+    """Resolve the persist_image flag. Default is now TRUE (opt-out): a missing
+    field persists the image; only an explicit falsey value opts out."""
+    if raw is None:
+        return True
+    if isinstance(raw, bool):
+        return raw
+    try:
+        return str(raw).strip().lower() not in _PERSIST_FALSEY
+    except Exception:
+        return True
+
+
+def _thumbnail_for_storage(image_bytes: bytes) -> bytes | None:
+    """Resize an uploaded image to a small JPEG thumbnail for DB storage.
+    Returns JPEG bytes, or None if the input can't be decoded. Never raises —
+    the inference path's latency/robustness budget is sacred."""
+    if not isinstance(image_bytes, (bytes, bytearray, memoryview)):
+        return None
+    if len(image_bytes) == 0:
+        return None
+    try:
+        from PIL import Image as _PIL
+        import io as _io
+        im = _PIL.open(_io.BytesIO(bytes(image_bytes))).convert("RGB")
+        w, h = im.size
+        scale = _SCAN_STORE_MAX_DIM / float(max(w, h)) if max(w, h) else 1.0
+        if scale < 1.0:
+            im = im.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                           _PIL.LANCZOS)
+        buf = _io.BytesIO()
+        im.save(buf, format="JPEG", quality=_SCAN_STORE_JPEG_Q, optimize=True)
+        return buf.getvalue()
+    except Exception:
+        logger.debug("_thumbnail_for_storage: decode/resize failed", exc_info=True)
+        return None
+
+
 def _extract_image_metadata(image_bytes: bytes) -> dict:
     """Best-effort image metadata via Pillow.
 
@@ -5762,7 +5810,7 @@ _CONSOLE_NAV_BYTES = (
     # Phase 8.H · global toast system. odometer.js first so the pill count
     # animation can use it. apin_toast.js initialises on DOMContentLoaded.
     b'<script src="/static/odometer.js"></script>\n'
-    b'<script src="/static/apin_toast.js"></script>\n'
+    b'<script src="/static/apin_toast.js?v=9s1"></script>\n'
     # Phase 8.H.C · nav badge for unread alerts.
     b'<script src="/static/apin_nav_badge.js"></script>\n'
     # Phase 9.N.1 · shared animation library. Loads before any chart code
@@ -5999,6 +6047,13 @@ def _add_account_console_routes(app):
 
     # ── Routers (Phase 3.2 keys + Phase 3.3 sudo) ──────────────────
     app.include_router(_rk.router)
+    # Phase 2 · API key groups
+    try:
+        from scripts.apin_v2.account import routes_key_groups as _rkg
+        app.include_router(_rkg.router)
+        logger.info("API key-groups router mounted (Phase 2): /api/account/key-groups")
+    except Exception as _e:
+        logger.warning("key-groups router failed to mount: %s", _e)
     _route_count = sum(
         1 for r in _rk.router.routes
         if hasattr(r, "methods") and r.methods
@@ -6092,6 +6147,16 @@ def _add_account_console_routes(app):
     logger.info(
         "API Console usage router mounted (Phase 9.B): %d usage routes.",
         len(_ru.router.routes),
+    )
+
+    # 9.N.T31 · Per-key "Analytics" tab — inference-observatory endpoints
+    # (geo map, inference field, severity, bloom, request stream, quota,
+    # payloads). Session-cookie auth only, same prefix family as usage.
+    from scripts.apin_v2.account import routes_analytics as _ra
+    app.include_router(_ra.router)
+    logger.info(
+        "API Console analytics router mounted (9.N.T31): %d analytics routes.",
+        len(_ra.router.routes),
     )
 
     # Phase 6.B.1 + B.2: Console settings + quickstart HTML pages.
@@ -6284,13 +6349,19 @@ def _add_account_console_routes(app):
     # keeps 'unsafe-inline' because the pages still ship inline <style>
     # blocks (separate item — out of Phase 8 scope, deferred to Phase 9+
     # along with self-host Fraunces).
+    # 9.N.T31h · MapLibre needs blob: workers and fetches OpenFreeMap vector
+    # tiles + glyphs + sprite from tiles.openfreemap.org (Analytics geo map).
+    # Scoped additions: worker-src blob:, and the one tile host on
+    # connect-src/img-src. Everything else stays locked to 'self'.
     _ACCOUNT_PAGE_CSP = (
         "default-src 'none'; "
         "script-src 'self'; "
+        "worker-src 'self' blob:; "
+        "child-src 'self' blob:; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
-        "img-src 'self' data:; "
-        "connect-src 'self'; "
+        "img-src 'self' data: blob: https://tiles.openfreemap.org; "
+        "connect-src 'self' https://tiles.openfreemap.org; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'"
@@ -6396,6 +6467,25 @@ def _add_account_console_routes(app):
         "three.min.js",            # 9.N.T25 — vendored Three.js r149 (lazy-loaded)
         "apin_request_drawer.js",  # 9.N.T9 — shared request-detail drawer
         "apin_request_drawer.css", # 9.N.T9 — shared drawer styles
+        # 9.N.T31 · Analytics tab — vendored map/3D libs + boundary data + CC0
+        # crop models (all lazy-loaded only on the Analytics tab).
+        "globe.gl.min.js",         # globe.gl v2.31.0 (MIT) — legacy (superseded by MapLibre)
+        "maplibre-gl.js",          # 9.N.T31h · MapLibre GL JS v5 (BSD) — vector-tile map
+        "maplibre-gl.css",         # 9.N.T31h · MapLibre controls/canvas styles
+        "console_analytics.js",    # Analytics tab controller
+        "console_analytics_geo.js",   # 3D geographic origin widget
+        "console_analytics_field.js", # 3D inference field widget
+        "console_analytics_observatory.js", # expanded Agricultural Observatory (lazy)
+        "console_analytics_clients.js",     # 9.N.T34 · Visitors' Log client widget
+        "console_analytics_confidence.js",  # 9.N.T34 · Soil-Horizon confidence ladder
+        "console_modal.js",                 # 9.O.2 · in-page modal (key actions)
+        "apin_console_base.css",            # 9.P.2 · shared scrollbar/checkbox/input/button
+        "console_key_groups.js",            # 9.Q.4 · API key groups UI (keys page)
+        "geo_world_countries.json",   # Natural Earth admin-0 (public domain)
+        "geo_world_states.json",      # Natural Earth admin-1 (public domain)
+        "geo_district_IN.json",       # geoBoundaries IND ADM2 (CC-BY)
+        "crop_okra.glb",           # Quaternius LowPoly Crops (CC0)
+        "crop_brassica.glb",       # Quaternius LowPoly Crops (CC0)
     }
     _STATIC_JS_CACHE: dict[str, dict] = {}
 
@@ -6418,14 +6508,26 @@ def _add_account_console_routes(app):
                 cache["etag"]  = (
                     '"' + hashlib.sha256(cache["body"]).hexdigest()[:12] + '"'
                 )
-            # three.min.js is a vendored, immutable lib (busted via ?v=) → cache
-            # hard so repeat terrain opens are instant. Our own files revalidate.
-            cc = ("public, max-age=31536000, immutable" if filename == "three.min.js"
+            # three.min.js + globe.gl + boundary JSON + crop models are
+            # vendored, immutable libs/data (busted via ?v=) → cache hard so
+            # repeat opens are instant. Our own files revalidate.
+            _IMMUTABLE = (filename == "three.min.js"
+                          or filename == "globe.gl.min.js"
+                          or filename.startswith("geo_")
+                          or filename.endswith(".glb"))
+            cc = ("public, max-age=31536000, immutable" if _IMMUTABLE
                   else "public, max-age=0, must-revalidate")
             inm = request.headers.get("if-none-match")
             if inm and inm == cache["etag"]:
                 return Response(status_code=304, headers={"ETag": cache["etag"], "Cache-Control": cc})
-            _media = "text/css" if filename.endswith(".css") else "application/javascript"
+            if filename.endswith(".css"):
+                _media = "text/css"
+            elif filename.endswith(".json"):
+                _media = "application/json"
+            elif filename.endswith((".glb", ".gltf")):
+                _media = "model/gltf-binary"
+            else:
+                _media = "application/javascript"
             hdr = {"Cache-Control": cc, "ETag": cache["etag"],
                    "X-Content-Type-Options": "nosniff", "Vary": "Accept-Encoding"}
             # gzip on the wire — Three.js 608 KB → ~150 KB; cached once per file.
@@ -6629,7 +6731,7 @@ def _add_perception_routes(app):
                     field="geo")
             cap = geo_in.get("captured_at")
             fid = geo_in.get("flight_id")
-            persist = bool(geo_in.get("persist_image"))
+            persist = _persist_default(geo_in.get("persist_image"))
         else:
             geo_in = {
                 "latitude":    latitude,
@@ -6640,7 +6742,7 @@ def _add_perception_routes(app):
             }
             cap = captured_at
             fid = flight_id
-            persist = bool(persist_image)
+            persist = _persist_default(persist_image)
         geo = _validate_geo(geo_in)
         cap_iso = _parse_iso_captured_at(cap)
         return geo, cap_iso, (fid or None), persist
@@ -6705,7 +6807,7 @@ def _add_perception_routes(app):
             geo=geo_parsed,
             captured_at=cap_iso,
             image_sha256=image_sha,
-            image_bytes=(data if persist else None),
+            image_bytes=(_thumbnail_for_storage(data) if persist else None),
             result=result,
             processing_ms=elapsed_ms)
         feature = _scan_to_geojson_feature(scan, diag_db)
@@ -6798,7 +6900,7 @@ def _add_perception_routes(app):
         features: list[dict] = []
         total_bytes = 0
         n_ok = n_err = 0
-        persist = bool(persist_image)
+        persist = _persist_default(persist_image)
         diag_counter: dict = {}
         for i, (f, m) in enumerate(zip(files, man)):
             entry = {"index": i, "filename": f.filename}
@@ -6843,7 +6945,7 @@ def _add_perception_routes(app):
                     geo=geo,
                     captured_at=cap_iso,
                     image_sha256=image_sha,
-                    image_bytes=(data if persist else None),
+                    image_bytes=(_thumbnail_for_storage(data) if persist else None),
                     result=result,
                     processing_ms=elapsed_ms)
                 feature = _scan_to_geojson_feature(scan, diag_db)

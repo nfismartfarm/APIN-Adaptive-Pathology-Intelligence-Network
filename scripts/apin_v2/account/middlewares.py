@@ -41,6 +41,7 @@ import hashlib
 import json
 import logging
 import re
+import secrets
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -502,18 +503,22 @@ _SUDO_EXEMPT_PATHS = (
     "/api/account/sudo",          # POST/GET — includes /sudo/revoke
     "/api/account/alerts/stream", # SSE — read-only
     "/api/account/docs/try",      # ergonomics — see §9.2
-    # Phase 8.H · alert inbox-state operations are NOT security mutations.
-    # Marking notifications read / dismissed / snoozed is the user's own
-    # inbox bookkeeping; gating it behind sudo silently kills the toast
-    # interaction (toast's mark-read fetch 403'd, badge never refreshed,
-    # dashboard stayed stale). The four routes covered:
-    #   PATCH  /api/account/alerts/{id}/read
-    #   PATCH  /api/account/alerts/{id}/restore
-    #   POST   /api/account/alerts/{id}/snooze
-    #   DELETE /api/account/alerts/{id}        (soft-dismiss)
-    # AND the new prefs routes:
-    #   PATCH  /api/account/alerts/prefs       (notification preferences)
-    "/api/account/alerts",        # NOTE: matches /alerts AND /alerts/...
+)
+
+# Audit #3 (2026-06) — the alert *inbox-state* mutations are NOT security
+# mutations (marking notifications read / dismissed / snoozed is the user's own
+# inbox bookkeeping; gating them behind sudo kills the toast interaction). They
+# used to be exempted with a broad "/api/account/alerts" prefix, which would
+# SILENTLY exempt any FUTURE security-relevant route added under that prefix.
+# Replaced with an explicit (method, exact-path-regex) allowlist so the
+# exemption is fail-SAFE: a newly added alert mutation requires sudo by default
+# until someone deliberately lists it here.
+_SUDO_EXEMPT_ALERT_ROUTES = (
+    ("PATCH",  re.compile(r"^/api/account/alerts/prefs/?$")),         # prefs
+    ("PATCH",  re.compile(r"^/api/account/alerts/[^/]+/read/?$")),    # mark read
+    ("POST",   re.compile(r"^/api/account/alerts/[^/]+/restore/?$")), # restore
+    ("POST",   re.compile(r"^/api/account/alerts/[^/]+/snooze/?$")),  # snooze
+    ("DELETE", re.compile(r"^/api/account/alerts/[^/]+/?$")),         # dismiss
 )
 
 
@@ -521,14 +526,70 @@ def _is_sudo_exempt(path: str, method: str) -> bool:
     """Return True if this request bypasses sudo enforcement.
 
     Spec §9.2: read-only methods exempt unconditionally. POST/PATCH/DELETE
-    on path prefixes in `_SUDO_EXEMPT_PATHS` are also exempt.
+    on path prefixes in `_SUDO_EXEMPT_PATHS` are also exempt, plus the explicit
+    alert inbox-state routes in `_SUDO_EXEMPT_ALERT_ROUTES` (audit #3).
     """
     if method not in _SUDO_REQUIRED_METHODS:
         return True
     for prefix in _SUDO_EXEMPT_PATHS:
         if path == prefix or path.startswith(prefix + "/"):
             return True
+    for m, rx in _SUDO_EXEMPT_ALERT_ROUTES:
+        if method == m and rx.match(path):
+            return True
     return False
+
+
+def _csrf_ok_from_scope(scope) -> bool:
+    """Audit #4 — defense-in-depth CSRF check for the raw-ASGI middleware.
+
+    Mirrors `account._session_helpers.require_csrf`: constant-time compare of
+    the `X-Console-Csrf` header against the session's `csrf_token`, resolved
+    from scope state and falling back to a cookie->DB session lookup (identical
+    resolution order to the handler-level check). Returns True only on a valid
+    match. Every state-changing `/api/account/*` request is verified here in
+    addition to the per-handler `require_csrf`, so a handler that forgets the
+    in-line check is still protected. Names defined later at module level
+    (`_SESSION_COOKIE_NAME`) resolve fine since this runs at request time.
+    """
+    incoming = ""
+    for k, v in (scope.get("headers") or []):
+        if k == b"x-console-csrf":
+            try:
+                incoming = v.decode("latin-1").strip()
+            except Exception:
+                incoming = ""
+            break
+    if not incoming:
+        return False
+
+    expected = None
+    _ss = scope.get("state")
+    sess = None
+    if isinstance(_ss, dict):
+        sess = _ss.get("session")
+    elif _ss is not None:
+        sess = getattr(_ss, "session", None)
+    if sess is not None:
+        expected = getattr(sess, "csrf_token", None)
+        if expected is None and isinstance(sess, dict):
+            expected = sess.get("csrf_token")
+    if not expected:
+        try:
+            cookie_header = _collect_cookie_headers(scope)
+            raw = _parse_cookie_header(cookie_header, _SESSION_COOKIE_NAME)
+            if raw:
+                row = auth_db.lookup_session_by_token(raw)
+                if row:
+                    expected = row.get("csrf_token")
+        except Exception:
+            expected = None
+    if not expected:
+        return False
+    try:
+        return secrets.compare_digest(incoming, expected)
+    except Exception:
+        return False
 
 
 def _verify_sudo_cookie(cookie_value: str,
@@ -768,6 +829,18 @@ class SudoMiddleware:
 
         if not path.startswith("/api/account/"):
             return await self.app(scope, receive, send)
+
+        # Audit #4 — central CSRF net. Every unsafe /api/account/* request must
+        # carry a valid session-bound CSRF token, INCLUDING sudo-exempt ones
+        # (the sudo endpoint and alert inbox routes — all of which already send
+        # the header from the console). Handlers also call require_csrf; this
+        # is the defense-in-depth backstop so a future handler that forgets the
+        # in-line check cannot accept a forged cross-site request.
+        if method in _SUDO_REQUIRED_METHODS and not _csrf_ok_from_scope(scope):
+            return await _send_json_error(
+                send, 401, "invalid_or_missing_token",
+                "CSRF token missing or invalid.",
+            )
 
         if _is_sudo_exempt(path, method):
             return await self.app(scope, receive, send)

@@ -1890,6 +1890,16 @@ def _migrate_v2_extensions(c) -> None:
         ("ood_flag",                "INTEGER NOT NULL DEFAULT 0"),
         ("calibration_warning",     "INTEGER NOT NULL DEFAULT 0"),
         ("client_country",          "TEXT"),
+        # 9.N.T31 · GPS-derived administrative region for the Analytics
+        # geographic-origin map. Reverse-geocoded from latitude/longitude at
+        # write time (geo_resolver / reverse_geocoder, offline). Distinct from
+        # client_country (IP/header-derived). geo_cc is the ISO-3166 alpha-2
+        # country code (join key for GADM/Natural Earth display polygons);
+        # geo_state = admin1, geo_district = admin2. All NULL if resolution
+        # is unavailable (library missing or off-grid point).
+        ("geo_cc",                  "TEXT"),
+        ("geo_state",               "TEXT"),
+        ("geo_district",            "TEXT"),
     ])
 
     # Stage 6 · browser_sessions gets a denormalised `current_route` so
@@ -2011,6 +2021,22 @@ CREATE TABLE IF NOT EXISTS api_key_usage_minute (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_key_time
   ON api_key_usage_minute(key_id, minute_ts DESC);
+
+-- ── API key groups (Phase 2) ─────────────────────────────────────────
+-- A group is a shared SCOPE set. Member keys inherit it ('locked') or
+-- override within a per-key ceiling ('special'). Rate/quota/allowlists
+-- stay per-key. group_id / group_role / scope_ceiling live on api_keys
+-- (added via _add_columns so existing rows migrate cleanly).
+CREATE TABLE IF NOT EXISTS api_key_groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    scopes      TEXT NOT NULL DEFAULT '[]',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_key_groups_user_name
+    ON api_key_groups(user_id, name);
 
 -- ── §6.4 api_key_request_log ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS api_key_request_log (
@@ -2234,6 +2260,12 @@ def _migrate_stage7_alter_api_keys(c) -> None:
         ("origin_allowlist",      "TEXT"),
         ("rate_limit_per_min",    "INTEGER"),
         ("quota_per_day",         "INTEGER"),
+        # 9.P.1 · quota period. quota_per_day stores the AMOUNT; quota_period
+        # the window it applies to ('hour'|'day'|'week'|'month'). Default 'day'
+        # keeps every existing row's meaning identical. Enforcement (_quota_ok)
+        # is still a Phase-10 stub, so this is storage+display today and
+        # enforcement-ready later.
+        ("quota_period",          "TEXT NOT NULL DEFAULT 'day'"),
         ("expires_at",            "TEXT"),
         ("created_ip",            "TEXT"),
         ("created_ua",            "TEXT"),
@@ -2251,6 +2283,14 @@ def _migrate_stage7_alter_api_keys(c) -> None:
         ("deleted_at",            "TEXT"),
         ("enforce_origin_for_non_browser", "INTEGER NOT NULL DEFAULT 1"),
         ("legacy_alert_emitted",  "INTEGER NOT NULL DEFAULT 0"),
+        # Phase 2 · API key groups. group_id -> api_key_groups.id (logical FK;
+        # SQLite ALTER can't add FK constraints). group_role is 'locked'
+        # (inherits the group's scopes live) or 'special' (own scopes, capped
+        # to scope_ceiling). NULL group_id = ungrouped (legacy behaviour).
+        ("group_id",              "INTEGER"),
+        ("group_role",            "TEXT"),
+        ("scope_ceiling",         "TEXT"),   # JSON: max scopes a special key may hold
+
         # Phase 8.H · FIX-MIGRATION-GAP: disable_console_api_key /
         # enable_console_api_key / rotate / patch all write to updated_at,
         # but the original Phase-1 migration omitted it. On Turso this
@@ -4090,6 +4130,23 @@ _ALERT_REGISTRY: dict[str, dict] = {
         "category": "key_lifecycle", "default_on": False, "severity": "info",
         "title_tmpl": "Key settings updated",
         "body_tmpl": "Key '{key_name}' had {fields_changed} updated.",
+    },
+    # Phase 2 · API key groups
+    "group.created": {
+        "category": "key_lifecycle", "default_on": True, "severity": "info",
+        "title_tmpl": "API group created",
+        "body_tmpl": "Group '{group_name}' was created with {scope_count} permission(s).",
+    },
+    "group.updated": {
+        "category": "key_lifecycle", "default_on": True, "severity": "info",
+        "title_tmpl": "API group updated",
+        "body_tmpl": "Group '{group_name}' was updated ({change}).",
+    },
+    "group.deleted": {
+        "category": "key_lifecycle", "default_on": True, "severity": "info",
+        "title_tmpl": "API group deleted",
+        "body_tmpl": "Group '{group_name}' was deleted — {members_kept} key(s) kept, "
+                     "{members_deleted} deleted.",
     },
 
     # ── Category 2 · Key security ─────────────────────────────────────
@@ -7125,6 +7182,263 @@ def find_api_key(raw_token: str) -> Optional[dict]:
             "name":    row["name"]}
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 2 · API key groups — CRUD, membership, effective-scope helpers.
+# A group is a shared SCOPE set. Locked members inherit it live; special
+# members hold their own scopes clamped to a per-key ceiling.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _parse_scope_list(s):
+    import json as _json
+    if not s:
+        return []
+    try:
+        v = _json.loads(s)
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+
+def _group_to_dict(row, member_count=None):
+    d = {
+        "id": int(row["id"]),
+        "name": row["name"],
+        "scopes": _parse_scope_list(row["scopes"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+    if member_count is not None:
+        d["member_count"] = int(member_count)
+    return d
+
+
+def create_key_group(*, user_id: int, name: str, scopes: list) -> dict:
+    import json as _json
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("group name required")
+    if not isinstance(scopes, list):
+        scopes = []
+    now = _now_iso()
+    with _write_lock, get_conn() as c:
+        dup = c.execute(
+            "SELECT id FROM api_key_groups WHERE user_id = ? AND name = ?",
+            (int(user_id), name)).fetchone()
+        if dup is not None:
+            raise DuplicateKeyNameError(f"a group named {name!r} already exists")
+        cur = c.execute(
+            "INSERT INTO api_key_groups (user_id, name, scopes, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (int(user_id), name, _json.dumps(scopes), now, now))
+        gid = cur.lastrowid
+    return get_key_group(user_id=int(user_id), group_id=int(gid))
+
+
+def list_key_groups(*, user_id: int) -> list:
+    with get_conn() as c:
+        rows = c.execute(
+            "SELECT g.id, g.name, g.scopes, g.created_at, g.updated_at, "
+            "  (SELECT COUNT(*) FROM api_keys k WHERE k.group_id = g.id "
+            "     AND k.deleted_at IS NULL) AS member_count "
+            "FROM api_key_groups g WHERE g.user_id = ? ORDER BY g.name",
+            (int(user_id),)).fetchall()
+    return [_group_to_dict(r, r["member_count"]) for r in rows]
+
+
+def get_key_group(*, user_id: int, group_id: int) -> Optional[dict]:
+    with get_conn() as c:
+        row = c.execute(
+            "SELECT id, name, scopes, created_at, updated_at "
+            "FROM api_key_groups WHERE id = ? AND user_id = ?",
+            (int(group_id), int(user_id))).fetchone()
+        if row is None:
+            return None
+        members = c.execute(
+            "SELECT public_id, name, group_role, status, scopes, scope_ceiling "
+            "FROM api_keys WHERE group_id = ? AND user_id = ? AND deleted_at IS NULL "
+            "ORDER BY name",
+            (int(group_id), int(user_id))).fetchall()
+    d = _group_to_dict(row)
+    d["members"] = [{
+        "public_id": m["public_id"],
+        "name": m["name"],
+        "group_role": m["group_role"] or "locked",
+        "status": m["status"],
+        "scopes": _parse_scope_list(m["scopes"]),
+        "scope_ceiling": _parse_scope_list(m["scope_ceiling"]) if m["scope_ceiling"] else None,
+    } for m in members]
+    d["member_count"] = len(d["members"])
+    return d
+
+
+def patch_key_group(*, user_id: int, group_id: int,
+                     name: Optional[str] = None,
+                     scopes: Optional[list] = None) -> Optional[dict]:
+    import json as _json
+    sets, args = [], []
+    if name is not None:
+        nm = (name or "").strip()
+        if not nm:
+            raise ValueError("group name cannot be empty")
+        sets.append("name = ?"); args.append(nm)
+    if scopes is not None:
+        if not isinstance(scopes, list):
+            scopes = []
+        sets.append("scopes = ?"); args.append(_json.dumps(scopes))
+    if not sets:
+        return get_key_group(user_id=int(user_id), group_id=int(group_id))
+    sets.append("updated_at = ?"); args.append(_now_iso())
+    args.extend([int(group_id), int(user_id)])
+    with _write_lock, get_conn() as c:
+        if name is not None:
+            dup = c.execute(
+                "SELECT id FROM api_key_groups WHERE user_id = ? AND name = ? AND id != ?",
+                (int(user_id), (name or "").strip(), int(group_id))).fetchone()
+            if dup is not None:
+                raise DuplicateKeyNameError(
+                    f"a group named {(name or '').strip()!r} already exists")
+        cur = c.execute(
+            "UPDATE api_key_groups SET " + ", ".join(sets) +
+            " WHERE id = ? AND user_id = ?", tuple(args))
+        if cur.rowcount == 0:
+            return None
+    return get_key_group(user_id=int(user_id), group_id=int(group_id))
+
+
+def assign_key_to_group(*, user_id: int, public_id: str, group_id: int,
+                        role: str = "locked",
+                        scope_ceiling: Optional[list] = None) -> Optional[dict]:
+    """Attach a key to a group.
+      - 'locked'  : key inherits the group's scopes (stored copy kept in sync).
+      - 'special' : key keeps its own scopes, clamped to a ceiling. The ceiling
+                    is group.scopes UNION the allowed extras (scope_ceiling), or
+                    just group.scopes when no extras were granted (cap-at-group).
+    The stored scopes are clamped on assignment so they can never exceed the
+    ceiling. Returns the updated key dict, or None if key/group not found.
+    """
+    import json as _json
+    role = role if role in ("locked", "special") else "locked"
+    with _write_lock, get_conn() as c:
+        g = c.execute(
+            "SELECT scopes FROM api_key_groups WHERE id = ? AND user_id = ?",
+            (int(group_id), int(user_id))).fetchone()
+        if g is None:
+            raise ValueError("group not found")
+        gscopes = _parse_scope_list(g["scopes"])
+        krow = c.execute(
+            "SELECT scopes FROM api_keys "
+            "WHERE user_id = ? AND public_id = ? AND deleted_at IS NULL",
+            (int(user_id), public_id)).fetchone()
+        if krow is None:
+            return None
+        if role == "locked":
+            new_scopes = list(gscopes)
+            ceiling = None
+        else:
+            if scope_ceiling is None or not isinstance(scope_ceiling, list):
+                ceiling = list(gscopes)
+            else:
+                ceiling = sorted(set(gscopes) | set(scope_ceiling))
+            kscopes = _parse_scope_list(krow["scopes"])
+            base = kscopes if kscopes else gscopes
+            new_scopes = [s for s in base if s in ceiling]
+        c.execute(
+            "UPDATE api_keys SET group_id = ?, group_role = ?, scopes = ?, "
+            "  scope_ceiling = ?, updated_at = ? "
+            "WHERE user_id = ? AND public_id = ?",
+            (int(group_id), role, _json.dumps(new_scopes),
+             _json.dumps(ceiling) if ceiling is not None else None,
+             _now_iso(), int(user_id), public_id))
+    return get_console_api_key(user_id=int(user_id), public_id=public_id)
+
+
+def remove_key_from_group(*, user_id: int, public_id: str) -> Optional[dict]:
+    with _write_lock, get_conn() as c:
+        cur = c.execute(
+            "UPDATE api_keys SET group_id = NULL, group_role = NULL, "
+            "  scope_ceiling = NULL, updated_at = ? "
+            "WHERE user_id = ? AND public_id = ? AND deleted_at IS NULL",
+            (_now_iso(), int(user_id), public_id))
+        if cur.rowcount == 0:
+            return None
+    return get_console_api_key(user_id=int(user_id), public_id=public_id)
+
+
+def set_key_group_role(*, user_id: int, public_id: str, role: str,
+                       scope_ceiling: Optional[list] = None) -> Optional[dict]:
+    """Promote (locked -> special, with a ceiling) or demote (special ->
+    locked). The key must already belong to a group."""
+    with get_conn() as c:
+        row = c.execute(
+            "SELECT group_id FROM api_keys "
+            "WHERE user_id = ? AND public_id = ? AND deleted_at IS NULL",
+            (int(user_id), public_id)).fetchone()
+    if row is None or row["group_id"] is None:
+        raise ValueError("key is not in a group")
+    return assign_key_to_group(
+        user_id=int(user_id), public_id=public_id, group_id=int(row["group_id"]),
+        role=role, scope_ceiling=scope_ceiling)
+
+
+def delete_key_group(*, user_id: int, group_id: int,
+                     member_policy: str = "ungroup",
+                     keep_public_ids: Optional[list] = None) -> Optional[dict]:
+    """Delete a group and resolve its members.
+
+      'ungroup'      — keep every key, just detach it from the group.
+      'delete_all'   — disable + soft-delete every member key.
+      'keep_special' — detach special members; delete locked members.
+      'choose'       — detach keys in keep_public_ids; delete the rest.
+
+    Returns a summary dict, or None if the group wasn't found.
+    """
+    keep = set(keep_public_ids or [])
+    with _write_lock, get_conn() as c:
+        g = c.execute(
+            "SELECT id FROM api_key_groups WHERE id = ? AND user_id = ?",
+            (int(group_id), int(user_id))).fetchone()
+        if g is None:
+            return None
+        members = c.execute(
+            "SELECT public_id, group_role FROM api_keys "
+            "WHERE group_id = ? AND user_id = ? AND deleted_at IS NULL",
+            (int(group_id), int(user_id))).fetchall()
+        now = _now_iso()
+        kept = removed = 0
+        for m in members:
+            pid = m["public_id"]
+            role = m["group_role"] or "locked"
+            if member_policy == "ungroup":
+                detach = True
+            elif member_policy == "delete_all":
+                detach = False
+            elif member_policy == "keep_special":
+                detach = (role == "special")
+            elif member_policy == "choose":
+                detach = (pid in keep)
+            else:
+                detach = True
+            if detach:
+                c.execute(
+                    "UPDATE api_keys SET group_id = NULL, group_role = NULL, "
+                    "  scope_ceiling = NULL, updated_at = ? "
+                    "WHERE user_id = ? AND public_id = ?",
+                    (now, int(user_id), pid))
+                kept += 1
+            else:
+                c.execute(
+                    "UPDATE api_keys SET status = 'disabled', revoked_at = ?, "
+                    "  deleted_at = ?, group_id = NULL, group_role = NULL, "
+                    "  scope_ceiling = NULL, updated_at = ? "
+                    "WHERE user_id = ? AND public_id = ?",
+                    (now, now, now, int(user_id), pid))
+                removed += 1
+        c.execute("DELETE FROM api_key_groups WHERE id = ? AND user_id = ?",
+                  (int(group_id), int(user_id)))
+    return {"deleted_group": int(group_id),
+            "members_kept": kept, "members_deleted": removed}
+
+
 def lookup_api_key_full(raw_token: str) -> Optional[dict]:
     """Stage-7 / API Console key lookup. Returns the FULL row dict needed by
     `@require_scope` (scopes, status, ip_allowlist, etc.), or None.
@@ -7162,6 +7476,7 @@ def lookup_api_key_full(raw_token: str) -> Optional[dict]:
                 "       ip_allowlist, origin_allowlist, "
                 "       enforce_origin_for_non_browser, "
                 "       rate_limit_per_min, quota_per_day, "
+                "       group_id, group_role, "
                 "       revoked_at, deleted_at "
                 "FROM api_keys WHERE token_hash = ?",
                 (token_hash,)
@@ -7183,6 +7498,26 @@ def lookup_api_key_full(raw_token: str) -> Optional[dict]:
             scopes = []
     except Exception:
         scopes = []
+    # Phase 2 · effective scopes. A 'locked' group member inherits the group's
+    # scopes LIVE (so editing the group re-permissions every locked key at
+    # once). 'special' members keep their own scopes (already clamped to their
+    # ceiling on write). Ungrouped keys are unchanged. Fail-safe: on any group
+    # lookup error, fall back to the key's own stored scopes.
+    _gid = row["group_id"]
+    _role = row["group_role"]
+    if _gid is not None and _role == "locked":
+        try:
+            with get_conn() as _gc:
+                _grow = _gc.execute(
+                    "SELECT scopes FROM api_key_groups WHERE id = ? AND user_id = ?",
+                    (int(_gid), int(row["user_id"]))
+                ).fetchone()
+            if _grow is not None:
+                _gs = _json.loads(_grow["scopes"]) if _grow["scopes"] else []
+                if isinstance(_gs, list):
+                    scopes = _gs
+        except Exception:
+            pass   # keep the key's own scopes on any error
     # IP / origin allowlists are JSON arrays of strings, or NULL.
     def _parse_json_list(s):
         if s is None or s == "":
@@ -7207,6 +7542,8 @@ def lookup_api_key_full(raw_token: str) -> Optional[dict]:
             bool(row["enforce_origin_for_non_browser"]),
         "rate_limit_per_min": row["rate_limit_per_min"],
         "quota_per_day":    row["quota_per_day"],
+        "group_id":         row["group_id"],
+        "group_role":       row["group_role"],
         # `revoked_at` is preserved for callers that want to know WHEN the
         # key was revoked. Status='disabled' is set by Phase-1 backfill
         # whenever revoked_at is non-NULL.
@@ -7406,7 +7743,12 @@ def list_console_api_keys(
             f"SELECT id, public_id, name, environment, scopes, status, "
             f"       last_four, expires_at, created_at, last_used_at, "
             f"       ip_allowlist, origin_allowlist, rate_limit_per_min, "
-            f"       quota_per_day, note, enforce_origin_for_non_browser "
+            f"       quota_per_day, note, enforce_origin_for_non_browser, "
+            f"       group_id, group_role, "
+            f"       (SELECT name FROM api_key_groups g WHERE g.id = api_keys.group_id) "
+            f"         AS group_name, "
+            f"       (SELECT COUNT(*) FROM api_key_request_log r "
+            f"         WHERE r.key_id = api_keys.public_id) AS request_count "
             f"FROM api_keys WHERE {where_sql} "
             f"ORDER BY id DESC LIMIT ?",
             args + [limit + 1]
@@ -7454,6 +7796,10 @@ def list_console_api_keys(
             "note": row["note"],
             "enforce_origin_for_non_browser": bool(
                 row["enforce_origin_for_non_browser"]),
+            "group_id": row["group_id"],
+            "group_role": row["group_role"],
+            "group_name": row["group_name"],
+            "request_count": int(row["request_count"] or 0),
         })
     next_cursor = int(rows[limit - 1]["id"]) if has_more else None
     return {"items": items, "next_cursor": next_cursor}
@@ -7468,7 +7814,9 @@ def get_console_api_key(*, user_id: int, public_id: str) -> Optional[dict]:
             "SELECT id, public_id, name, environment, scopes, status, "
             "       last_four, expires_at, created_at, last_used_at, "
             "       ip_allowlist, origin_allowlist, rate_limit_per_min, "
-            "       quota_per_day, note, enforce_origin_for_non_browser, "
+            "       quota_per_day, quota_period, note, "
+            "       enforce_origin_for_non_browser, "
+            "       group_id, group_role, scope_ceiling, "
             "       revoked_at, deleted_at, predecessor_id, successor_id, "
             "       rotation_grace_until "
             "FROM api_keys WHERE user_id = ? AND public_id = ? AND deleted_at IS NULL",
@@ -7492,6 +7840,77 @@ def get_console_api_key(*, user_id: int, public_id: str) -> Optional[dict]:
         except Exception:
             return None
 
+    # 9.O.1 · Live usage computed from the request log (single source of truth).
+    # The denormalized api_keys counters are not maintained on the hot path, so
+    # the Settings "Security & usage" block read 0 / never-used despite real
+    # traffic. Compute it here, fail-open (any error → values stay None/0).
+    usage = {"request_count": 0, "error_count": 0, "error_5xx": 0,
+             "last_used_at": row["last_used_at"], "last_used_ip": None,
+             "last_used_ua": None, "quota_used_period": 0}
+    try:
+        with get_conn() as c2:
+            # Defense-in-depth (audit #6): the usage subqueries are
+            # independently owner-scoped via a subselect, so tenant isolation
+            # does NOT rely solely on having run after the owner-scoped fetch.
+            # If the key isn't owned by user_id, the subselect returns NULL and
+            # `key_id = NULL` matches no rows (0 usage), never another tenant's.
+            _owned = (
+                "(SELECT public_id FROM api_keys "
+                "WHERE user_id = ? AND public_id = ? AND deleted_at IS NULL)"
+            )
+            agg = c2.execute(
+                "SELECT COUNT(*) AS n, "
+                "SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS errs, "
+                "SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS e5 "
+                "FROM api_key_request_log WHERE key_id = " + _owned,
+                (user_id, row["public_id"])).fetchone()
+            if agg:
+                a = dict(agg)
+                usage["request_count"] = int(a.get("n") or 0)
+                usage["error_count"] = int(a.get("errs") or 0)
+                usage["error_5xx"] = int(a.get("e5") or 0)
+            last = c2.execute(
+                "SELECT timestamp, ip, ua FROM api_key_request_log "
+                "WHERE key_id = " + _owned + " ORDER BY id DESC LIMIT 1",
+                (user_id, row["public_id"])).fetchone()
+            if last:
+                ld = dict(last)
+                usage["last_used_at"] = ld.get("timestamp") or usage["last_used_at"]
+                usage["last_used_ip"] = ld.get("ip")
+                usage["last_used_ua"] = ld.get("ua")
+            # 9.P.1 · requests inside the current quota window — drives the
+            # Settings quota usage bar. Display-only (quota isn't enforced yet).
+            _PERIOD_SECS = {"hour": 3600, "day": 86400,
+                            "week": 604800, "month": 2592000}
+            _secs = _PERIOD_SECS.get((row["quota_period"] or "day"), 86400)
+            from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+            _cutoff = (_dt.now(_tz.utc) - _td(seconds=_secs)).isoformat()
+            _pc = c2.execute(
+                "SELECT COUNT(*) AS n FROM api_key_request_log "
+                "WHERE key_id = " + _owned + " AND timestamp >= ?",
+                (user_id, row["public_id"], _cutoff)).fetchone()
+            if _pc:
+                usage["quota_used_period"] = int(dict(_pc).get("n") or 0)
+    except Exception as e:
+        _logging.getLogger("apin_v2.auth_db").debug(
+            "get_console_api_key live usage failed: %s", e)
+
+    # Phase 2 · resolve the group's name + scopes for display (locked keys
+    # render the inherited scopes; the UI shows a group badge).
+    _group_meta = {"name": None, "scopes": None}
+    if row["group_id"] is not None:
+        try:
+            with get_conn() as _gc:
+                _grow = _gc.execute(
+                    "SELECT name, scopes FROM api_key_groups "
+                    "WHERE id = ? AND user_id = ?",
+                    (int(row["group_id"]), int(user_id))).fetchone()
+            if _grow is not None:
+                _group_meta["name"] = _grow["name"]
+                _group_meta["scopes"] = _parse_scope_list(_grow["scopes"])
+        except Exception:
+            pass
+
     return {
         "key_id": int(row["id"]),
         "public_id": row["public_id"],
@@ -7502,18 +7921,32 @@ def get_console_api_key(*, user_id: int, public_id: str) -> Optional[dict]:
         "last_four": row["last_four"],
         "expires_at": row["expires_at"],
         "created_at": row["created_at"],
-        "last_used_at": row["last_used_at"],
+        "last_used_at": usage["last_used_at"],
         "ip_allowlist": _parse(row["ip_allowlist"]),
         "origin_allowlist": _parse(row["origin_allowlist"]),
         "rate_limit_per_min": row["rate_limit_per_min"],
         "quota_per_day": row["quota_per_day"],
+        "quota_period": row["quota_period"] or "day",
+        "quota_used_period": usage["quota_used_period"],
         "note": row["note"],
         "enforce_origin_for_non_browser":
             bool(row["enforce_origin_for_non_browser"]),
+        # Phase 2 · group membership (None when ungrouped)
+        "group_id": row["group_id"],
+        "group_role": row["group_role"],
+        "group_name": _group_meta["name"],
+        "group_scopes": _group_meta["scopes"],
+        "scope_ceiling": _parse_scope_list(row["scope_ceiling"]) if row["scope_ceiling"] else None,
         "revoked_at": row["revoked_at"],
         "predecessor_id": row["predecessor_id"],
         "successor_id": row["successor_id"],
         "rotation_grace_until": row["rotation_grace_until"],
+        # 9.O.1 · live usage for the Settings "Security & usage" section
+        "request_count": usage["request_count"],
+        "error_count": usage["error_5xx"],   # "5xx errors" in the UI
+        "error_4xx_plus": usage["error_count"],
+        "last_used_ip": usage["last_used_ip"],
+        "last_used_ua": usage["last_used_ua"],
     }
 
 
@@ -7534,9 +7967,26 @@ def patch_console_api_key(
     """
     ALLOWED = {
         "name", "scopes", "ip_allowlist", "origin_allowlist",
-        "rate_limit_per_min", "quota_per_day", "expires_at", "note",
+        "rate_limit_per_min", "quota_per_day", "quota_period", "expires_at", "note",
     }
     JSON_FIELDS = {"scopes", "ip_allowlist", "origin_allowlist"}
+
+    # Phase 2 · group scope governance. A 'locked' member's scopes are owned by
+    # the group and cannot be patched directly. A 'special' member's scopes are
+    # clamped to its stored ceiling so it can never exceed what was granted.
+    if fields.get("scopes") is not None:
+        with get_conn() as _gc:
+            _gr = _gc.execute(
+                "SELECT group_role, scope_ceiling FROM api_keys "
+                "WHERE user_id = ? AND public_id = ? AND deleted_at IS NULL",
+                (int(user_id), public_id)).fetchone()
+        if _gr is not None and _gr["group_role"] == "locked":
+            raise ValueError(
+                "this key inherits its scopes from its group; edit the group, "
+                "or make the key special to set its own scopes")
+        if _gr is not None and _gr["group_role"] == "special" and _gr["scope_ceiling"]:
+            _ceil = _parse_scope_list(_gr["scope_ceiling"])
+            fields["scopes"] = [s for s in fields["scopes"] if s in _ceil]
 
     sets: list = []
     args: list = []
@@ -7651,9 +8101,9 @@ def disable_console_api_key(*, user_id: int, public_id: str) -> Optional[dict]:
     no-op and returns the current row.
 
     Returns the updated row dict, or None if not found / not owned.
-    Raises ValueError if the key is in a status that cannot be disabled
-    (currently: 'rotating', 'deleted', 'expired' — those need their own
-    transition paths).
+    Disabling a 'rotating' key is allowed and ends its rotation grace early.
+    Raises ValueError only for statuses with no disable transition
+    ('deleted', 'expired').
     """
     with _write_lock, get_conn() as c:
         row = c.execute(
@@ -7665,14 +8115,18 @@ def disable_console_api_key(*, user_id: int, public_id: str) -> Optional[dict]:
             return None
         if row["status"] == "disabled":
             return get_console_api_key(user_id=int(user_id), public_id=public_id)
-        if row["status"] not in ("active", "legacy_pending"):
+        if row["status"] not in ("active", "legacy_pending", "rotating"):
             raise ValueError(
                 f"cannot disable a key in status {row['status']!r}; only "
-                f"'active' keys can be disabled directly"
+                f"'active', 'legacy_pending', or 'rotating' keys can be disabled"
             )
+        # Disabling a 'rotating' predecessor ends its grace window early: the
+        # old token stops immediately and the key becomes deletable. The
+        # successor (the new active key) is unaffected. Fix: rotating keys were
+        # otherwise stuck — not disableable and not deletable.
         c.execute(
             "UPDATE api_keys SET status = 'disabled', revoked_at = ?, "
-            "  updated_at = ? "
+            "  rotation_grace_until = NULL, updated_at = ? "
             "WHERE id = ?",
             (_now_iso(), _now_iso(), row["id"])
         )
@@ -8044,6 +8498,1080 @@ def compute_usage_lifetime(*, user_id: int, key_id: Optional[str] = None,
     return out
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# 9.N.T31 · Analytics page aggregations (per-key "Analytics" tab).
+#
+# Scan-based widgets (geo map, inference field, severity, bloom) read `scans`
+# (GPS + diagnosis + confidence + severity + precomputed geo_*). Request-based
+# widgets (request stream, payloads) read api_key_request_log. Quota reads
+# api_keys + the request log.
+#
+# scans key on the INTEGER api_key_id (-> api_keys.id); the request log keys
+# on the PUBLIC id. _scan_scope() bridges that. Scan time windows wrap
+# datetime(s.processed_at) so the ISO-with-T-and-offset stored by _now_iso()
+# compares correctly against datetime('now', ...). Every function is fail-open
+# (returns an empty-but-valid shape on error) so the page never 500s.
+# ─────────────────────────────────────────────────────────────────────────
+
+_ALYT_LOG = _logging.getLogger("apin_v2.auth_db.analytics")
+
+
+def _scan_scope(user_id: int, key_id: Optional[str], env: Optional[str]):
+    """(where_sql, args) scoping `scans s` to a user (+ optional key/env).
+    scans.api_key_id -> api_keys.id; key_id is the PUBLIC id."""
+    wheres = ["s.user_id = ?", "s.deleted_at IS NULL"]
+    args: list = [int(user_id)]
+    if key_id or env:
+        sw = ["user_id = ?", "deleted_at IS NULL"]
+        sa: list = [int(user_id)]
+        if key_id:
+            sw.append("public_id = ?"); sa.append(str(key_id))
+        if env:
+            sw.append("environment = ?"); sa.append(str(env))
+        wheres.append("s.api_key_id IN (SELECT id FROM api_keys WHERE "
+                      + " AND ".join(sw) + ")")
+        args.extend(sa)
+    return " AND ".join(wheres), args
+
+
+def _crop_of(diagnosis: Optional[str]) -> str:
+    """Derive a crop bucket from a diagnosis label. 'okra_yvmv' -> 'okra'."""
+    if not diagnosis:
+        return "unknown"
+    head = str(diagnosis).strip().lower().split("_", 1)[0].split(" ", 1)[0]
+    return head or "unknown"
+
+
+def _alyt_scan_window(range_seconds: int):
+    """(sql_fragment, arg) for the scan time window."""
+    return ("datetime(s.processed_at) >= datetime('now', '-' || ? || ' seconds')",
+            int(max(60, range_seconds)))
+
+
+def compute_analytics_geo(*, user_id, key_id=None, env=None,
+                          range_seconds=86400, tier="state",
+                          compare=False) -> dict:
+    """Per-region scan aggregation for the geographic-origin map. tier ∈
+    {country,state,district}. Each region carries count, count-weighted
+    centroid, per-disease/-crop breakdown, and operational metrics
+    (ood_rate, avg_confidence) so the client renders the origins / crop-mix /
+    disease-mix / density / metric-overlay layers from one payload. With
+    compare=True a previous equal-length window's count is attached per region
+    (prev_count + delta_pct)."""
+    tier = tier if tier in ("country", "state", "district") else "state"
+    where, args = _scan_scope(user_id, key_id, env)
+    win_sql, win_arg = _alyt_scan_window(range_seconds)
+    regions, legend, unmapped, total = {}, {}, 0, 0
+    ood_total, conf_sum_total, conf_cnt_total = 0, 0.0, 0
+    try:
+        with get_conn() as c:
+            rows = c.execute(
+                "SELECT geo_cc, geo_state, geo_district, diagnosis, "
+                "COUNT(*) AS n, AVG(latitude) AS lat, AVG(longitude) AS lon, "
+                "SUM(COALESCE(is_ood,0)) AS ood, "
+                "SUM(COALESCE(confidence,0)) AS conf_sum, "
+                "SUM(CASE WHEN confidence IS NOT NULL THEN 1 ELSE 0 END) AS conf_cnt "
+                f"FROM scans s WHERE {where} AND {win_sql} "
+                "GROUP BY geo_cc, geo_state, geo_district, diagnosis",
+                args + [win_arg]).fetchall()
+            prev_counts, prev_info = {}, {}
+            if compare:
+                w2 = int(max(60, range_seconds))
+                prows = c.execute(
+                    "SELECT geo_cc, geo_state, geo_district, COUNT(*) AS n, "
+                    "AVG(latitude) AS lat, AVG(longitude) AS lon "
+                    f"FROM scans s WHERE {where} "
+                    "AND datetime(s.processed_at) <  datetime('now','-' || ? || ' seconds') "
+                    "AND datetime(s.processed_at) >= datetime('now','-' || ? || ' seconds') "
+                    "GROUP BY geo_cc, geo_state, geo_district",
+                    args + [w2, w2 * 2]).fetchall()
+                for pr in prows:
+                    pd = dict(pr)
+                    if not pd.get("geo_cc"):
+                        continue
+                    if tier == "country":
+                        pk = (pd["geo_cc"],)
+                        plabel = {"cc": pd["geo_cc"], "state": None, "district": None}
+                    elif tier == "state":
+                        pk = (pd["geo_cc"], pd.get("geo_state"))
+                        plabel = {"cc": pd["geo_cc"], "state": pd.get("geo_state"), "district": None}
+                    else:
+                        pk = (pd["geo_cc"], pd.get("geo_state"), pd.get("geo_district"))
+                        plabel = {"cc": pd["geo_cc"], "state": pd.get("geo_state"), "district": pd.get("geo_district")}
+                    pn = int(pd["n"] or 0)
+                    prev_counts[pk] = prev_counts.get(pk, 0) + pn
+                    prev_info[pk] = {**plabel, "count": pn,
+                                     "lat": pd.get("lat"), "lon": pd.get("lon")}
+        for r in rows:
+            d = dict(r); n = int(d["n"] or 0); total += n
+            ood = int(d.get("ood") or 0); ood_total += ood
+            cs = float(d.get("conf_sum") or 0.0); cc_ = int(d.get("conf_cnt") or 0)
+            conf_sum_total += cs; conf_cnt_total += cc_
+            cc = d.get("geo_cc")
+            if not cc:
+                unmapped += n
+                continue
+            if tier == "country":
+                key = (cc,); label = {"cc": cc, "state": None, "district": None}
+            elif tier == "state":
+                key = (cc, d.get("geo_state"))
+                label = {"cc": cc, "state": d.get("geo_state"), "district": None}
+            else:
+                key = (cc, d.get("geo_state"), d.get("geo_district"))
+                label = {"cc": cc, "state": d.get("geo_state"),
+                         "district": d.get("geo_district")}
+            reg = regions.get(key)
+            if reg is None:
+                reg = {**label, "_k": key, "count": 0, "ood": 0,
+                       "conf_sum": 0.0, "conf_cnt": 0,
+                       "lat_sum": 0.0, "lon_sum": 0.0,
+                       "by_disease": {}, "by_crop": {}}
+                regions[key] = reg
+            reg["count"] += n
+            reg["ood"] += ood
+            reg["conf_sum"] += cs; reg["conf_cnt"] += cc_
+            if d.get("lat") is not None and d.get("lon") is not None:
+                reg["lat_sum"] += float(d["lat"]) * n
+                reg["lon_sum"] += float(d["lon"]) * n
+            diag = d.get("diagnosis") or "unknown"; crop = _crop_of(diag)
+            reg["by_disease"][diag] = reg["by_disease"].get(diag, 0) + n
+            reg["by_crop"][crop] = reg["by_crop"].get(crop, 0) + n
+            legend[diag] = legend.get(diag, 0) + n
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_geo failed: %s", e)
+    out_regions = []
+    for reg in regions.values():
+        cnt = reg["count"] or 1
+        top_dis = (max(reg["by_disease"].items(), key=lambda kv: kv[1])[0]
+                   if reg["by_disease"] else None)
+        top_crop = (max(reg["by_crop"].items(), key=lambda kv: kv[1])[0]
+                    if reg["by_crop"] else None)
+        rrow = {
+            "cc": reg["cc"], "state": reg["state"], "district": reg["district"],
+            "count": reg["count"],
+            "lat": round(reg["lat_sum"] / cnt, 5) if reg["lat_sum"] else None,
+            "lon": round(reg["lon_sum"] / cnt, 5) if reg["lon_sum"] else None,
+            "top_disease": top_dis, "top_crop": top_crop,
+            "ood_rate": round(reg["ood"] / cnt, 4),
+            "avg_confidence": round(reg["conf_sum"] / reg["conf_cnt"], 4)
+                              if reg["conf_cnt"] else None,
+            "by_disease": reg["by_disease"], "by_crop": reg["by_crop"]}
+        if compare:
+            pc = prev_counts.get(reg["_k"], 0)
+            rrow["prev_count"] = pc
+            rrow["delta_pct"] = (round(100.0 * (reg["count"] - pc) / pc, 1)
+                                 if pc else (None if reg["count"] == 0 else 100.0))
+        out_regions.append(rrow)
+    out_regions.sort(key=lambda r: r["count"], reverse=True)
+    leg = [{"key": k, "count": v,
+            "pct": round(100.0 * v / total, 1) if total else 0.0}
+           for k, v in sorted(legend.items(), key=lambda kv: kv[1], reverse=True)]
+    out = {"tier": tier, "total": total, "unmapped": unmapped,
+           "regions": out_regions, "legend": leg, "source": "scans",
+           "ood_rate": round(ood_total / total, 4) if total else 0.0,
+           "avg_confidence": round(conf_sum_total / conf_cnt_total, 4)
+                             if conf_cnt_total else None}
+    if compare:
+        cur_keys = {tuple(reg["_k"]) for reg in regions.values()}
+        out["prev_total"] = sum(prev_counts.values())
+        gone = []
+        for k, pi in prev_info.items():
+            if k in cur_keys or pi["count"] <= 0:
+                continue
+            gone.append({"cc": pi["cc"], "state": pi["state"],
+                         "district": pi["district"], "prev_count": pi["count"],
+                         "lat": round(pi["lat"], 5) if pi.get("lat") is not None else None,
+                         "lon": round(pi["lon"], 5) if pi.get("lon") is not None else None})
+        gone.sort(key=lambda r: r["prev_count"], reverse=True)
+        out["gone"] = gone
+    return out
+
+
+def _geo_region_key(geo: dict, tier: str):
+    """(key-tuple, label-dict) for a resolved IP geo at a given tier."""
+    cc = geo["cc"]
+    if tier == "country":
+        return (cc,), {"cc": cc, "state": None, "district": None}
+    if tier == "state":
+        return (cc, geo.get("state")), {"cc": cc, "state": geo.get("state"),
+                                        "district": None}
+    return ((cc, geo.get("state"), geo.get("district")),
+            {"cc": cc, "state": geo.get("state"), "district": geo.get("district")})
+
+
+def compute_analytics_geo_requests(*, user_id, key_id=None, env=None,
+                                   range_seconds=86400, tier="state",
+                                   compare=False) -> dict:
+    """Per-region REQUEST-origin aggregation — geolocated from the client IP in
+    api_key_request_log (DB-IP City Lite). Same shape as compute_analytics_geo
+    so the map renders identically. For requests there is no crop/disease, so
+    'top_disease'/'by_disease' carry the top endpoint path per region. Private/
+    loopback IPs (localhost) are counted into 'local', un-geolocatable public
+    IPs into 'unmapped'.
+
+    Each region also carries operational metrics: error_rate (share of 4xx/5xx),
+    avg_latency (ms). With compare=True, a previous equal-length window's count
+    is attached as prev_count + delta_pct so the client can render the
+    this-vs-last-week comparison and flag anomalies."""
+    tier = tier if tier in ("country", "state", "district") else "state"
+    sub, sargs = _build_user_keys_where(int(user_id), key_id, env)
+    try:
+        from scripts.apin_v2 import ip_geo_resolver as _ipgeo
+    except Exception:
+        _ipgeo = None
+    win = int(max(60, range_seconds))
+    regions, unmapped, local, total = {}, 0, 0, 0
+    err_total, lat_sum_total, lat_cnt_total = 0, 0, 0
+    try:
+        with get_conn() as c:
+            rows = c.execute(
+                "SELECT ip, path, COUNT(*) AS n, "
+                "SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS errs, "
+                "SUM(COALESCE(latency_ms, 0)) AS lat_sum, "
+                "SUM(CASE WHEN latency_ms IS NOT NULL THEN 1 ELSE 0 END) AS lat_cnt "
+                "FROM api_key_request_log "
+                f"WHERE key_id IN {sub} "
+                "AND timestamp >= datetime('now','-' || ? || ' seconds') "
+                "GROUP BY ip, path",
+                sargs + [win]).fetchall()
+            prev_counts, prev_info = {}, {}
+            if compare:
+                prows = c.execute(
+                    "SELECT ip, COUNT(*) AS n FROM api_key_request_log "
+                    f"WHERE key_id IN {sub} "
+                    "AND timestamp <  datetime('now','-' || ? || ' seconds') "
+                    "AND timestamp >= datetime('now','-' || ? || ' seconds') "
+                    "GROUP BY ip",
+                    sargs + [win, win * 2]).fetchall()
+                for pr in prows:
+                    pd = dict(pr)
+                    pgeo = _ipgeo.resolve_cached(pd.get("ip")) if _ipgeo else None
+                    if not pgeo or not pgeo.get("cc"):
+                        continue
+                    pk, plabel = _geo_region_key(pgeo, tier)
+                    pn = int(pd["n"] or 0)
+                    prev_counts[pk] = prev_counts.get(pk, 0) + pn
+                    pi = prev_info.get(pk)
+                    if pi is None:
+                        pi = {**plabel, "count": 0, "lt": 0.0, "ln": 0.0}
+                        prev_info[pk] = pi
+                    pi["count"] += pn
+                    if pgeo.get("lat") is not None and pgeo.get("lon") is not None:
+                        pi["lt"] += pgeo["lat"] * pn
+                        pi["ln"] += pgeo["lon"] * pn
+        for r in rows:
+            d = dict(r); n = int(d["n"] or 0); total += n
+            errs = int(d.get("errs") or 0); err_total += errs
+            ls = int(d.get("lat_sum") or 0); lc = int(d.get("lat_cnt") or 0)
+            lat_sum_total += ls; lat_cnt_total += lc
+            geo = _ipgeo.resolve_cached(d.get("ip")) if _ipgeo else None
+            if not geo or not geo.get("cc"):
+                if geo and geo.get("local"):
+                    local += n
+                else:
+                    unmapped += n
+                continue
+            key, label = _geo_region_key(geo, tier)
+            reg = regions.get(key)
+            if reg is None:
+                reg = {**label, "_k": key, "count": 0, "errs": 0,
+                       "lat_sum": 0, "lat_cnt": 0, "lt_sum": 0.0, "ln_sum": 0.0,
+                       "by_disease": {}, "by_crop": {}}
+                regions[key] = reg
+            reg["count"] += n
+            reg["errs"] += errs
+            reg["lat_sum"] += ls; reg["lat_cnt"] += lc
+            if geo.get("lat") is not None and geo.get("lon") is not None:
+                reg["lt_sum"] += geo["lat"] * n
+                reg["ln_sum"] += geo["lon"] * n
+            ep = d.get("path") or "?"
+            reg["by_disease"][ep] = reg["by_disease"].get(ep, 0) + n
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_geo_requests failed: %s", e)
+    out_regions = []
+    for reg in regions.values():
+        cnt = reg["count"] or 1
+        top_ep = (max(reg["by_disease"].items(), key=lambda kv: kv[1])[0]
+                  if reg["by_disease"] else None)
+        rrow = {
+            "cc": reg["cc"], "state": reg["state"], "district": reg["district"],
+            "count": reg["count"],
+            "lat": round(reg["lt_sum"] / cnt, 5) if reg["lt_sum"] else None,
+            "lon": round(reg["ln_sum"] / cnt, 5) if reg["ln_sum"] else None,
+            "top_disease": top_ep, "top_crop": None,
+            "error_rate": round(reg["errs"] / cnt, 4),
+            "errors": reg["errs"],
+            "avg_latency": round(reg["lat_sum"] / reg["lat_cnt"], 1)
+                           if reg["lat_cnt"] else None,
+            "by_disease": reg["by_disease"], "by_crop": {}}
+        if compare:
+            pc = prev_counts.get(reg["_k"], 0)
+            rrow["prev_count"] = pc
+            rrow["delta_pct"] = (round(100.0 * (reg["count"] - pc) / pc, 1)
+                                 if pc else (None if reg["count"] == 0 else 100.0))
+        out_regions.append(rrow)
+    out_regions.sort(key=lambda r: r["count"], reverse=True)
+    out = {"tier": tier, "total": total, "unmapped": unmapped, "local": local,
+           "regions": out_regions, "legend": [], "source": "requests",
+           "error_rate": round(err_total / total, 4) if total else 0.0,
+           "avg_latency": round(lat_sum_total / lat_cnt_total, 1)
+                          if lat_cnt_total else None}
+    if compare:
+        cur_keys = set(regions.keys())
+        out["prev_total"] = sum(prev_counts.values())
+        gone = []
+        for k, pi in prev_info.items():
+            if k in cur_keys or pi["count"] <= 0:
+                continue
+            cnt = pi["count"]
+            gone.append({"cc": pi["cc"], "state": pi["state"],
+                         "district": pi["district"], "prev_count": cnt,
+                         "lat": round(pi["lt"] / cnt, 5) if pi["lt"] else None,
+                         "lon": round(pi["ln"] / cnt, 5) if pi["ln"] else None})
+        gone.sort(key=lambda r: r["prev_count"], reverse=True)
+        out["gone"] = gone
+    return out
+
+
+def _percentile(sorted_vals, q):
+    """Nearest-rank percentile of an already-sorted numeric list. q in [0,1]."""
+    if not sorted_vals:
+        return None
+    import math
+    k = max(0, min(len(sorted_vals) - 1,
+                   int(math.ceil(q * len(sorted_vals)) - 1)))
+    return sorted_vals[k]
+
+
+def _region_match(geo: dict, tier: str, cc, state, district) -> bool:
+    if not geo or geo.get("cc") != cc:
+        return False
+    if tier == "country":
+        return True
+    if tier == "state":
+        return (geo.get("state") or None) == (state or None)
+    return ((geo.get("state") or None) == (state or None)
+            and (geo.get("district") or None) == (district or None))
+
+
+def compute_analytics_geo_region(*, user_id, key_id=None, env=None,
+                                 range_seconds=86400, tier="state",
+                                 source="requests", cc=None, state=None,
+                                 district=None, buckets=24, compare=False) -> dict:
+    """Single-region dossier for the expanded console's side panel. Returns a
+    volume trend (bucketed), top endpoints/diagnoses, error/OOD count + trend,
+    p95 latency / avg confidence, distinct client count, first-seen timestamp,
+    and prev-window count. source ∈ {requests,scans}.
+
+    With compare=True it also computes the PREVIOUS equal-length window's
+    bucketed trend (prev_trend) and the same metrics for that window
+    (prev_error_rate / prev_avg_latency / prev_p95_latency / prev_clients for
+    requests; prev_ood_rate / prev_avg_confidence for scans) so the Compare
+    window can render a true now-vs-then side-by-side."""
+    tier = tier if tier in ("country", "state", "district") else "state"
+    buckets = int(max(6, min(96, buckets)))
+    win = int(max(60, range_seconds))
+    bsec = max(60, win // buckets)
+    out = {
+        "tier": tier, "source": source,
+        "cc": cc, "state": state, "district": district,
+        "count": 0, "prev_count": 0, "delta_pct": None,
+        "trend": [0] * buckets, "err_trend": [0] * buckets,
+        "top": [], "errors": 0, "error_rate": 0.0,
+        "p95_latency": None, "avg_latency": None,
+        "ood": 0, "ood_rate": 0.0, "avg_confidence": None,
+        "clients": 0, "first_seen": None, "bucket_seconds": bsec,
+        "prev_trend": [0] * buckets,
+        "prev_error_rate": None, "prev_avg_latency": None,
+        "prev_p95_latency": None, "prev_clients": 0,
+        "prev_ood_rate": None, "prev_avg_confidence": None,
+    }
+    try:
+        if source == "scans":
+            where, args = _scan_scope(user_id, key_id, env)
+            rwheres = [where, "s.geo_cc = ?"]; rargs = list(args) + [cc]
+            if tier in ("state", "district"):
+                if state is None:
+                    rwheres.append("s.geo_state IS NULL")
+                else:
+                    rwheres.append("s.geo_state = ?"); rargs.append(state)
+            if tier == "district":
+                if district is None:
+                    rwheres.append("s.geo_district IS NULL")
+                else:
+                    rwheres.append("s.geo_district = ?"); rargs.append(district)
+            wsql = " AND ".join(rwheres)
+            with get_conn() as c:
+                rows = c.execute(
+                    "SELECT diagnosis, confidence, COALESCE(is_ood,0) AS ood, "
+                    "s.processed_at AS ts, "
+                    "CAST((strftime('%s','now') - strftime('%s', s.processed_at)) "
+                    "/ ? AS INTEGER) AS ab "
+                    f"FROM scans s WHERE {wsql} "
+                    "AND datetime(s.processed_at) >= datetime('now','-'||?||' seconds') "
+                    "ORDER BY s.processed_at ASC LIMIT 5000",
+                    [bsec] + rargs + [win]).fetchall()
+                prev = c.execute(
+                    f"SELECT COUNT(*) AS n FROM scans s WHERE {wsql} "
+                    "AND datetime(s.processed_at) < datetime('now','-'||?||' seconds') "
+                    "AND datetime(s.processed_at) >= datetime('now','-'||?||' seconds')",
+                    rargs + [win, win * 2]).fetchone()
+            by_diag, confs = {}, []
+            for r in rows:
+                d = dict(r); out["count"] += 1
+                if out["first_seen"] is None:
+                    out["first_seen"] = d.get("ts")
+                ab = int(d.get("ab") or 0)
+                fi = buckets - 1 - ab
+                if 0 <= fi < buckets:
+                    out["trend"][fi] += 1
+                    if int(d.get("ood") or 0):
+                        out["err_trend"][fi] += 1
+                if int(d.get("ood") or 0):
+                    out["ood"] += 1
+                if d.get("confidence") is not None:
+                    confs.append(float(d["confidence"]))
+                diag = d.get("diagnosis") or "unknown"
+                by_diag[diag] = by_diag.get(diag, 0) + 1
+            out["top"] = [{"key": k, "count": v} for k, v in
+                          sorted(by_diag.items(), key=lambda kv: kv[1],
+                                 reverse=True)[:6]]
+            if out["count"]:
+                out["ood_rate"] = round(out["ood"] / out["count"], 4)
+            if confs:
+                out["avg_confidence"] = round(sum(confs) / len(confs), 4)
+            out["prev_count"] = int(dict(prev).get("n", 0) or 0) if prev else 0
+            if compare:
+                with get_conn() as c:
+                    prows2 = c.execute(
+                        "SELECT confidence, COALESCE(is_ood,0) AS ood, "
+                        "CAST((strftime('%s','now') - strftime('%s', s.processed_at)) "
+                        "/ ? AS INTEGER) AS ab "
+                        f"FROM scans s WHERE {wsql} "
+                        "AND datetime(s.processed_at) <  datetime('now','-'||?||' seconds') "
+                        "AND datetime(s.processed_at) >= datetime('now','-'||?||' seconds') "
+                        "ORDER BY s.processed_at ASC LIMIT 5000",
+                        [bsec] + rargs + [win, win * 2]).fetchall()
+                pconf, pood, pn = [], 0, 0
+                for r in prows2:
+                    d = dict(r); pn += 1
+                    pfi = (2 * buckets - 1) - int(d.get("ab") or 0)
+                    if 0 <= pfi < buckets:
+                        out["prev_trend"][pfi] += 1
+                    if int(d.get("ood") or 0):
+                        pood += 1
+                    if d.get("confidence") is not None:
+                        pconf.append(float(d["confidence"]))
+                if pn:
+                    out["prev_ood_rate"] = round(pood / pn, 4)
+                if pconf:
+                    out["prev_avg_confidence"] = round(sum(pconf) / len(pconf), 4)
+        else:
+            sub, sargs = _build_user_keys_where(int(user_id), key_id, env)
+            try:
+                from scripts.apin_v2 import ip_geo_resolver as _ipgeo
+            except Exception:
+                _ipgeo = None
+            with get_conn() as c:
+                rows = c.execute(
+                    "SELECT ip, path, status_code, latency_ms, timestamp AS ts, "
+                    "CAST((strftime('%s','now') - strftime('%s', timestamp)) "
+                    "/ ? AS INTEGER) AS ab "
+                    f"FROM api_key_request_log WHERE key_id IN {sub} "
+                    "AND timestamp >= datetime('now','-'||?||' seconds') "
+                    "ORDER BY timestamp ASC LIMIT 8000",
+                    [bsec] + sargs + [win]).fetchall()
+                prows = c.execute(
+                    f"SELECT ip, COUNT(*) AS n FROM api_key_request_log "
+                    f"WHERE key_id IN {sub} "
+                    "AND timestamp <  datetime('now','-'||?||' seconds') "
+                    "AND timestamp >= datetime('now','-'||?||' seconds') "
+                    "GROUP BY ip",
+                    sargs + [win, win * 2]).fetchall()
+            by_ep, lats, clients = {}, [], set()
+            for r in rows:
+                d = dict(r)
+                geo = _ipgeo.resolve_cached(d.get("ip")) if _ipgeo else None
+                if not _region_match(geo, tier, cc, state, district):
+                    continue
+                out["count"] += 1
+                if out["first_seen"] is None:
+                    out["first_seen"] = d.get("ts")
+                if d.get("ip"):
+                    clients.add(d["ip"])
+                ab = int(d.get("ab") or 0); fi = buckets - 1 - ab
+                is_err = int(d.get("status_code") or 0) >= 400
+                if 0 <= fi < buckets:
+                    out["trend"][fi] += 1
+                    if is_err:
+                        out["err_trend"][fi] += 1
+                if is_err:
+                    out["errors"] += 1
+                if d.get("latency_ms") is not None:
+                    lats.append(int(d["latency_ms"]))
+                ep = d.get("path") or "?"
+                by_ep[ep] = by_ep.get(ep, 0) + 1
+            out["top"] = [{"key": k, "count": v} for k, v in
+                          sorted(by_ep.items(), key=lambda kv: kv[1],
+                                 reverse=True)[:6]]
+            out["clients"] = len(clients)
+            if out["count"]:
+                out["error_rate"] = round(out["errors"] / out["count"], 4)
+            if lats:
+                lats.sort()
+                out["avg_latency"] = round(sum(lats) / len(lats), 1)
+                out["p95_latency"] = _percentile(lats, 0.95)
+            pc = 0
+            for pr in prows:
+                pd = dict(pr)
+                geo = _ipgeo.resolve_cached(pd.get("ip")) if _ipgeo else None
+                if _region_match(geo, tier, cc, state, district):
+                    pc += int(pd["n"] or 0)
+            out["prev_count"] = pc
+            if compare:
+                with get_conn() as c:
+                    prows2 = c.execute(
+                        "SELECT ip, status_code, latency_ms, "
+                        "CAST((strftime('%s','now') - strftime('%s', timestamp)) "
+                        "/ ? AS INTEGER) AS ab "
+                        f"FROM api_key_request_log WHERE key_id IN {sub} "
+                        "AND timestamp <  datetime('now','-'||?||' seconds') "
+                        "AND timestamp >= datetime('now','-'||?||' seconds') "
+                        "ORDER BY timestamp ASC LIMIT 8000",
+                        [bsec] + sargs + [win, win * 2]).fetchall()
+                plats, perr, pcl, pn = [], 0, set(), 0
+                for r in prows2:
+                    d = dict(r)
+                    geo = _ipgeo.resolve_cached(d.get("ip")) if _ipgeo else None
+                    if not _region_match(geo, tier, cc, state, district):
+                        continue
+                    pn += 1
+                    if d.get("ip"):
+                        pcl.add(d["ip"])
+                    pfi = (2 * buckets - 1) - int(d.get("ab") or 0)
+                    if 0 <= pfi < buckets:
+                        out["prev_trend"][pfi] += 1
+                    if int(d.get("status_code") or 0) >= 400:
+                        perr += 1
+                    if d.get("latency_ms") is not None:
+                        plats.append(int(d["latency_ms"]))
+                if pn:
+                    out["prev_error_rate"] = round(perr / pn, 4)
+                    out["prev_clients"] = len(pcl)
+                if plats:
+                    plats.sort()
+                    out["prev_avg_latency"] = round(sum(plats) / len(plats), 1)
+                    out["prev_p95_latency"] = _percentile(plats, 0.95)
+        pc = out["prev_count"]
+        out["delta_pct"] = (round(100.0 * (out["count"] - pc) / pc, 1)
+                            if pc else (None if out["count"] == 0 else 100.0))
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_geo_region failed: %s", e)
+    return out
+
+
+def compute_analytics_geo_region_requests(*, user_id, key_id=None, env=None,
+                                          range_seconds=86400, tier="state",
+                                          cc=None, state=None, district=None,
+                                          limit=200) -> dict:
+    """Recent REQUEST rows originating from a single region, newest first.
+    Powers the "click a map dot → request list → drawer" drill. The client
+    can't geolocate IPs (the DB-IP database is server-side), so we scan the
+    request log for the scope+window, resolve each client IP, and keep the
+    rows whose region matches. Returns drawer-ready rows (id + method/path/
+    status/latency/timestamp/ip)."""
+    tier = tier if tier in ("country", "state", "district") else "state"
+    sub, sargs = _build_user_keys_where(int(user_id), key_id, env)
+    win = int(max(60, range_seconds))
+    limit = max(1, min(int(limit), 300))
+    try:
+        from scripts.apin_v2 import ip_geo_resolver as _ipgeo
+    except Exception:
+        _ipgeo = None
+    out = []
+    try:
+        with get_conn() as c:
+            rows = c.execute(
+                "SELECT id, method, path, status_code, latency_ms, timestamp, ip "
+                f"FROM api_key_request_log WHERE key_id IN {sub} "
+                "AND timestamp >= datetime('now','-' || ? || ' seconds') "
+                "ORDER BY id DESC LIMIT 2500",
+                sargs + [win]).fetchall()
+        for r in rows:
+            d = dict(r)
+            geo = _ipgeo.resolve_cached(d.get("ip")) if _ipgeo else None
+            if not _region_match(geo, tier, cc, state, district):
+                continue
+            out.append({
+                "id": d.get("id"), "method": d.get("method"), "path": d.get("path"),
+                "status_code": d.get("status_code"), "latency_ms": d.get("latency_ms"),
+                "timestamp": d.get("timestamp"), "ip": d.get("ip"),
+            })
+            if len(out) >= limit:
+                break
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_geo_region_requests failed: %s", e)
+    return {"region": {"cc": cc, "state": state, "district": district},
+            "tier": tier, "count": len(out), "items": out}
+
+
+def compute_analytics_geo_replay(*, user_id, key_id=None, env=None,
+                                 range_seconds=86400, tier="state",
+                                 source="requests", frames=120) -> dict:
+    """Time-bucketed origin events for the replay scrubber. Returns `frames`
+    sequential buckets (oldest→newest); each bucket holds per-region points
+    {lat,lon,count,label}. The client scrubs/plays through buckets, pulsing
+    each region as its requests arrive."""
+    tier = tier if tier in ("country", "state", "district") else "state"
+    frames = int(max(20, min(240, frames)))
+    win = int(max(60, range_seconds))
+    bsec = max(30, win // frames)
+    buckets = [dict() for _ in range(frames)]
+    total = 0
+    try:
+        if source == "scans":
+            where, args = _scan_scope(user_id, key_id, env)
+            with get_conn() as c:
+                rows = c.execute(
+                    "SELECT geo_cc, geo_state, geo_district, "
+                    "AVG(latitude) AS lat, AVG(longitude) AS lon, COUNT(*) AS n, "
+                    "CAST((strftime('%s','now') - strftime('%s', s.processed_at)) "
+                    "/ ? AS INTEGER) AS ab "
+                    f"FROM scans s WHERE {where} "
+                    "AND datetime(s.processed_at) >= datetime('now','-'||?||' seconds') "
+                    "GROUP BY geo_cc, geo_state, geo_district, ab",
+                    [bsec] + args + [win]).fetchall()
+            for r in rows:
+                d = dict(r); n = int(d["n"] or 0)
+                if not d.get("geo_cc") or d.get("lat") is None:
+                    continue
+                fi = frames - 1 - int(d.get("ab") or 0)
+                if not (0 <= fi < frames):
+                    continue
+                if tier == "country":
+                    k = (d["geo_cc"],); lbl = d["geo_cc"]
+                elif tier == "state":
+                    k = (d["geo_cc"], d.get("geo_state"))
+                    lbl = d.get("geo_state") or d["geo_cc"]
+                else:
+                    k = (d["geo_cc"], d.get("geo_state"), d.get("geo_district"))
+                    lbl = d.get("geo_district") or d.get("geo_state") or d["geo_cc"]
+                slot = buckets[fi].get(k)
+                if slot is None:
+                    slot = {"lat": float(d["lat"]), "lon": float(d["lon"]),
+                            "count": 0, "label": lbl}
+                    buckets[fi][k] = slot
+                slot["count"] += n; total += n
+        else:
+            sub, sargs = _build_user_keys_where(int(user_id), key_id, env)
+            try:
+                from scripts.apin_v2 import ip_geo_resolver as _ipgeo
+            except Exception:
+                _ipgeo = None
+            with get_conn() as c:
+                rows = c.execute(
+                    "SELECT ip, COUNT(*) AS n, "
+                    "CAST((strftime('%s','now') - strftime('%s', timestamp)) "
+                    "/ ? AS INTEGER) AS ab "
+                    f"FROM api_key_request_log WHERE key_id IN {sub} "
+                    "AND timestamp >= datetime('now','-'||?||' seconds') "
+                    "GROUP BY ip, ab",
+                    [bsec] + sargs + [win]).fetchall()
+            for r in rows:
+                d = dict(r); n = int(d["n"] or 0)
+                geo = _ipgeo.resolve_cached(d.get("ip")) if _ipgeo else None
+                if not geo or not geo.get("cc") or geo.get("lat") is None:
+                    continue
+                fi = frames - 1 - int(d.get("ab") or 0)
+                if not (0 <= fi < frames):
+                    continue
+                k, lab = _geo_region_key(geo, tier)
+                lbl = (lab.get("district") or lab.get("state") or lab.get("cc"))
+                slot = buckets[fi].get(k)
+                if slot is None:
+                    slot = {"lat": float(geo["lat"]), "lon": float(geo["lon"]),
+                            "count": 0, "label": lbl}
+                    buckets[fi][k] = slot
+                slot["count"] += n; total += n
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_geo_replay failed: %s", e)
+    out_frames = [{"points": list(b.values()),
+                   "total": sum(p["count"] for p in b.values())}
+                  for b in buckets]
+    return {"tier": tier, "source": source, "frames": out_frames,
+            "frame_count": frames, "bucket_seconds": bsec, "total": total}
+
+
+def compute_analytics_field(*, user_id, key_id=None, env=None,
+                            range_seconds=86400) -> dict:
+    """crop -> disease -> {count, avg_confidence, severity_mix} for the 3D
+    inference field."""
+    where, args = _scan_scope(user_id, key_id, env)
+    win_sql, win_arg = _alyt_scan_window(range_seconds)
+    crops, total = {}, 0
+    try:
+        with get_conn() as c:
+            rows = c.execute(
+                "SELECT diagnosis, severity, COUNT(*) AS n, "
+                "AVG(confidence) AS conf "
+                f"FROM scans s WHERE {where} AND {win_sql} "
+                "GROUP BY diagnosis, severity", args + [win_arg]).fetchall()
+        for r in rows:
+            d = dict(r); n = int(d["n"] or 0); total += n
+            diag = d.get("diagnosis") or "unknown"; crop = _crop_of(diag)
+            sev = d.get("severity") or "unknown"
+            cv = crops.setdefault(crop, {"count": 0, "diseases": {}})
+            cv["count"] += n
+            dv = cv["diseases"].setdefault(
+                diag, {"count": 0, "conf_sum": 0.0, "severity": {}})
+            dv["count"] += n
+            dv["conf_sum"] += float(d.get("conf") or 0.0) * n
+            dv["severity"][sev] = dv["severity"].get(sev, 0) + n
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_field failed: %s", e)
+    out = []
+    for crop, cv in sorted(crops.items(), key=lambda kv: kv[1]["count"],
+                           reverse=True):
+        diseases = []
+        for diag, dv in sorted(cv["diseases"].items(),
+                               key=lambda kv: kv[1]["count"], reverse=True):
+            cnt = dv["count"] or 1
+            diseases.append({
+                "disease": diag, "count": dv["count"],
+                "avg_confidence": round(dv["conf_sum"] / cnt, 3),
+                "severity_mix": dv["severity"],
+                "pct": round(100.0 * dv["count"] / (cv["count"] or 1), 1)})
+        out.append({"crop": crop, "count": cv["count"],
+                    "pct": round(100.0 * cv["count"] / (total or 1), 1),
+                    "diseases": diseases})
+    return {"total": total, "crops": out}
+
+
+def compute_analytics_field_scans(*, user_id, key_id=None, env=None,
+                                  range_seconds=86400, crop=None, disease=None,
+                                  limit=400) -> dict:
+    """Individual scan rows for the Agricultural Observatory — each plant in the
+    3D farm IS a scan, and the prediction feed streams these. Optional crop
+    (diagnosis prefix) / disease (exact) filter. Newest first.
+    Row: scan_uid, diagnosis, crop, severity, confidence, is_ood, geo_*,
+    captured_at, processed_at, has_image."""
+    where, args = _scan_scope(user_id, key_id, env)
+    win_sql, win_arg = _alyt_scan_window(range_seconds)
+    wheres = [where, win_sql]; a = list(args) + [win_arg]
+    if disease:
+        wheres.append("s.diagnosis = ?"); a.append(str(disease))
+    elif crop:
+        wheres.append("s.diagnosis LIKE ?"); a.append(str(crop).lower() + "_%")
+    limit = max(1, min(int(limit), 1000))
+    items = []
+    try:
+        with get_conn() as c:
+            rows = c.execute(
+                "SELECT scan_uid, diagnosis, severity, confidence, "
+                "COALESCE(is_ood,0) AS is_ood, geo_cc, geo_state, geo_district, "
+                "captured_at, processed_at, COALESCE(image_n_bytes,0) AS img "
+                f"FROM scans s WHERE {' AND '.join(wheres)} "
+                "ORDER BY s.processed_at DESC LIMIT ?",
+                a + [limit]).fetchall()
+        for r in rows:
+            d = dict(r); diag = d.get("diagnosis") or "unknown"
+            items.append({
+                "scan_uid": d.get("scan_uid"), "diagnosis": diag,
+                "crop": _crop_of(diag), "severity": d.get("severity"),
+                "confidence": d.get("confidence"), "is_ood": int(d.get("is_ood") or 0),
+                "geo_cc": d.get("geo_cc"), "geo_state": d.get("geo_state"),
+                "geo_district": d.get("geo_district"),
+                "captured_at": d.get("captured_at"), "processed_at": d.get("processed_at"),
+                "has_image": int(d.get("img") or 0) > 0})
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_field_scans failed: %s", e)
+    return {"count": len(items), "items": items,
+            "crop": crop, "disease": disease}
+
+
+def compute_analytics_scan_detail(*, user_id, scan_uid) -> dict:
+    """Full scan dossier for the Prediction Inspector (click a plant). Scoped to
+    the user. Includes geo, timing, and a parsed treatment/disease summary from
+    result_json when present. The image is served separately (get_scan_image)."""
+    out = {"found": False}
+    try:
+        with get_conn() as c:
+            row = c.execute(
+                "SELECT scan_uid, diagnosis, severity, confidence, tier, "
+                "COALESCE(is_ood,0) AS is_ood, geo_cc, geo_state, geo_district, "
+                "latitude, longitude, captured_at, processed_at, processing_ms, "
+                "COALESCE(image_n_bytes,0) AS img, result_json "
+                "FROM scans WHERE user_id = ? AND scan_uid = ? AND deleted_at IS NULL",
+                [int(user_id), str(scan_uid)]).fetchone()
+        if not row:
+            return out
+        d = dict(row); out.update({
+            "found": True, "scan_uid": d.get("scan_uid"), "diagnosis": d.get("diagnosis"),
+            "crop": _crop_of(d.get("diagnosis")), "severity": d.get("severity"),
+            "confidence": d.get("confidence"), "tier": d.get("tier"),
+            "is_ood": int(d.get("is_ood") or 0), "geo_cc": d.get("geo_cc"),
+            "geo_state": d.get("geo_state"), "geo_district": d.get("geo_district"),
+            "latitude": d.get("latitude"), "longitude": d.get("longitude"),
+            "captured_at": d.get("captured_at"), "processed_at": d.get("processed_at"),
+            "processing_ms": d.get("processing_ms"), "has_image": int(d.get("img") or 0) > 0,
+        })
+        try:
+            rj = json.loads(d.get("result_json") or "{}")
+            out["diseases"] = rj.get("diseases") or rj.get("predictions") or []
+            out["treatment"] = rj.get("treatment") or rj.get("recommendation")
+            # 9.N.T33d · Full parsed result for the inspector's "See payload"
+            # panel (diagnosis / confidence / tier / severity / crop /
+            # all_class_probabilities, etc.). Best-effort; never blocks.
+            if isinstance(rj, dict):
+                out["payload"] = rj
+        except Exception:
+            pass
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_scan_detail failed: %s", e)
+    return out
+
+
+def get_scan_image(*, user_id, scan_uid):
+    """Returns (bytes, mime) for a scan's stored image, ownership-checked, or
+    (None, None). Mime sniffed from magic bytes."""
+    try:
+        with get_conn() as c:
+            row = c.execute(
+                "SELECT image_bytes FROM scans WHERE user_id = ? AND scan_uid = ? "
+                "AND deleted_at IS NULL", [int(user_id), str(scan_uid)]).fetchone()
+        if not row:
+            return None, None
+        b = dict(row).get("image_bytes")
+        if not b:
+            return None, None
+        if isinstance(b, memoryview):
+            b = b.tobytes()
+        mime = "image/jpeg"
+        if b[:3] == b"\xff\xd8\xff":
+            mime = "image/jpeg"
+        elif b[:8] == b"\x89PNG\r\n\x1a\n":
+            mime = "image/png"
+        elif len(b) >= 12 and b[8:12] == b"WEBP":
+            mime = "image/webp"
+        return b, mime
+    except Exception as e:
+        _ALYT_LOG.warning("get_scan_image failed: %s", e)
+        return None, None
+
+
+def compute_analytics_severity(*, user_id, key_id=None, env=None,
+                               range_seconds=86400, sample=200) -> dict:
+    """Severity distribution + a sample of recent scans (drifting spectrum
+    dots): {scan_uid, diagnosis, severity, confidence, is_ood}."""
+    where, args = _scan_scope(user_id, key_id, env)
+    win_sql, win_arg = _alyt_scan_window(range_seconds)
+    dist, total, pts = {}, 0, []
+    try:
+        with get_conn() as c:
+            for r in c.execute(
+                    "SELECT severity, COUNT(*) AS n "
+                    f"FROM scans s WHERE {where} AND {win_sql} "
+                    "GROUP BY severity", args + [win_arg]).fetchall():
+                d = dict(r); n = int(d["n"] or 0); total += n
+                dist[d.get("severity") or "unknown"] = n
+            for r in c.execute(
+                    "SELECT scan_uid, diagnosis, severity, confidence, is_ood "
+                    f"FROM scans s WHERE {where} AND {win_sql} "
+                    "ORDER BY datetime(s.processed_at) DESC LIMIT ?",
+                    args + [win_arg, int(sample)]).fetchall():
+                d = dict(r)
+                pts.append({
+                    "scan_uid": d.get("scan_uid"),
+                    "diagnosis": d.get("diagnosis"),
+                    "severity": d.get("severity") or "unknown",
+                    "confidence": round(float(d.get("confidence") or 0.0), 3),
+                    "is_ood": bool(d.get("is_ood"))})
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_severity failed: %s", e)
+    return {"total": total, "distribution": dist, "scans": pts}
+
+
+def _bucketed_series(rows, *, buckets, key_field, bucket_field="b",
+                     count_field="n", top=6):
+    """Shared: rows of (key, bucket_idx, n) -> top-N series with bucket 0 =
+    oldest .. buckets-1 = newest, plus per-key totals."""
+    series, totals = {}, {}
+    for r in rows:
+        d = dict(r); k = d.get(key_field) or "?"
+        b = int(d.get(bucket_field) or 0)
+        b = min(max(b, 0), buckets - 1)
+        n = int(d.get(count_field) or 0)
+        s = series.setdefault(k, {}); s[b] = s.get(b, 0) + n
+        totals[k] = totals.get(k, 0) + n
+    top_keys = [k for k, _ in sorted(totals.items(), key=lambda kv: kv[1],
+                                     reverse=True)[:int(top)]]
+    out = []
+    for k in top_keys:
+        s = series.get(k, {})
+        # incoming b=0 is most-recent; flip so index increases with time
+        vals = [s.get(buckets - 1 - i, 0) for i in range(buckets)]
+        out.append({"key": k, "total": totals.get(k, 0), "values": vals})
+    return out
+
+
+def compute_analytics_bloom(*, user_id, key_id=None, env=None,
+                            range_seconds=604800, buckets=28, top=6) -> dict:
+    """Per-disease bucketed counts over the range (streamgraph 'bloom')."""
+    where, args = _scan_scope(user_id, key_id, env)
+    range_seconds = max(60, int(range_seconds))
+    buckets = max(4, min(120, int(buckets)))
+    bucket_sec = max(60, range_seconds // buckets)
+    win_sql = ("datetime(s.processed_at) >= "
+               "datetime('now', '-' || ? || ' seconds')")
+    rows = []
+    try:
+        with get_conn() as c:
+            # Param order matches the ? positions in the SQL TEXT: the
+            # bucket-size divisor in the SELECT comes BEFORE the scope args in
+            # {where} and the window arg at the end.
+            rows = c.execute(
+                "SELECT diagnosis AS key, CAST((strftime('%s','now') - "
+                "strftime('%s', s.processed_at)) / ? AS INTEGER) AS b, "
+                "COUNT(*) AS n "
+                f"FROM scans s WHERE {where} AND {win_sql} "
+                "GROUP BY diagnosis, b",
+                [int(bucket_sec)] + args + [int(range_seconds)]).fetchall()
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_bloom failed: %s", e)
+    series = _bucketed_series(rows, buckets=buckets, key_field="key", top=top)
+    return {"buckets": buckets, "bucket_seconds": bucket_sec,
+            "series": [{"disease": s["key"], "total": s["total"],
+                        "values": s["values"]} for s in series]}
+
+
+def compute_analytics_streams(*, user_id, key_id=None, env=None,
+                              range_seconds=86400, buckets=48, top=6) -> dict:
+    """Per-endpoint (all request types) bucketed counts from the request
+    log — the 'request stream' streamgraph."""
+    sub, sargs = _build_user_keys_where(int(user_id), key_id, env)
+    range_seconds = max(60, int(range_seconds))
+    buckets = max(4, min(200, int(buckets)))
+    bucket_sec = max(30, range_seconds // buckets)
+    rows = []
+    try:
+        with get_conn() as c:
+            # Param order matches the ? positions in the SQL TEXT: the
+            # bucket-size divisor in the SELECT comes BEFORE the {sub} scope
+            # args and the window arg at the end.
+            rows = c.execute(
+                "SELECT path AS key, CAST((strftime('%s','now') - "
+                "strftime('%s', timestamp)) / ? AS INTEGER) AS b, "
+                "COUNT(*) AS n FROM api_key_request_log "
+                f"WHERE key_id IN {sub} "
+                "AND timestamp >= datetime('now','-' || ? || ' seconds') "
+                "GROUP BY path, b",
+                [int(bucket_sec)] + sargs + [int(range_seconds)]).fetchall()
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_streams failed: %s", e)
+    series = _bucketed_series(rows, buckets=buckets, key_field="key", top=top)
+    return {"buckets": buckets, "bucket_seconds": bucket_sec,
+            "series": [{"path": s["key"], "total": s["total"],
+                        "values": s["values"]} for s in series]}
+
+
+def compute_analytics_quota(*, user_id, key_id=None, env=None) -> dict:
+    """Quota + rate limit + today's burn + projected exhaustion for one key.
+    The per-key Analytics tab always passes a key_id; NULL quota = unlimited."""
+    from datetime import timedelta
+    out = {"quota_per_day": None, "rate_limit_per_min": None,
+           "used_today": 0, "remaining": None, "pct": None, "rate_now": 0,
+           "projected_exhaust_iso": None, "resets_in_seconds": None,
+           "burn": []}
+    try:
+        sub, sargs = _build_user_keys_where(int(user_id), key_id, env)
+        with get_conn() as c:
+            if key_id:
+                krow = c.execute(
+                    "SELECT quota_per_day, rate_limit_per_min FROM api_keys "
+                    "WHERE user_id=? AND public_id=? AND deleted_at IS NULL",
+                    (int(user_id), str(key_id))).fetchone()
+                if krow:
+                    kd = dict(krow)
+                    out["quota_per_day"] = kd.get("quota_per_day")
+                    out["rate_limit_per_min"] = kd.get("rate_limit_per_min")
+            urow = c.execute(
+                "SELECT COUNT(*) AS n FROM api_key_request_log "
+                f"WHERE key_id IN {sub} "
+                "AND timestamp >= datetime('now','start of day')",
+                sargs).fetchone()
+            out["used_today"] = int(dict(urow).get("n", 0) or 0)
+            rrow = c.execute(
+                "SELECT COUNT(*) AS n FROM api_key_request_log "
+                f"WHERE key_id IN {sub} "
+                "AND timestamp >= datetime('now','-60 seconds')",
+                sargs).fetchone()
+            out["rate_now"] = int(dict(rrow).get("n", 0) or 0)
+            brows = c.execute(
+                "SELECT CAST((strftime('%s','now') - "
+                "strftime('%s', timestamp))/3600 AS INTEGER) AS h, "
+                "COUNT(*) AS n FROM api_key_request_log "
+                f"WHERE key_id IN {sub} "
+                "AND timestamp >= datetime('now','-86400 seconds') "
+                "GROUP BY h", sargs).fetchall()
+            burn = {int(dict(r)["h"]): int(dict(r)["n"]) for r in brows}
+            out["burn"] = [burn.get(23 - i, 0) for i in range(24)]
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_quota failed: %s", e)
+    q = out["quota_per_day"]
+    if q:
+        out["remaining"] = max(0, int(q) - out["used_today"])
+        out["pct"] = round(100.0 * out["used_today"] / int(q), 1)
+        recent_hr = (sum(out["burn"][-3:]) / 3.0) if out["burn"] else 0.0
+        if recent_hr > 0 and out["remaining"] is not None:
+            hrs = out["remaining"] / recent_hr
+            out["projected_exhaust_iso"] = (
+                datetime.now(timezone.utc) + timedelta(hours=hrs)).isoformat()
+    now = datetime.now(timezone.utc)
+    nxt = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0,
+                                            microsecond=0)
+    out["resets_in_seconds"] = int((nxt - now).total_seconds())
+    return out
+
+
+def compute_analytics_payloads(*, user_id, key_id=None, env=None,
+                               range_seconds=86400, sample=20) -> dict:
+    """Response field-stats (from scans) + a sample of real response previews
+    (from the request log)."""
+    sub, sargs = _build_user_keys_where(int(user_id), key_id, env)
+    swhere, sargs2 = _scan_scope(user_id, key_id, env)
+    win_sql, win_arg = _alyt_scan_window(range_seconds)
+    stats = {"responses": 0, "avg_confidence": None, "ood_pct": None}
+    samples = []
+    try:
+        with get_conn() as c:
+            srow = c.execute(
+                "SELECT COUNT(*) AS n, AVG(confidence) AS conf, "
+                "SUM(CASE WHEN is_ood=1 THEN 1 ELSE 0 END) AS ood "
+                f"FROM scans s WHERE {swhere} AND {win_sql}",
+                sargs2 + [win_arg]).fetchone()
+            sd = dict(srow); ntot = int(sd.get("n", 0) or 0)
+            stats["responses"] = ntot
+            if ntot:
+                stats["avg_confidence"] = round(float(sd.get("conf") or 0.0), 3)
+                stats["ood_pct"] = round(100.0 * (sd.get("ood") or 0) / ntot, 1)
+            for r in c.execute(
+                    "SELECT timestamp, path, status_code, body_out_preview, "
+                    "body_out_ctype FROM api_key_request_log "
+                    f"WHERE key_id IN {sub} AND body_out_preview IS NOT NULL "
+                    "AND timestamp >= datetime('now','-' || ? || ' seconds') "
+                    "ORDER BY id DESC LIMIT ?",
+                    sargs + [int(range_seconds), int(sample)]).fetchall():
+                d = dict(r)
+                samples.append({
+                    "timestamp": d.get("timestamp"), "path": d.get("path"),
+                    "status": d.get("status_code"),
+                    "ctype": d.get("body_out_ctype"),
+                    "preview": d.get("body_out_preview")})
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_payloads failed: %s", e)
+    return {"stats": stats, "samples": samples}
+
+
 def _percentile(sorted_lats: list[int], p: float) -> Optional[float]:
     if not sorted_lats:
         return None
@@ -8051,6 +9579,420 @@ def _percentile(sorted_lats: list[int], p: float) -> Optional[float]:
     n = len(sorted_lats)
     idx = max(0, min(n - 1, math.ceil(p * n / 100.0) - 1))
     return float(sorted_lats[idx])
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 9.N.T34 · Analytics widgets: Client Distribution + Confidence Ladder.
+# ─────────────────────────────────────────────────────────────────────────
+
+def _ts_epoch(s):
+    """Tolerant ISO/space timestamp -> epoch seconds (UTC). None on failure."""
+    if not s:
+        return None
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        ds = str(s).strip().replace("Z", "+00:00")
+        d = _dt.fromisoformat(ds)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_tz.utc)
+        return d.timestamp()
+    except Exception:
+        return None
+
+
+def _parse_ua(ua):
+    """User-Agent -> {family, lib, version, label}. Buckets the common API
+    clients (Python/Node/curl/browser/SDK) by runtime family + library."""
+    import re as _re
+    s = (ua or "").strip()
+    low = s.lower()
+    fam, lib, ver = "Other", None, None
+
+    def grab(name):
+        m = _re.search(_re.escape(name) + r"[/ ]v?([0-9][0-9A-Za-z._-]*)", low)
+        return m.group(1) if m else None
+
+    if "apin-sdk" in low:
+        fam, lib, ver = "APIN-SDK", "apin-sdk", grab("apin-sdk")
+    elif "python-requests" in low:
+        fam, lib, ver = "Python", "requests", grab("python-requests")
+    elif "python-urllib" in low or "urllib" in low:
+        fam, lib, ver = "Python", "urllib", grab("python-urllib") or grab("urllib")
+    elif "aiohttp" in low:
+        fam, lib, ver = "Python", "aiohttp", grab("aiohttp")
+    elif "httpx" in low:
+        fam, lib, ver = "Python", "httpx", grab("httpx")
+    elif "undici" in low:
+        fam, lib, ver = "Node.js", "undici", grab("undici")
+    elif "node-fetch" in low:
+        fam, lib, ver = "Node.js", "node-fetch", grab("node-fetch")
+    elif "axios" in low:
+        fam, lib, ver = "Node.js", "axios", grab("axios")
+    elif low.startswith("got/") or "got (" in low:
+        fam, lib, ver = "Node.js", "got", grab("got")
+    elif "okhttp" in low:
+        fam, lib, ver = "Java/Android", "okhttp", grab("okhttp")
+    elif "go-http-client" in low:
+        fam, lib, ver = "Go", "net/http", grab("go-http-client")
+    elif "postmanruntime" in low:
+        fam, lib, ver = "Postman", "postman", grab("postmanruntime")
+    elif "curl" in low:
+        fam, lib, ver = "curl", "curl", grab("curl")
+    elif "wget" in low:
+        fam, lib, ver = "Wget", "wget", grab("wget")
+    elif "mozilla" in low or "applewebkit" in low:
+        fam = "Browser"
+        if "edg/" in low:
+            lib, ver = "Edge", grab("edg")
+        elif "firefox" in low:
+            lib, ver = "Firefox", grab("firefox")
+        elif "chrome" in low and "chromium" not in low:
+            lib, ver = "Chrome", grab("chrome")
+        elif "safari" in low:
+            lib, ver = "Safari", grab("version") or grab("safari")
+        else:
+            lib, ver = "Browser", None
+    label = (lib + "/" + ver) if (lib and ver) else (lib or fam)
+    return {"family": fam, "lib": lib or fam, "version": ver, "label": label}
+
+
+def compute_analytics_clients(*, user_id, key_id=None, env=None,
+                              range_seconds=86400, top=24, buckets=24) -> dict:
+    """Client distribution for the 'Visitors' Log' widget. Buckets the request
+    log by runtime family (Python/Node/curl/browser/SDK) + library/version,
+    with per-family volume / error-rate / p95 / last-seen / regions / endpoints,
+    a top-callers roster, new-vs-returning, origins, status mix, latency
+    histogram, and per-family over-time series. Fail-open."""
+    sub, sargs = _build_user_keys_where(int(user_id), key_id, env)
+    win = int(max(60, range_seconds))
+    out = {"total": 0, "window": win, "families": [], "callers": [],
+           "new_clients": 0, "returning_clients": 0, "origins": [],
+           "status_mix": {}, "latency_hist": [], "buckets": 0,
+           "bucket_seconds": 0}
+    try:
+        from scripts.apin_v2 import ip_geo_resolver as _ipgeo
+    except Exception:
+        _ipgeo = None
+    try:
+        with get_conn() as c:
+            rows = c.execute(
+                "SELECT ip, ua, status_code, latency_ms, timestamp, path "
+                f"FROM api_key_request_log WHERE key_id IN {sub} "
+                "AND timestamp >= datetime('now','-' || ? || ' seconds') "
+                "ORDER BY id DESC LIMIT 8000", sargs + [win]).fetchall()
+            firstseen = {}
+            for r in c.execute(
+                    "SELECT ua, MIN(timestamp) AS m FROM api_key_request_log "
+                    f"WHERE key_id IN {sub} GROUP BY ua", sargs).fetchall():
+                d = dict(r); firstseen[d.get("ua") or ""] = d.get("m")
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_clients failed: %s", e)
+        return out
+
+    import time as _time
+    now = _time.time()
+    nb = max(6, min(48, int(buckets)))
+    bucket_seconds = max(1, win // nb)
+    fams, callers, status_mix, origins = {}, {}, {}, {}
+    lat_all, seen, new_ct, ret_ct = [], set(), 0, 0
+
+    for r in rows:
+        d = dict(r)
+        ua = d.get("ua") or ""
+        p = _parse_ua(ua)
+        fam, label = p["family"], p["label"]
+        st = int(d.get("status_code") or 0)
+        lat = d.get("latency_ms")
+        ts = d.get("timestamp")
+        path = d.get("path") or "?"
+        ip = d.get("ip")
+        out["total"] += 1
+        status_mix[st] = status_mix.get(st, 0) + 1
+        if lat is not None:
+            try: lat_all.append(int(lat))
+            except Exception: pass
+
+        fa = fams.get(fam)
+        if fa is None:
+            fa = {"family": fam, "count": 0, "errors": 0, "lats": [], "last": None,
+                  "versions": {}, "endpoints": {}, "regions": {}, "series": [0] * nb}
+            fams[fam] = fa
+        fa["count"] += 1
+        if st >= 400: fa["errors"] += 1
+        if lat is not None:
+            try: fa["lats"].append(int(lat))
+            except Exception: pass
+        if fa["last"] is None or (ts and ts > fa["last"]): fa["last"] = ts
+        fa["versions"][label] = fa["versions"].get(label, 0) + 1
+        fa["endpoints"][path] = fa["endpoints"].get(path, 0) + 1
+
+        ca = callers.get(label)
+        if ca is None:
+            ca = {"label": label, "family": fam, "count": 0, "errors": 0,
+                  "lats": [], "last": None, "region": None}
+            callers[label] = ca
+        ca["count"] += 1
+        if st >= 400: ca["errors"] += 1
+        if lat is not None:
+            try: ca["lats"].append(int(lat))
+            except Exception: pass
+        if ca["last"] is None or (ts and ts > ca["last"]): ca["last"] = ts
+
+        if _ipgeo and ip:
+            g = _ipgeo.resolve_cached(ip)
+            if g and g.get("cc"):
+                rk = g.get("state") or g.get("cc")
+                fa["regions"][rk] = fa["regions"].get(rk, 0) + 1
+                origins[rk] = origins.get(rk, 0) + 1
+                if ca["region"] is None: ca["region"] = rk
+
+        te = _ts_epoch(ts)
+        if te is not None:
+            bi = nb - 1 - int((now - te) // bucket_seconds)
+            if 0 <= bi < nb: fa["series"][bi] += 1
+
+        if ua not in seen:
+            seen.add(ua)
+            fse = _ts_epoch(firstseen.get(ua))
+            if fse is not None and fse >= (now - win): new_ct += 1
+            else: ret_ct += 1
+
+    def _fin(agg, extra=False):
+        lats = sorted(agg["lats"])
+        base = {"count": agg["count"],
+                "error_rate": round(agg["errors"] / max(1, agg["count"]), 4),
+                "errors": agg["errors"],
+                "avg_latency": round(sum(lats) / len(lats), 0) if lats else None,
+                "p95_latency": _percentile(lats, 95), "last_seen": agg["last"]}
+        return base
+
+    fam_list = []
+    for fa in fams.values():
+        b = _fin(fa)
+        b.update({
+            "family": fa["family"],
+            "pct": round(100.0 * fa["count"] / max(1, out["total"]), 1),
+            "versions": [{"label": k, "count": v} for k, v in
+                         sorted(fa["versions"].items(), key=lambda kv: -kv[1])[:8]],
+            "top_endpoints": [{"path": k, "count": v} for k, v in
+                              sorted(fa["endpoints"].items(), key=lambda kv: -kv[1])[:6]],
+            "regions": [{"label": k, "count": v} for k, v in
+                        sorted(fa["regions"].items(), key=lambda kv: -kv[1])[:6]],
+            "series": fa["series"]})
+        fam_list.append(b)
+    fam_list.sort(key=lambda x: -x["count"])
+
+    caller_list = []
+    for ca in callers.values():
+        b = _fin(ca)
+        b.update({"label": ca["label"], "family": ca["family"], "region": ca["region"]})
+        caller_list.append(b)
+    caller_list.sort(key=lambda x: -x["count"])
+
+    lat_all.sort()
+    edges = [0, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 10 ** 9]
+    hist = [0] * (len(edges) - 1)
+    for l in lat_all:
+        for i in range(len(edges) - 1):
+            if edges[i] <= l < edges[i + 1]:
+                hist[i] += 1; break
+
+    out["families"] = fam_list
+    out["callers"] = caller_list[:int(top)]
+    out["new_clients"] = new_ct
+    out["returning_clients"] = ret_ct
+    out["origins"] = [{"label": k, "count": v} for k, v in
+                      sorted(origins.items(), key=lambda kv: -kv[1])[:8]]
+    out["status_mix"] = {str(k): v for k, v in sorted(status_mix.items())}
+    out["latency_hist"] = [{"lo": edges[i], "hi": edges[i + 1], "count": hist[i]}
+                           for i in range(len(hist))]
+    out["buckets"] = nb
+    out["bucket_seconds"] = bucket_seconds
+    return out
+
+
+_CONF_BANDS = [
+    ("certain", "Certain", 0.85, 1.01, "ship"),
+    ("likely", "Likely", 0.65, 0.85, "usually ok"),
+    ("tentative", "Tentative", 0.45, 0.65, "verify"),
+    ("uncertain", "Uncertain", 0.0, 0.45, "check"),
+]
+_CONF_ORDER = ["certain", "likely", "tentative", "uncertain", "ood"]
+
+
+def _conf_band_key(conf, is_ood):
+    if is_ood:
+        return "ood"
+    c = conf or 0.0
+    if c >= 0.85: return "certain"
+    if c >= 0.65: return "likely"
+    if c >= 0.45: return "tentative"
+    return "uncertain"
+
+
+def compute_analytics_confidence(*, user_id, key_id=None, env=None,
+                                 range_seconds=86400, specimens=24,
+                                 buckets=24) -> dict:
+    """Confidence-band aggregation for the 'Soil Horizon' ladder. Bands
+    (certain/likely/tentative/uncertain/OOD) with per-band disease + specimen
+    list, average, model-tier grouping (3/4A/4B), per-disease confidence,
+    over-time series, and a HYBRID calibration block: a reliability diagram +
+    ECE when enough scan-linked feedback exists, otherwise a confidence
+    histogram with an OOD overlay. Fail-open."""
+    swhere, sargs = _scan_scope(user_id, key_id, env)
+    win_sql, win_arg = _alyt_scan_window(range_seconds)
+    out = {"total": 0, "avg_confidence": None, "bands": [], "needs_review": 0,
+           "tiers": [], "by_disease": [], "over_time": {},
+           "calibration": {"mode": "histogram", "bins": [], "n": 0}}
+    try:
+        with get_conn() as c:
+            rows = c.execute(
+                "SELECT scan_uid, diagnosis, confidence, severity, "
+                "COALESCE(is_ood,0) AS is_ood, tier, processed_at, "
+                "COALESCE(image_n_bytes,0) AS img "
+                f"FROM scans s WHERE {swhere} AND {win_sql} "
+                "ORDER BY datetime(s.processed_at) DESC LIMIT 6000",
+                sargs + [win_arg]).fetchall()
+            try:
+                fb = c.execute(
+                    "SELECT f.verdict AS verdict, sc.confidence AS confidence "
+                    "FROM inference_feedback f JOIN scans sc ON f.scan_id = sc.id "
+                    "WHERE sc.user_id = ? AND sc.deleted_at IS NULL "
+                    "AND f.scan_id IS NOT NULL", [int(user_id)]).fetchall()
+            except Exception:
+                fb = []
+    except Exception as e:
+        _ALYT_LOG.warning("compute_analytics_confidence failed: %s", e)
+        return out
+
+    import time as _time
+    now = _time.time()
+    band_meta = {k: (lbl, lo, hi, act) for k, lbl, lo, hi, act in _CONF_BANDS}
+    band_meta["ood"] = ("OOD", None, None, "review")
+    aggs = {k: {"count": 0, "conf_sum": 0.0, "diseases": {}, "sev": {},
+                "specimens": []} for k in _CONF_ORDER}
+    conf_sum_all, conf_n = 0.0, 0
+    tiers, by_disease = {}, {}
+    nb = max(6, min(48, int(buckets)))
+    bucket_seconds = max(1, int(max(60, range_seconds)) // nb)
+    band_series = {k: [0] * nb for k in _CONF_ORDER}
+    avg_sum, avg_n = [0.0] * nb, [0] * nb
+    HB = 10
+    hist = [{"lo": i / HB, "hi": (i + 1) / HB, "count": 0, "ood": 0}
+            for i in range(HB)]
+
+    for r in rows:
+        d = dict(r)
+        conf = float(d.get("confidence") or 0.0)
+        ood = int(d.get("is_ood") or 0)
+        diag = d.get("diagnosis") or "unknown"
+        sev = d.get("severity") or "unknown"
+        tier = d.get("tier") or "?"
+        uid = d.get("scan_uid")
+        hasimg = int(d.get("img") or 0) > 0
+        ts = d.get("processed_at")
+        out["total"] += 1
+        conf_sum_all += conf; conf_n += 1
+        bk = _conf_band_key(conf, ood)
+        a = aggs[bk]
+        a["count"] += 1; a["conf_sum"] += conf
+        a["diseases"][diag] = a["diseases"].get(diag, 0) + 1
+        a["sev"][sev] = a["sev"].get(sev, 0) + 1
+        if len(a["specimens"]) < int(specimens):
+            a["specimens"].append({"scan_uid": uid, "diagnosis": diag,
+                                    "confidence": round(conf, 3),
+                                    "has_image": hasimg, "severity": sev,
+                                    "is_ood": bool(ood)})
+        t = tiers.get(tier)
+        if t is None:
+            t = {"tier": tier, "count": 0, "conf_sum": 0.0,
+                 "bands": {k: 0 for k in _CONF_ORDER}, "diseases": {}}
+            tiers[tier] = t
+        t["count"] += 1; t["conf_sum"] += conf; t["bands"][bk] += 1
+        t["diseases"][diag] = t["diseases"].get(diag, 0) + 1
+        bd = by_disease.get(diag)
+        if bd is None:
+            bd = {"disease": diag, "count": 0, "conf_sum": 0.0, "ood": 0}
+            by_disease[diag] = bd
+        bd["count"] += 1; bd["conf_sum"] += conf; bd["ood"] += ood
+        te = _ts_epoch(ts)
+        if te is not None:
+            bi = nb - 1 - int((now - te) // bucket_seconds)
+            if 0 <= bi < nb:
+                band_series[bk][bi] += 1
+                avg_sum[bi] += conf; avg_n[bi] += 1
+        hb = min(HB - 1, int(conf * HB))
+        hist[hb]["count"] += 1
+        if ood: hist[hb]["ood"] += 1
+
+    band_list = []
+    for k in _CONF_ORDER:
+        a = aggs[k]; lbl, lo, hi, act = band_meta[k]
+        top = (max(a["diseases"].items(), key=lambda kv: kv[1])[0]
+               if a["diseases"] else None)
+        band_list.append({
+            "key": k, "label": lbl, "lo": lo, "hi": hi, "action": act,
+            "count": a["count"],
+            "pct": round(100.0 * a["count"] / max(1, out["total"]), 1),
+            "avg_confidence": round(a["conf_sum"] / a["count"], 3) if a["count"] else None,
+            "top_disease": top, "severity_mix": a["sev"],
+            "specimens": a["specimens"]})
+    out["bands"] = band_list
+    out["avg_confidence"] = round(conf_sum_all / conf_n, 3) if conf_n else None
+    out["needs_review"] = aggs["uncertain"]["count"] + aggs["ood"]["count"]
+
+    tier_list = []
+    for t in sorted(tiers.values(), key=lambda x: str(x["tier"])):
+        topd = (max(t["diseases"].items(), key=lambda kv: kv[1])[0]
+                if t["diseases"] else None)
+        tier_list.append({"tier": t["tier"], "count": t["count"],
+                          "avg_confidence": round(t["conf_sum"] / t["count"], 3) if t["count"] else None,
+                          "bands": t["bands"], "top_disease": topd,
+                          "pct": round(100.0 * t["count"] / max(1, out["total"]), 1)})
+    out["tiers"] = tier_list
+
+    bdl = [{"disease": bd["disease"], "count": bd["count"],
+            "avg_confidence": round(bd["conf_sum"] / bd["count"], 3) if bd["count"] else None,
+            "ood_rate": round(bd["ood"] / max(1, bd["count"]), 3)}
+           for bd in by_disease.values()]
+    bdl.sort(key=lambda x: -x["count"])
+    out["by_disease"] = bdl
+
+    out["over_time"] = {"buckets": nb, "bucket_seconds": bucket_seconds,
+                        "bands": [{"key": k, "values": band_series[k]} for k in _CONF_ORDER],
+                        "avg": [round(avg_sum[i] / avg_n[i], 3) if avg_n[i] else None
+                                for i in range(nb)]}
+
+    pairs = []
+    for r in fb:
+        d = dict(r); v = (d.get("verdict") or "").lower(); cf = d.get("confidence")
+        if cf is None: continue
+        correct = 1 if v in ("confirm", "confirmed", "correct", "agree",
+                              "up", "yes", "accurate") else 0
+        pairs.append((float(cf), correct))
+    if len(pairs) >= 20:
+        nbins = 10
+        bins = [{"lo": i / nbins, "hi": (i + 1) / nbins, "n": 0,
+                 "correct": 0, "conf_sum": 0.0} for i in range(nbins)]
+        for cf, corr in pairs:
+            bi = min(nbins - 1, int(cf * nbins))
+            bins[bi]["n"] += 1; bins[bi]["correct"] += corr; bins[bi]["conf_sum"] += cf
+        ece, tot, rel = 0.0, len(pairs), []
+        for b in bins:
+            if b["n"]:
+                acc = b["correct"] / b["n"]; cf = b["conf_sum"] / b["n"]
+                ece += abs(acc - cf) * b["n"] / tot
+                rel.append({"lo": b["lo"], "hi": b["hi"], "n": b["n"],
+                            "accuracy": round(acc, 3), "confidence": round(cf, 3)})
+            else:
+                rel.append({"lo": b["lo"], "hi": b["hi"], "n": 0,
+                            "accuracy": None, "confidence": None})
+        out["calibration"] = {"mode": "reliability", "bins": rel,
+                              "ece": round(ece, 4), "n": tot}
+    else:
+        out["calibration"] = {"mode": "histogram", "bins": hist,
+                              "n": out["total"], "feedback_n": len(pairs)}
+    return out
 
 
 def compute_usage_summary(*, user_id: int, range_seconds: int,
@@ -9554,6 +11496,15 @@ def create_scan(*, user_id: int, api_key_id: Optional[int],
     n_bytes = len(image_bytes) if image_bytes is not None else None
     result_json = json.dumps(result, separators=(",", ":"), default=str)
 
+    # 9.N.T31 · Resolve the GPS point to a country/state/district once (before
+    # the uid-retry loop). Offline + best-effort: on any failure every field
+    # is None and we store NULLs — region resolution must never block a scan.
+    try:
+        from scripts.apin_v2 import geo_resolver as _geo_resolver
+        _region = _geo_resolver.resolve(lat, lon)
+    except Exception:
+        _region = {"cc": None, "state": None, "district": None}
+
     # PDA Phase-2: retry on the (vanishingly rare) sha256-on-uid
     # collision so a single unlucky scan can never propagate as an
     # unhandled 500. 3 attempts is far more than 128-bit entropy
@@ -9569,9 +11520,10 @@ def create_scan(*, user_id: int, api_key_id: Optional[int],
                     "is_ood, latitude, longitude, altitude_m, "
                     "heading_deg, accuracy_m, captured_at, "
                     "image_sha256, image_bytes, image_n_bytes, "
-                    "processed_at, processing_ms, result_json) "
+                    "processed_at, processing_ms, result_json, "
+                    "geo_cc, geo_state, geo_district) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                    "?, ?, ?, ?, ?, ?, ?)",
+                    "?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (scan_uid, int(user_id),
                      int(api_key_id) if api_key_id is not None else None,
                      flight_id,
@@ -9582,7 +11534,8 @@ def create_scan(*, user_id: int, api_key_id: Optional[int],
                      float(geo["accuracy_m"])  if geo.get("accuracy_m")  is not None else None,
                      captured_at,
                      image_sha256, image_bytes, n_bytes,
-                     now, int(processing_ms), result_json))
+                     now, int(processing_ms), result_json,
+                     _region.get("cc"), _region.get("state"), _region.get("district")))
                 break
             except sqlite3.IntegrityError as e:
                 # UNIQUE constraint failed (extreme bad luck on uid).
@@ -9602,7 +11555,78 @@ def create_scan(*, user_id: int, api_key_id: Optional[int],
         row = c.execute(
             "SELECT * FROM scans WHERE scan_uid = ?", (scan_uid,)
         ).fetchone()
+
+    # 9.N.T31 · Publish a live "scan" event to the account stream bus so the
+    # Analytics globe can pulse the origin district/state/country and the
+    # inference field / severity widgets can update in real time. Best-effort,
+    # outside the write lock; a failure here must never affect the scan.
+    try:
+        from scripts.apin_v2 import usage_recorder as _ur
+        _ur.get_stream_bus().publish(int(user_id), {
+            "type": "scan",
+            "ts": now,
+            "user_id": int(user_id),
+            "api_key_id": int(api_key_id) if api_key_id is not None else None,
+            "scan_uid": scan_uid,
+            "diagnosis": diagnosis,
+            "crop": _crop_of(diagnosis),
+            "severity": severity,
+            "confidence": confidence,
+            "is_ood": bool(is_ood),
+            "tier": tier,  # 9.N.T34 · lets the Confidence ladder's tier toggle update live
+            "lat": float(lat), "lon": float(lon),
+            "geo_cc": _region.get("cc"),
+            "geo_state": _region.get("state"),
+            "geo_district": _region.get("district"),
+        })
+    except Exception:
+        pass
+
     return _scan_row_to_dict(row)
+
+
+def backfill_scan_geo(batch_size: int = 500, max_rows: Optional[int] = None) -> dict:
+    """9.N.T31 · Populate geo_cc/geo_state/geo_district on scans that predate
+    the geo-precompute migration.
+
+    Selects rows with geo_cc IS NULL and a present latitude, resolves them in
+    batches, and updates. Uses an id cursor (id > last) so unresolvable
+    off-grid points don't cause an infinite re-select within a run. Idempotent
+    and resumable — safe to run repeatedly. Returns a summary dict.
+    """
+    try:
+        from scripts.apin_v2 import geo_resolver as _geo_resolver
+    except Exception:
+        return {"ok": False, "reason": "geo_resolver import failed", "updated": 0}
+    if not _geo_resolver.available():
+        return {"ok": False, "reason": "geo_resolver unavailable "
+                "(reverse_geocoder not installed)", "updated": 0}
+
+    total_updated = 0
+    last_id = 0
+    while True:
+        with _write_lock, get_conn() as c:
+            rows = c.execute(
+                "SELECT id, latitude, longitude FROM scans "
+                "WHERE geo_cc IS NULL AND latitude IS NOT NULL AND id > ? "
+                "ORDER BY id LIMIT ?",
+                (last_id, batch_size)
+            ).fetchall()
+            if not rows:
+                break
+            coords = [(r["latitude"], r["longitude"]) for r in rows]
+            regions = _geo_resolver.resolve_batch(coords)
+            for r, reg in zip(rows, regions):
+                c.execute(
+                    "UPDATE scans SET geo_cc = ?, geo_state = ?, "
+                    "geo_district = ? WHERE id = ?",
+                    (reg.get("cc"), reg.get("state"), reg.get("district"),
+                     r["id"]))
+            last_id = rows[-1]["id"]
+            total_updated += len(rows)
+        if max_rows is not None and total_updated >= max_rows:
+            break
+    return {"ok": True, "updated": total_updated}
 
 
 def _derive_severity(result: Optional[dict]) -> Optional[str]:

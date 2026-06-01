@@ -343,7 +343,131 @@ a:hover{color:var(--green-deep)}
   .tab{padding:12px 14px;font-size:12.5px}
   .kpi-tile .num{font-size:24px}
 }
+
+/* ── 9.N.T31 · Analytics tab ──────────────────────────────────────────── */
+.an-wrap{display:flex;flex-direction:column;gap:18px}
+.an-ph{padding:30px;text-align:center;color:var(--ink-mute);font:italic 12px 'Fraunces',serif}
+.an-ph-empty{display:flex;flex-direction:column;align-items:center;gap:8px}
+.an-leaf{width:26px;height:26px;border-radius:0 60% 0 60%;background:var(--paper-deep);border:1.4px solid var(--c-accent,#52b788);display:inline-block;transform:rotate(45deg)}
+.an-controls{display:flex;align-items:center;gap:14px;padding:10px 16px;flex-wrap:wrap}
+.an-range,.an-seg{display:inline-flex;gap:2px;background:var(--paper-deep);border:1px solid var(--paper-edge);border-radius:8px;padding:2px}
+.an-range button,.an-seg button{border:none;background:none;font:600 11px 'JetBrains Mono',monospace;color:var(--ink-mute);padding:5px 11px;border-radius:6px;cursor:pointer;text-transform:lowercase}
+.an-range button[aria-pressed="true"],.an-seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.an-spacer{flex:1}
+.an-live{display:inline-flex;align-items:center;gap:6px;font:11px 'JetBrains Mono',monospace;color:var(--ink-mute)}
+.an-live-dot{width:7px;height:7px;border-radius:50%;background:var(--c-accent,#52b788);transition:transform .3s}
+.an-live.an-live-hit .an-live-dot{transform:scale(2);box-shadow:0 0 8px var(--c-accent,#52b788)}
+.an-chips{display:flex;gap:6px;flex-wrap:wrap}
+.an-chip{font:11px 'JetBrains Mono',monospace;background:var(--paper);border:1px solid var(--paper-edge);border-radius:12px;padding:3px 10px;cursor:pointer;color:var(--ink-soft)}
+.an-card-head{display:flex;align-items:center;gap:10px;padding:14px 18px 6px}
+.an-card-head h2{font:600 14px 'Fraunces',serif;margin:0}
+.an-aux{font:11px 'JetBrains Mono',monospace;color:var(--ink-mute)}
+.an-card-body{padding:8px 18px 16px}
+.an-expand{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;flex:none;padding:0;background:none;border:1px solid var(--paper-edge);border-radius:6px;cursor:pointer;color:var(--ink-mute);width:26px;height:26px}
+.an-expand svg{width:14px;height:14px;display:block}
+.an-expand:hover{border-color:var(--c-accent,#52b788);color:var(--ink)}
+/* geo control row: keep the expand button vertically centred with the segs */
+.an-geo-ctl .an-expand{align-self:center}
+.an-geo-ctl{display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap}
+/* quota */
+.an-quota-grid{display:flex;gap:22px;align-items:center;padding:16px 20px;flex-wrap:wrap}
+.an-leaf-svg{width:108px;height:108px;flex:none}
+.an-leaf-fill{transition:y .8s cubic-bezier(.4,0,.2,1)}
+.an-leaf-wave{animation:anWave 3.5s ease-in-out infinite}
+@keyframes anWave{0%,100%{transform:translateX(0)}50%{transform:translateX(-6px)}}
+.an-quota-meta{flex:1;min-width:220px}
+.an-quota-big{font:14px 'Fraunces',serif;color:var(--ink-soft)}
+.an-quota-big b{font-size:26px;color:var(--ink)}
+.an-quota-pct{font:600 13px 'JetBrains Mono',monospace;margin:4px 0}
+.an-quota-rows{display:flex;gap:16px;flex-wrap:wrap;font:11.5px 'JetBrains Mono',monospace;color:var(--ink-mute);margin:6px 0}
+.an-quota-rows b{color:var(--ink)}
+.an-quota-spark{width:168px;height:26px;display:block;margin:6px 0}
+.an-quota-meta h3{font:600 15px 'Fraunces',serif;margin:0 0 4px}
+.an-quota-cta{display:flex;gap:8px;margin-top:10px}
+.an-btn{font:600 11.5px 'JetBrains Mono',monospace;padding:7px 14px;border-radius:8px;border:1px solid var(--paper-edge);background:var(--paper);color:var(--ink-soft);cursor:pointer;text-decoration:none;display:inline-block}
+.an-btn:hover{border-color:var(--c-accent,#52b788);color:var(--ink)}
+.an-btn.primary{background:var(--ink);color:var(--paper);border-color:transparent}
+/* rows / cards layout */
+.an-row{display:grid;gap:18px}
+.an-row-geo{grid-template-columns:2fr 1fr}
+.an-row-2{grid-template-columns:1fr 1fr}
+.an-card-geo .an-card-body,#an-geo-host{min-height:440px;height:440px;position:relative;padding:0;border-radius:8px;overflow:hidden;-webkit-user-select:none;user-select:none;touch-action:none}
+#an-geo-host .maplibregl-canvas{outline:none}
+.an-crumb{font:600 11px 'JetBrains Mono',monospace;color:var(--ink-soft);background:var(--paper-deep);border:1px solid var(--paper-edge);border-radius:8px;padding:5px 10px;white-space:nowrap}
+/* MapLibre overrides (paper-ink) */
+.an-card-geo .maplibregl-map,.an-exp-map .maplibregl-map{border-radius:8px}
+.an-mlp .maplibregl-popup-content{background:var(--ink,#1a1612);color:#efe7d4;font:11px 'JetBrains Mono',monospace;border-radius:7px;padding:6px 9px;box-shadow:0 3px 12px rgba(0,0,0,.28)}
+.an-mlp .maplibregl-popup-content b{color:#8fe0b4}.an-mlp .maplibregl-popup-tip{border-top-color:var(--ink,#1a1612);border-bottom-color:var(--ink,#1a1612)}
+.an-mlp .maplibregl-popup-content small{color:#b9b09c}
+.maplibregl-ctrl-group{background:var(--paper)!important;border:1px solid var(--paper-edge)!important}
+.an-ml-pulse{width:12px;height:12px;border-radius:50%;background:rgba(82,183,136,.6);box-shadow:0 0 0 rgba(82,183,136,.5);animation:anMlPulse 1.5s ease-out}
+@keyframes anMlPulse{0%{transform:scale(.4);box-shadow:0 0 0 0 rgba(82,183,136,.5)}100%{transform:scale(2.4);box-shadow:0 0 0 22px rgba(82,183,136,0);opacity:0}}
+.an-geo-credit{font:9.5px 'JetBrains Mono',monospace;color:var(--ink-mute);padding:0 18px 10px;opacity:.7}
+.an-globe-tip{background:var(--ink,#1a1612);color:#efe7d4;font:11px 'JetBrains Mono',monospace;padding:6px 9px;border-radius:7px;box-shadow:0 3px 12px rgba(0,0,0,.28);white-space:nowrap}
+.an-globe-tip b{color:#8fe0b4}
+.an-card-geo .scene-tooltip,.an-exp-globe .scene-tooltip{color:var(--ink);font-family:'JetBrains Mono',monospace}
+.an-card-field .an-field-body{display:grid;grid-template-columns:1fr 250px;gap:14px}
+#an-field-host{min-height:320px;height:320px;position:relative}
+.an-field-insight{min-width:230px}
+/* legend */
+.an-leg{display:flex;flex-direction:column;gap:5px}
+.an-leg-row{display:flex;align-items:center;gap:8px;background:none;border:none;cursor:pointer;padding:4px 6px;border-radius:6px;text-align:left;width:100%}
+.an-leg-row:hover{background:var(--paper-deep)}
+.an-leg-name{flex:1;font:11.5px 'JetBrains Mono',monospace;color:var(--ink)}
+.an-leg-name small{display:block;color:var(--ink-mute);font-size:9.5px}
+.an-leg-bar{width:70px;height:6px;background:var(--paper-deep);border-radius:3px;overflow:hidden}
+.an-leg-bar i{display:block;height:100%;background:var(--c-accent,#52b788)}
+.an-leg-n{font:600 11px 'JetBrains Mono',monospace;color:var(--ink-soft);width:40px;text-align:right}
+.an-leg-unmapped{font:10.5px 'JetBrains Mono',monospace;color:var(--ink-mute);padding:6px;font-style:italic}
+/* streamgraph */
+.an-stream-svg{width:100%;height:150px;display:block}
+.an-stream-band{cursor:pointer;transition:opacity .15s}
+.an-stream-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+.an-sl{font:11px 'JetBrains Mono',monospace;color:var(--ink-soft);display:inline-flex;align-items:center;gap:5px}
+.an-sl i{width:9px;height:9px;border-radius:2px;display:inline-block}
+.an-sl b{color:var(--ink)}
+/* severity */
+.an-sev-svg{width:100%;height:120px;display:block;border-radius:8px}
+.an-sev-dot{cursor:pointer;animation:anFloat 6s ease-in-out infinite;animation-delay:var(--d,0s)}
+@keyframes anFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.an-sev-counts{display:flex;gap:18px;margin-top:8px;justify-content:center}
+.an-sev-c{font:600 12px 'JetBrains Mono',monospace}
+/* payloads */
+.an-pay-stats{display:flex;gap:18px;flex-wrap:wrap;font:11.5px 'JetBrains Mono',monospace;color:var(--ink-mute);margin-bottom:10px}
+.an-pay-stats b{color:var(--ink)}
+.an-pay-box{background:var(--ink);border-radius:9px;overflow:hidden}
+.an-pay-bar{display:flex;align-items:center;padding:7px 12px;font:11px 'JetBrains Mono',monospace;color:#cfe8d6;border-bottom:1px solid rgba(255,255,255,.08)}
+.an-pay-meta{flex:1}
+.an-pay-nav button{background:none;border:none;color:#cfe8d6;cursor:pointer;font-size:16px;padding:0 6px}
+.an-pay-code{margin:0;padding:12px 14px;font:11.5px/1.6 'JetBrains Mono',monospace;color:#d9cfa6;white-space:pre-wrap;word-break:break-all;max-height:260px;overflow:auto}
+/* recent */
+.an-recent{display:flex;flex-direction:column}
+.an-recent-row{display:flex;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px solid var(--paper-edge);font:12px 'JetBrains Mono',monospace}
+.an-rec-sev{width:8px;height:8px;border-radius:50%;flex:none}
+.an-rec-diag{flex:1;color:var(--ink)}
+.an-rec-sev-t{color:var(--ink-mute)}
+.an-rec-conf{color:var(--ink-soft)}
+.an-rec-ood{font-size:9px;background:#fff3cd;color:var(--c-amber,#c98a2b);padding:1px 5px;border-radius:6px}
+/* field insight */
+.an-fi h4{font:600 13px 'Fraunces',serif;margin:0 0 4px}
+.an-fi-big{font:13px 'Fraunces',serif;color:var(--ink-soft);margin-bottom:8px}
+.an-fi-big small{font-size:11px}
+.an-fi-row{display:flex;align-items:center;gap:7px;width:100%;background:none;border:none;cursor:pointer;padding:5px 4px;border-radius:6px;text-align:left;font:11px 'JetBrains Mono',monospace}
+.an-fi-row:hover{background:var(--paper-deep)}
+.an-fi-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.an-fi-name{flex:1;color:var(--ink)}
+.an-fi-n{color:var(--ink-soft)}
+.an-fi-conf{color:var(--ink-mute)}
+/* set quota + expanded */
+.an-setq label{display:block;font:12px 'JetBrains Mono',monospace;margin:10px 0;color:var(--ink-soft)}
+.an-setq input,.an-setq select{margin-left:8px;padding:5px 8px;border:1px solid var(--paper-edge);border-radius:6px;font:inherit}
+.an-setq-note{font:11px 'Fraunces',serif;font-style:italic;color:var(--ink-mute)}
+.an-setq-cta{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.an-exp-cap{font:11px 'JetBrains Mono',monospace;color:var(--ink-mute);text-align:center;margin-top:8px}
+@media (max-width:820px){.an-row-geo,.an-row-2{grid-template-columns:1fr}.an-card-field .an-field-body{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){.an-leaf-wave,.an-sev-dot{animation:none}}
 </style>
+  <link rel="stylesheet" href="/static/apin_console_base.css?v=9p1">
 </head>
 <body>
 <!-- @ICON_SPRITE@ -->
@@ -371,9 +495,6 @@ a:hover{color:var(--green-deep)}
       <button type="button" class="btn" data-act="rotate" title="Rotate token">
         <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> rotate
       </button>
-      <button type="button" class="btn" data-act="edit" title="Edit key settings">
-        <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> edit
-      </button>
       <button type="button" class="btn" data-act="disable" id="btn-disable" title="Disable this key">
         <svg class="icon" aria-hidden="true"><use href="#i-pause"/></svg> disable
       </button>
@@ -398,7 +519,7 @@ a:hover{color:var(--green-deep)}
       <svg class="icon" aria-hidden="true"><use href="#i-route"/></svg> Endpoints
     </a>
     <a href="#usage" class="tab" data-tab="usage" role="tab">
-      <svg class="icon" aria-hidden="true"><use href="#i-chart-line"/></svg> Usage
+      <svg class="icon" aria-hidden="true"><use href="#i-chart-line"/></svg> Analytics
     </a>
     <a href="#requests" class="tab" data-tab="requests" role="tab">
       <svg class="icon" aria-hidden="true"><use href="#i-list-ordered"/></svg>
@@ -587,76 +708,10 @@ a:hover{color:var(--green-deep)}
 
   <!-- Usage (rich charts — 9.I population) -->
   <section class="tabpane" id="pane-usage" role="tabpanel" aria-hidden="true">
-    <!-- Range strip + mode switcher for this key -->
-    <div class="card" style="padding:14px 22px;display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:18px">
-      <div class="range-strip" id="pk-range-strip" role="tablist" aria-label="Range">
-        <button data-range="15m">15m</button>
-        <button data-range="1h">1h</button>
-        <button data-range="6h">6h</button>
-        <button data-range="24h" aria-pressed="true">24h</button>
-        <button data-range="7d">7d</button>
-        <button data-range="30d">30d</button>
-      </div>
-      <div class="mode-switcher" id="pk-ts-mode" role="tablist" aria-label="Chart mode" style="margin-left:auto">
-        <button data-mode="total" aria-pressed="true">requests</button>
-        <button data-mode="by_status">by status</button>
-        <button data-mode="by_endpoint">by endpoint</button>
-        <button data-mode="latency">latency</button>
-        <button data-mode="errors">errors</button>
-        <button data-mode="bytes">bytes</button>
-      </div>
-    </div>
-
-    <!-- KPI strip for this key -->
-    <div class="kpi-strip" id="pk-kpi-strip" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
-      <div class="kpi-tile" data-pk-k="requests">
-        <div class="lbl"><svg class="icon"><use href="#i-activity"/></svg> Requests</div>
-        <div class="num"><span class="apin-odometer" data-num>·</span></div>
-        <div class="sub" data-delta>·</div>
-      </div>
-      <div class="kpi-tile" data-pk-k="errors">
-        <div class="lbl"><svg class="icon"><use href="#i-alert"/></svg> Errors</div>
-        <div class="num"><span class="apin-odometer" data-num>·</span></div>
-        <div class="sub" data-breakdown>· · ·</div>
-      </div>
-      <div class="kpi-tile" data-pk-k="p95">
-        <div class="lbl"><svg class="icon"><use href="#i-gauge"/></svg> p95 latency</div>
-        <div class="num"><span class="apin-odometer" data-num>·</span><span class="unit">ms</span></div>
-        <div class="sub" data-breakdown>·</div>
-      </div>
-      <div class="kpi-tile" data-pk-k="bytes_out">
-        <div class="lbl"><svg class="icon"><use href="#i-download"/></svg> Bytes out</div>
-        <div class="num" data-num>·</div>
-        <div class="sub" data-delta>·</div>
-      </div>
-    </div>
-
-    <!-- Time-series -->
-    <div class="card">
-      <div class="card-head">
-        <h2 id="pk-ts-title">Requests · 24h</h2>
-        <span class="aux">click a point to drill · click rows to inspect</span>
-      </div>
-      <div class="card-body">
-        <div class="chart-host" id="pk-ts-host"><div class="placeholder">loading&hellip;</div></div>
-      </div>
-    </div>
-
-    <!-- Sub-charts grid -->
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-top:18px">
-      <div class="card">
-        <div class="card-head"><h2>Top endpoints</h2><span class="aux" id="pk-top-ep-aux">·</span></div>
-        <div class="card-body" id="pk-top-ep-host"><div class="placeholder">loading&hellip;</div></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>Status mix</h2><span class="aux" id="pk-donut-aux">·</span></div>
-        <div class="card-body" id="pk-donut-host"><div class="placeholder">loading&hellip;</div></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>Latency distribution</h2><span class="aux" id="pk-hist-aux">·</span></div>
-        <div class="card-body" id="pk-hist-host"><div class="placeholder">loading&hellip;</div></div>
-      </div>
-    </div>
+    <!-- 9.N.T31 · Analytics tab — the inference observatory mounts here.
+         console_analytics.js (+ globe.gl, boundary data, 3D field) is
+         lazy-loaded by loadAnalyticsTab() only on first open. -->
+    <div id="an-mount"><div class="placeholder">loading analytics&hellip;</div></div>
   </section>
 
   <!-- Requests (paginated, filterable raw log) -->
@@ -730,126 +785,9 @@ a:hover{color:var(--green-deep)}
     </div>
   </section>
 
-  <!-- 9.J · Settings tab — 5 paper-aesthetic cards -->
+  <!-- 9.O.4 · Settings tab — control surface (built by renderSettings) -->
   <section class="tabpane" id="pane-settings" role="tabpanel" aria-hidden="true">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
-
-      <!-- Identity card -->
-      <div class="setcard">
-        <div class="setcard-head">
-          <svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>
-          <h3>Identity</h3>
-          <button class="setcard-edit" data-edit-target="identity" title="Edit in masthead"><svg class="icon"><use href="#i-pencil"/></svg></button>
-        </div>
-        <div class="setcard-body">
-          <div class="setrow">
-            <div class="setrow-lbl">Public ID</div>
-            <div class="setrow-val"><code id="set-pid">·</code></div>
-          </div>
-          <div class="setrow">
-            <div class="setrow-lbl">Token</div>
-            <div class="setrow-val"><code id="set-token">·</code></div>
-          </div>
-          <div class="setrow">
-            <div class="setrow-lbl">Environment</div>
-            <div class="setrow-val"><span class="env-pill" id="set-env">·</span></div>
-          </div>
-          <div class="setrow">
-            <div class="setrow-lbl">Created</div>
-            <div class="setrow-val" id="set-created">·</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- State card -->
-      <div class="setcard">
-        <div class="setcard-head">
-          <svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg>
-          <h3>State &amp; usage</h3>
-        </div>
-        <div class="setcard-body">
-          <div class="setrow">
-            <div class="setrow-lbl">Status</div>
-            <div class="setrow-val"><span class="status-pill" id="set-status">·</span></div>
-          </div>
-          <div class="setrow">
-            <div class="setrow-lbl">Total requests</div>
-            <div class="setrow-val setrow-numeric"><span id="set-req-count">·</span></div>
-          </div>
-          <div class="setrow">
-            <div class="setrow-lbl">Total 5xx errors</div>
-            <div class="setrow-val setrow-numeric"><span id="set-err-count">·</span></div>
-          </div>
-          <div class="setrow">
-            <div class="setrow-lbl">Last used</div>
-            <div class="setrow-val" id="set-last-used">·</div>
-          </div>
-          <div class="setrow">
-            <div class="setrow-lbl">Last used IP</div>
-            <div class="setrow-val"><code id="set-last-ip">·</code></div>
-          </div>
-          <div class="setrow">
-            <div class="setrow-lbl">Last UA</div>
-            <div class="setrow-val" id="set-last-ua" style="font-size:11.5px">·</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Limits card -->
-      <div class="setcard">
-        <div class="setcard-head">
-          <svg class="icon" aria-hidden="true"><use href="#i-gauge"/></svg>
-          <h3>Limits</h3>
-          <button class="setcard-edit" data-edit-target="limits" title="Edit"><svg class="icon"><use href="#i-pencil"/></svg></button>
-        </div>
-        <div class="setcard-body">
-          <div class="setrow">
-            <div class="setrow-lbl">Rate limit</div>
-            <div class="setrow-val setrow-numeric"><span id="set-rate-limit">·</span></div>
-          </div>
-          <div class="setrow">
-            <div class="setrow-lbl">Daily quota</div>
-            <div class="setrow-val setrow-numeric"><span id="set-quota">·</span></div>
-          </div>
-          <div class="setrow">
-            <div class="setrow-lbl">Expires</div>
-            <div class="setrow-val" id="set-expires">·</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Allowlists card -->
-      <div class="setcard">
-        <div class="setcard-head">
-          <svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg>
-          <h3>Allowlists</h3>
-          <button class="setcard-edit" data-edit-target="allowlists" title="Edit"><svg class="icon"><use href="#i-pencil"/></svg></button>
-        </div>
-        <div class="setcard-body">
-          <div class="setrow setrow-block">
-            <div class="setrow-lbl">IP allowlist</div>
-            <div class="setrow-val" id="set-ip-allow">·</div>
-          </div>
-          <div class="setrow setrow-block">
-            <div class="setrow-lbl">Origin allowlist</div>
-            <div class="setrow-val" id="set-origin-allow">·</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Scopes card — full-width -->
-      <div class="setcard" style="grid-column:1/-1">
-        <div class="setcard-head">
-          <svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg>
-          <h3>Scopes</h3>
-          <button class="setcard-edit" data-edit-target="scopes" title="Edit"><svg class="icon"><use href="#i-pencil"/></svg></button>
-        </div>
-        <div class="setcard-body">
-          <div id="set-scopes-chips" class="scopes-chips">·</div>
-        </div>
-      </div>
-
-    </div>
+    <div id="settings-root"></div>
   </section>
 
 </div>
@@ -1865,6 +1803,7 @@ a:hover{color:var(--green-deep)}
 <script src="/static/console_endpoint_genome.js?v=9g2"></script>
 <script src="/static/console_endpoint_galaxy.js?v=9gx4"></script>
 <script src="/static/console_key_endpoints.js?v=9ne18"></script>
-<script src="/static/console_key_detail.js?v=9nt9"></script>
+<script src="/static/console_modal.js?v=9r1"></script>
+<script src="/static/console_key_detail.js?v=9s1"></script>
 </body>
 </html>

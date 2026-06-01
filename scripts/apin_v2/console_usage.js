@@ -1266,24 +1266,28 @@
 
   // ─── Drawer plumbing ─────────────────────────────────────────────────
   function openDrawer() {
-    $('drawer').classList.add('show');
-    $('drawer-mask').classList.add('show');
-    $('drawer').setAttribute('aria-hidden', 'false');
+    const d = $('drawer'); if (!d) return;           // 9.N.T30 · null-safe
+    d.classList.add('show');
+    const m = $('drawer-mask'); if (m) m.classList.add('show');
+    d.setAttribute('aria-hidden', 'false');
   }
   function closeDrawer() {
-    $('drawer').classList.remove('show');
-    $('drawer-mask').classList.remove('show');
-    $('drawer').setAttribute('aria-hidden', 'true');
+    const d = $('drawer'); if (!d) return;
+    d.classList.remove('show');
+    const m = $('drawer-mask'); if (m) m.classList.remove('show');
+    d.setAttribute('aria-hidden', 'true');
   }
   function openReqd() {
-    $('reqd').classList.add('show');
-    $('reqd-mask').classList.add('show');
-    $('reqd').setAttribute('aria-hidden', 'false');
+    const r = $('reqd'); if (!r) return;             // 9.N.T30 · null-safe
+    r.classList.add('show');
+    const m = $('reqd-mask'); if (m) m.classList.add('show');
+    r.setAttribute('aria-hidden', 'false');
   }
   function closeReqd() {
-    $('reqd').classList.remove('show');
-    $('reqd-mask').classList.remove('show');
-    $('reqd').setAttribute('aria-hidden', 'true');
+    const r = $('reqd'); if (!r) return;
+    r.classList.remove('show');
+    const m = $('reqd-mask'); if (m) m.classList.remove('show');
+    r.setAttribute('aria-hidden', 'true');
   }
 
   // ─── Minute drill drawer (richer than before) ─────────────────────────
@@ -2577,10 +2581,12 @@
       '<div style="font-family:\'Fraunces\',serif;font-size:20px;color:' + c + ';font-variant-numeric:tabular-nums">' + value + '</div>' +
     '</div>';
   }
-  $('drawer-close').addEventListener('click', closeDrawer);
-  $('drawer-mask').addEventListener('click', closeDrawer);
-  $('reqd-close').addEventListener('click', closeReqd);
-  $('reqd-mask').addEventListener('click', closeReqd);
+  // 9.N.T30 · null-safe — the per-key usage tab omits the reqd modal markup
+  // (it carries its own) and the bindings run at module load on both pages.
+  { const e = $('drawer-close'); if (e) e.addEventListener('click', closeDrawer); }
+  { const e = $('drawer-mask');  if (e) e.addEventListener('click', closeDrawer); }
+  { const e = $('reqd-close');   if (e) e.addEventListener('click', closeReqd); }
+  { const e = $('reqd-mask');    if (e) e.addEventListener('click', closeReqd); }
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { closeDrawer(); closeReqd(); }
   });
@@ -2613,7 +2619,9 @@
     writeHashFilters();
     loadTimeseries();
   });
-  $('filter-key').addEventListener('change', e => { filterState.key_id = e.target.value; recentCursor = null; applyFilters(); });
+  // 9.N.T30 · #filter-key is omitted on the per-key usage tab (key is pinned),
+  // so guard the binding — every other control is present on both pages.
+  { const _fk = $('filter-key'); if (_fk) _fk.addEventListener('change', e => { filterState.key_id = e.target.value; recentCursor = null; applyFilters(); }); }
   $('filter-env').addEventListener('change', e => { filterState.env = e.target.value; recentCursor = null; applyFilters(); });
   $('filter-status').addEventListener('change', e => { filterState.status = e.target.value; recentCursor = null; applyFilters(); });
   let endpointTimer;
@@ -2706,7 +2714,7 @@
       loadTop('endpoints', 'top-ep-host', 'top-ep-aux', { color_token: 'series-1' }),
       loadDonut(),
       loadLatencyHistogram(),
-      loadTop('keys', 'top-keys-host', null, { color_token: 'series-0' }),
+      ($('top-keys-host') ? loadTop('keys', 'top-keys-host', null, { color_token: 'series-0' }) : Promise.resolve()),
       loadTop('ips', 'top-ips-host', null, { color_token: 'series-2' }),
       loadTop('error_codes', 'top-errors-host', null, { color_token: 'series-3' }),
       loadRecent({ append: false }),
@@ -4716,11 +4724,11 @@
   }
 
   // ─── Boot ────────────────────────────────────────────────────────────
-  (async function boot() {
+  async function boot() {
     applyStateToUI();
     _bindHeatmapModeSwitcher();
     _bindCompareToggle();
-    await loadKeys();
+    if ($('filter-key')) await loadKeys();   // 9.N.T30 · no key dropdown when key-scoped
     await refreshAll();
     _injectExpandButtons();
     _attachLiveStream();   // 9.N.7 · SSE connection on the live-tail card
@@ -4733,5 +4741,30 @@
     _wireRecentControls();
     _subscribeRecentToLiveStream();
     startPoll();
-  })();
+  }
+
+  // ─── 9.N.T30 · Mount seam ────────────────────────────────────────────
+  // The standalone account page auto-boots (it carries the #filter-key
+  // selector). The per-key Usage tab loads this same module but waits to
+  // call APIN.usage.mount({publicId}) until ITS pane is visible — charts
+  // must measure a laid-out container, and key_id pins every fetch to one
+  // key. boot() is idempotent via _booted; deactivate() pauses the poll.
+  let _booted = false;
+  async function mount(opts) {
+    opts = opts || {};
+    if (opts.publicId) filterState.key_id = opts.publicId;
+    if (_booted) { startPoll(); return; }
+    _booted = true;
+    await boot();
+  }
+  function deactivate() { if (pollTimer) clearInterval(pollTimer); }
+  window.APIN = window.APIN || {};
+  APIN.usage = { mount: mount, deactivate: deactivate };
+
+  // Standalone account page only — detected by the all-keys selector that
+  // the per-key tab deliberately omits.
+  if (document.getElementById('filter-key')) {
+    _booted = true;
+    boot();
+  }
 })();

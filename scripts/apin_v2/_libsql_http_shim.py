@@ -49,7 +49,15 @@ def _decode_value(v: dict) -> Any:
         return v["value"]
     if t == "blob":
         import base64
-        return base64.b64decode(v["value"])
+        # Hrana returns blob bytes under `base64`; tolerate legacy `value` too.
+        b64 = v.get("base64")
+        if b64 is None:
+            b64 = v.get("value")
+        if b64 is None:
+            return b""
+        # Hrana emits UNPADDED base64 — re-pad to a multiple of 4 before decode.
+        pad = (-len(b64)) % 4
+        return base64.b64decode(b64 + ("=" * pad))
     return v.get("value")
 
 
@@ -130,7 +138,8 @@ def _encode_arg(v: Any) -> dict:
         return {"type": "float", "value": v}
     if isinstance(v, (bytes, bytearray, memoryview)):
         import base64
-        return {"type": "blob", "value": base64.b64encode(bytes(v)).decode("ascii")}
+        # Hrana protocol expects the field name `base64` for blob values.
+        return {"type": "blob", "base64": base64.b64encode(bytes(v)).decode("ascii")}
     return {"type": "text", "value": str(v)}
 
 

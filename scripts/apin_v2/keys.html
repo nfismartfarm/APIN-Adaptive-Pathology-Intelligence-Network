@@ -130,12 +130,30 @@ h1{
 .icon{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:14px;line-height:1}
 
 select.filter, input.search{
-  font:inherit;padding:7px 12px;border-radius:8px;
+  font-family:'Inter',sans-serif;font-size:13.5px;font-weight:500;
+  color:var(--ink);
+  padding:7px 12px;border-radius:8px;
   border:1.5px solid var(--paper-edge);background:var(--paper);
-  font-size:13.5px;
+  transition:border-color .14s, box-shadow .14s, background .14s;
 }
+select.filter{
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
+  cursor:pointer;padding-right:30px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%231a1612' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;
+}
+select.filter:hover, input.search:hover{border-color:var(--ink-soft);background:#fff}
+select.filter:focus, input.search:focus{
+  outline:none;border-color:var(--accent-green);background:#fff;
+  box-shadow:0 0 0 3px rgba(47,111,62,.15);
+}
+select.filter option{color:var(--ink);background:#fff}
 input.search{flex:1;min-width:140px}
-input.search::placeholder{color:var(--ink-soft);font-style:italic}
+input.search::placeholder{color:var(--ink-soft);font-style:italic;font-weight:400}
+/* sort select carries a subtle ochre tick to read as "ordering", not "filtering" */
+select#f-sort{
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23b87d1e' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
 
 /* ── card grid ───────────────────────────────────────── */
 #cards{display:flex;flex-direction:column;gap:14px}
@@ -206,6 +224,19 @@ input.search::placeholder{color:var(--ink-soft);font-style:italic}
   letter-spacing:0.05em;text-transform:uppercase;
 }
 .card .env-pill.env-test{background:#dde7f0;color:#2d6a96}
+.card .group-pill{
+  font-family:'JetBrains Mono',monospace;font-size:10px;
+  padding:2px 8px;border-radius:4px;
+  background:#fbe3c2;color:#7a4e0a;
+  letter-spacing:0.03em;
+  display:inline-flex;align-items:center;gap:4px;
+}
+.card .group-pill::before{content:'';width:6px;height:6px;border-radius:1px;background:#b87d1e;transform:rotate(45deg)}
+.keys-cap{
+  font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;
+  text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);
+  margin:4px 0 11px;
+}
 
 .token-mask{
   font-family:'JetBrains Mono',monospace;font-size:13px;
@@ -677,6 +708,8 @@ details.field[open] summary::before{content:'▾ '}
     <span><span class="count" id="count-disabled">0</span> disabled</span>
     <span class="sep">·</span>
     <span><span class="count" id="count-other">0</span> other</span>
+    <span class="sep">·</span>
+    <span><span class="count" id="count-groups">0</span> groups</span>
   </div>
 
   <div class="action-bar">
@@ -696,9 +729,21 @@ details.field[open] summary::before{content:'▾ '}
       <option value="expired">expired</option>
       <option value="compromised">compromised</option>
     </select>
+    <select class="filter" id="f-group" aria-label="group filter">
+      <option value="all">all groups</option>
+      <option value="__none__">ungrouped</option>
+    </select>
+    <select class="filter" id="f-sort" aria-label="sort order">
+      <option value="recent">most recent</option>
+      <option value="oldest">oldest first</option>
+      <option value="used">recently used</option>
+      <option value="requests">most requests</option>
+      <option value="name">name A–Z</option>
+    </select>
     <input class="search" id="f-search" type="search" placeholder="search by name…" maxlength="80">
   </div>
 
+  <div class="keys-cap" id="keys-cap" hidden>Keys</div>
   <div id="cards" role="list" aria-live="polite" aria-busy="true">
     <!-- skeleton cards while loading -->
     <div class="skeleton-card"><div class="skel-line w-50"></div><div class="skel-line w-70"></div><div class="skel-line w-30"></div></div>
@@ -1045,6 +1090,9 @@ details.field[open] summary::before{content:'▾ '}
   </div>
 </div>
 
-<script src="/static/keys.js" defer></script>
+<link rel="stylesheet" href="/static/apin_console_base.css?v=9r1">
+<script src="/static/console_modal.js?v=9r1" defer></script>
+<script src="/static/console_key_groups.js?v=9r1" defer></script>
+<script src="/static/keys.js?v=9s1" defer></script>
 </body>
 </html>

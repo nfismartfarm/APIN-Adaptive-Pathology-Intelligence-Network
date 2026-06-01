@@ -1,0 +1,186 @@
+/* apin_console_base.css — 9.P.2
+ * Shared console primitives: a custom scrollbar, custom checkbox, custom
+ * input/select, button base + hover, and the animated "ghost" placeholder.
+ * Linked on every console_*.html so the whole console feels one piece.
+ * All colours reference per-page :root tokens with hard fallbacks, so this
+ * file works even on a page that defines its palette slightly differently.
+ */
+
+/* ── Custom scrollbar (whole console) ─────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--paper-edge, #c7bca9) transparent;
+}
+*::-webkit-scrollbar { width: 11px; height: 11px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--paper-edge, #c7bca9);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-mute, #8b8273);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* ── Custom checkbox ──────────────────────────────────────────────────── */
+.apin-check {
+  appearance: none; -webkit-appearance: none;
+  width: 18px; height: 18px; flex: none; vertical-align: middle;
+  border: 1.6px solid var(--paper-edge, #c7bca9);
+  border-radius: 5px;
+  background: var(--paper, #fbf9f3);
+  cursor: pointer; position: relative;
+  transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.apin-check:hover { border-color: var(--green, #2f6f3e); }
+.apin-check:checked,
+.apin-check:indeterminate {
+  background: var(--green, #2f6f3e);
+  border-color: var(--green, #2f6f3e);
+}
+.apin-check:checked::after {
+  content: ""; position: absolute; left: 5.5px; top: 2px;
+  width: 4px; height: 9px;
+  border: solid #fff; border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.apin-check:indeterminate::after {
+  content: ""; position: absolute; left: 3.5px; top: 7.5px;
+  width: 9px; height: 0; border-top: 2px solid #fff; border-radius: 2px;
+}
+.apin-check:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px rgba(47, 111, 62, .22);
+}
+
+/* ── Custom radio ─────────────────────────────────────────────────────── */
+.apin-radio {
+  appearance: none; -webkit-appearance: none;
+  width: 18px; height: 18px; flex: none; vertical-align: middle;
+  border: 1.6px solid var(--paper-edge, #c7bca9);
+  border-radius: 50%;
+  background: var(--paper, #fbf9f3);
+  cursor: pointer; position: relative;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.apin-radio:hover { border-color: var(--green, #2f6f3e); }
+.apin-radio:checked { border-color: var(--green, #2f6f3e); }
+.apin-radio:checked::after {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--green, #2f6f3e); transform: translate(-50%, -50%);
+}
+.apin-radio:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px rgba(47, 111, 62, .22);
+}
+
+/* ── Custom text input / number / select ──────────────────────────────── */
+.apin-input, .apin-select {
+  width: 100%;
+  font: 13px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--ink, #1a1612);
+  background: var(--paper, #fbf9f3);
+  border: 1.4px solid var(--paper-edge, #c7bca9);
+  border-radius: 9px;
+  padding: 9px 12px;
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.apin-input:hover, .apin-select:hover { border-color: var(--ink-mute, #8b8273); }
+.apin-input:focus, .apin-select:focus {
+  outline: none;
+  border-color: var(--green, #2f6f3e);
+  box-shadow: 0 0 0 3px rgba(47, 111, 62, .16);
+  background: #fff;
+}
+.apin-input::placeholder { color: var(--ink-mute, #8b8273); }
+.apin-select {
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b8273' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+}
+
+/* ── Button base + hover (the part that was missing) ──────────────────── */
+.apin-btn {
+  font: 600 12.5px 'JetBrains Mono', ui-monospace, monospace;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 16px; border-radius: 9px; cursor: pointer;
+  border: 1.4px solid var(--paper-edge, #c7bca9);
+  background: var(--paper, #fbf9f3); color: var(--ink, #1a1612);
+  transition: transform .12s ease, background .15s ease,
+              border-color .15s ease, box-shadow .15s ease, color .15s ease;
+}
+.apin-btn:hover {
+  background: #fff; border-color: var(--ink-mute, #8b8273);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 13px rgba(20, 16, 12, .10);
+}
+.apin-btn:active { transform: translateY(0); box-shadow: none; }
+.apin-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(47, 111, 62, .20); }
+.apin-btn.primary {
+  background: var(--ink, #1a1612); color: var(--paper, #fbf9f3);
+  border-color: var(--ink, #1a1612);
+}
+.apin-btn.primary:hover {
+  background: var(--green-deep, #1f5b32); border-color: var(--green-deep, #1f5b32);
+}
+.apin-btn.ghost { background: transparent; }
+.apin-btn.ghost:hover { background: var(--paper-soft, #f4efe6); }
+.apin-btn.danger { color: #b3402f; border-color: #d9a99a; background: var(--paper, #fbf9f3); }
+.apin-btn.danger:hover { background: #b3402f; color: #fff; border-color: #b3402f; }
+.apin-btn[disabled] { opacity: .45; pointer-events: none; }
+
+/* ── Icon button (e.g. copy) ──────────────────────────────────────────── */
+.apin-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex: none;
+  border: 1.4px solid var(--paper-edge, #c7bca9);
+  background: var(--paper, #fbf9f3); border-radius: 7px; cursor: pointer;
+  color: var(--ink-soft, #5a5246);
+  transition: background .15s ease, border-color .15s ease,
+              color .15s ease, transform .12s ease;
+}
+.apin-iconbtn:hover {
+  background: #fff; border-color: var(--green, #2f6f3e);
+  color: var(--green-deep, #1f5b32); transform: translateY(-1px);
+}
+.apin-iconbtn:active { transform: translateY(0); }
+.apin-iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.apin-iconbtn.ok { color: var(--green-deep, #1f5b32); border-color: var(--green, #2f6f3e); }
+
+/* ── Group pill (key-detail masthead) ─────────────────────────────────── */
+.group-pill {
+  font: 600 10px 'JetBrains Mono', ui-monospace, monospace;
+  padding: 2px 8px; border-radius: 5px;
+  background: var(--ochre-soft, #fbe3c2); color: var(--ochre-deep, #7a4e0a);
+  letter-spacing: .03em; display: inline-flex; align-items: center; gap: 5px;
+}
+.group-pill::before {
+  content: ""; width: 6px; height: 6px; border-radius: 1px;
+  background: var(--ochre, #b87d1e); transform: rotate(45deg);
+}
+
+/* ── Animated "ghost" placeholder (e.g. unlimited) ────────────────────── */
+.apin-ghost {
+  font: italic 13px 'JetBrains Mono', ui-monospace, monospace;
+  background: linear-gradient(
+    100deg,
+    var(--ink-mute, #8b8273) 20%,
+    var(--paper-edge, #c7bca9) 50%,
+    var(--ink-mute, #8b8273) 80%);
+  background-size: 220px 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  animation: apinGhostShimmer 2.6s linear infinite;
+}
+@keyframes apinGhostShimmer {
+  0%   { background-position: 130px 0; }
+  100% { background-position: -130px 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .apin-ghost { animation: none; }
+  .apin-btn, .apin-iconbtn, .apin-check, .apin-input, .apin-select { transition: none; }
+}

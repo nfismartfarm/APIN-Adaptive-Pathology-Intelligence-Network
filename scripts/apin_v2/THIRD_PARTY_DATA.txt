@@ -1,0 +1,31 @@
+APIN Analytics tab — third-party libraries & data (9.N.T31)
+============================================================
+
+Vendored, lazy-loaded ONLY on the per-key Analytics tab.
+
+globe.gl  v2.46.1                 — globe.gl.min.js
+    3D globe visualization (bundles three.js).
+    License: MIT. (c) Vasco Asturiano. https://github.com/vasturiano/globe.gl
+
+Natural Earth (admin-0, admin-1)  — geo_world_countries.json,
+                                    geo_world_states.json
+    Country + state/province boundaries.
+    License: Public Domain (no rights reserved). https://www.naturalearthdata.com
+    Source vectors: github.com/nvkelso/natural-earth-vector
+    Property set trimmed + coordinates rounded to 4 dp for size.
+
+geoBoundaries (IND ADM2)          — geo_district_IN.json
+    India district boundaries (simplified).
+    License: CC BY 4.0 — ATTRIBUTION REQUIRED.
+    Runfola, D. et al. (2020) geoBoundaries: A global database of political
+    administrative boundaries. PLoS ONE 15(4): e0231866.
+    https://www.geoboundaries.org  (gbOpen, IND ADM2_simplified)
+    Property set trimmed + coordinates rounded to 4 dp for size.
+    NOTE: attribution is surfaced in-app on the Analytics geographic-origin
+    widget (map credit line).
+
+Crop meshes (3D inference field)
+    Decided in 9.N.T31e: stylized plants are generated procedurally in
+    three.js with an ink/toon shader (no external mesh dependency). If CC0
+    Quaternius meshes (https://quaternius.com, CC0) are vendored instead,
+    list them here — CC0 needs no attribution but we credit anyway.

@@ -25,7 +25,11 @@
   const $cOther = document.getElementById('count-other');
   const $fEnv = document.getElementById('f-env');
   const $fStatus = document.getElementById('f-status');
+  const $fGroup = document.getElementById('f-group');
+  const $fSort = document.getElementById('f-sort');
   const $fSearch = document.getElementById('f-search');
+  const $cGroups = document.getElementById('count-groups');
+  const $keysCap = document.getElementById('keys-cap');
   const $pager = document.getElementById('pager');
   const $acct = document.getElementById('acct-label');
   const $sessionModal = document.getElementById('session-expired-modal');
@@ -35,6 +39,17 @@
   let allLoaded = [];
   let nextCursor = null;
   let isLoading = false;
+  // 9.S.1 · live list. Set when the user clicks "load 20 more" so the
+  // background poll doesn't yank them back to page 1 mid-scroll. A reset
+  // fetch (filter change / mint / mutation) clears it.
+  let userPaginated = false;
+  // Cheap fingerprint of the rendered set so a silent poll that returns
+  // identical data doesn't tear down and rebuild the card DOM (which would
+  // drop hover state / flash every 12s).
+  let lastSig = null;
+  const sigOf = (items) => items.map((k) =>
+    [k.public_id, k.status, k.request_count, k.group_name || '',
+     k.last_used_at || '', k.name].join('~')).join('|');
 
   // ── helpers ─────────────────────────────────────────────
   const fmtDate = (iso) => {
@@ -125,6 +140,11 @@
       (env === 'test'
         ? '    <span class="env-pill env-test">test</span>'
         : '    <span class="env-pill">live</span>') +
+      (key.group_name
+        ? '    <span class="group-pill" title="group: ' + esc(key.group_name) +
+          (key.group_role === 'special' ? ' (special)' : '') + '">' + esc(key.group_name) +
+          (key.group_role === 'special' ? ' · special' : '') + '</span>'
+        : '') +
       '    <span class="status-chip">' +
       '      <span class="status-dot" aria-hidden="true"></span>' +
       '      <span>' + esc(status) + '</span>' +
@@ -247,10 +267,11 @@
   }
 
   // ── fetch keys from API ─────────────────────────────────
-  async function fetchKeys({ reset = true } = {}) {
+  async function fetchKeys({ reset = true, silent = false } = {}) {
     if (isLoading) return;
     isLoading = true;
-    $cards.setAttribute('aria-busy', 'true');
+    if (reset) userPaginated = false;
+    if (!silent) $cards.setAttribute('aria-busy', 'true');
 
     const params = new URLSearchParams();
     params.set('env', $fEnv.value);
@@ -282,6 +303,10 @@
       if (reset) allLoaded = items;
       else allLoaded = allLoaded.concat(items);
       nextCursor = data.next_cursor;
+      // Silent poll that produced no change → skip the DOM rebuild entirely.
+      const sig = sigOf(allLoaded);
+      if (silent && sig === lastSig) return;
+      lastSig = sig;
       renderResults();
     } catch (err) {
       renderResultsError('Network error. Check your connection and try again.');
@@ -297,22 +322,71 @@
     updateRibbon([]);
   }
 
+  function applyGroupFilter(items) {
+    const gf = $fGroup ? $fGroup.value : 'all';
+    if (!gf || gf === 'all') return items;
+    if (gf === '__none__') return items.filter((k) => !k.group_name);
+    return items.filter((k) => k.group_name === gf);
+  }
+
+  // Client-side sort over the keys already loaded. The server returns newest
+  // first (id DESC), which matches the default 'recent' ordering — so we only
+  // reorder a slice when the user picks something else. Never mutate allLoaded
+  // (its cursor order is what pagination's `id < cursor` depends on).
+  function applySort(items) {
+    const mode = $fSort ? $fSort.value : 'recent';
+    const ts = (v) => { const t = v ? Date.parse(v) : NaN; return isNaN(t) ? null : t; };
+    const arr = items.slice();
+    switch (mode) {
+      case 'oldest':
+        arr.sort((a, b) => (ts(a.created_at) || 0) - (ts(b.created_at) || 0));
+        break;
+      case 'used':
+        // most-recently-used first; never-used (null) sink to the bottom.
+        arr.sort((a, b) => {
+          const ua = ts(a.last_used_at), ub = ts(b.last_used_at);
+          if (ua === null && ub === null) return 0;
+          if (ua === null) return 1;
+          if (ub === null) return -1;
+          return ub - ua;
+        });
+        break;
+      case 'requests':
+        arr.sort((a, b) => (b.request_count || 0) - (a.request_count || 0));
+        break;
+      case 'name':
+        arr.sort((a, b) => String(a.name || '').localeCompare(
+          String(b.name || ''), undefined, { sensitivity: 'base' }));
+        break;
+      case 'recent':
+      default:
+        arr.sort((a, b) => (ts(b.created_at) || 0) - (ts(a.created_at) || 0));
+        break;
+    }
+    return arr;
+  }
+
   function renderResults() {
     updateRibbon(allLoaded);
-    if (allLoaded.length === 0) {
+    const visible = applySort(applyGroupFilter(allLoaded));
+    if (visible.length === 0) {
       const filtersActive = ($fEnv.value !== 'all') ||
         ($fStatus.value !== 'all') ||
-        ($fSearch.value.trim() !== '');
+        ($fSearch.value.trim() !== '') ||
+        ($fGroup && $fGroup.value !== 'all');
       $cards.innerHTML = filtersActive ? renderEmptyFiltered() : renderEmpty();
+      if ($keysCap) $keysCap.hidden = true;
       const clr = document.getElementById('btn-clear-filters');
       if (clr) clr.addEventListener('click', () => {
         $fEnv.value = 'all'; $fStatus.value = 'all'; $fSearch.value = '';
+        if ($fGroup) $fGroup.value = 'all';
         fetchKeys({ reset: true });
       });
       $pager.hidden = true;
       return;
     }
-    $cards.innerHTML = allLoaded.map(renderCard).join('');
+    if ($keysCap) $keysCap.hidden = false;
+    $cards.innerHTML = visible.map(renderCard).join('');
     bindCardClicks();
     renderPager();
   }
@@ -329,6 +403,7 @@
       '  <button class="btn" id="btn-load-more">load 20 more</button>' +
       '</div>';
     document.getElementById('btn-load-more').addEventListener('click', () => {
+      userPaginated = true;   // pause the live poll so we don't snap back to p1
       fetchKeys({ reset: false });
     });
   }
@@ -379,11 +454,18 @@
   });
   $fEnv.addEventListener('change', () => fetchKeys({ reset: true }));
   $fStatus.addEventListener('change', () => fetchKeys({ reset: true }));
+  // Group filter is applied client-side over the loaded keys (no refetch).
+  if ($fGroup) $fGroup.addEventListener('change', () => renderResults());
+  // Sort is also a pure client-side re-render over loaded keys (no refetch).
+  if ($fSort) $fSort.addEventListener('change', () => renderResults());
 
   // ── keyboard shortcuts (§15.3 spec keymap) ─────────────
   document.addEventListener('keydown', (ev) => {
-    // Don't trigger when typing in an input
-    if (ev.target.matches('input, select, textarea')) return;
+    // Don't trigger when typing in an input, when a modal is open, or when the
+    // event target isn't an element (guard: ev.target may be document).
+    const t = ev.target;
+    if (t && typeof t.matches === 'function' && t.matches('input, select, textarea')) return;
+    if (document.querySelector('[class*="apm-root"], [class*="apm-backdrop"]')) return;
     if (ev.key === '/') {
       ev.preventDefault();
       $fSearch.focus();
@@ -1232,6 +1314,44 @@
     }
   }
 
+  // ── live list (9.S.1) ───────────────────────────────────
+  // The keys list refreshes itself silently every ~12s while the tab is
+  // visible, so a freshly-minted / rotated / deleted key surfaces without a
+  // manual reload — and without any visible "refresh" affordance. The poll
+  // is deliberately conservative: it stands down while a request is already
+  // in flight, while any modal is open (so it can't reshuffle cards under the
+  // user's cursor), and while the user has paginated past page 1.
+  const LIVE_POLL_MS = 12000;
+  let livePollTimer = null;
+
+  function anyModalOpen() {
+    // keys.js modals are <… id$="-modal"> toggled via [hidden]; APIN.modal
+    // (console_modal.js) mounts .apm-root / .apm-backdrop nodes.
+    if (document.querySelector('[id$="-modal"]:not([hidden])')) return true;
+    if (document.querySelector('[class*="apm-root"], [class*="apm-backdrop"]')) return true;
+    return false;
+  }
+
+  function liveTick() {
+    if (document.hidden) return;          // browser throttles hidden tabs anyway
+    if (isLoading) return;
+    if (userPaginated) return;            // don't collapse the user's page 2+
+    if (anyModalOpen()) return;           // never reshuffle under an open modal
+    fetchKeys({ reset: true, silent: true });
+  }
+
+  function startLivePoll() {
+    if (livePollTimer) return;
+    livePollTimer = setInterval(liveTick, LIVE_POLL_MS);
+  }
+
+  // Coming back to the tab after it was hidden: refetch immediately rather
+  // than waiting out the remainder of the interval.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) liveTick();
+  });
+
   // ── initial load ────────────────────────────────────────
   fetchKeys({ reset: true });
+  startLivePoll();
 })();

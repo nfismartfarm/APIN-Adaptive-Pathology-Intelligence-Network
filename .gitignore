@@ -29,11 +29,19 @@ __pycache__/
 *.npz
 *.onnx
 *.safetensors
+# 9.N.T31 · IP→city geo DB (DB-IP City Lite, CC-BY) — 124MB, downloaded at
+# build/setup like model weights, never committed.
+*.mmdb
 models/
 scripts/apin/caches/
 scripts/apin/results/
 scripts/apin/feedback/
 scripts/**/*.json
+# 9.N.T31 · but DO ship the Analytics boundary data (served at runtime by the
+# /static/{filename} route; lazy-loaded by the geographic-origin globe/map).
+!scripts/apin_v2/geo_world_countries.json
+!scripts/apin_v2/geo_world_states.json
+!scripts/apin_v2/geo_district_IN.json
 scripts/dinov2_probe/results/
 scripts/model3_training/checkpoints/
 
@@ -154,3 +162,9 @@ deploy/_sample_report.pdf
 # ── Stray scratch artifacts ──────────────────────────────────────────────
 pipeline_dump.html
 UsersxplodVideos*
+
+# ── Office docs / internal reports — never part of the runnable app ──────
+*.docx
+*.doc
+*.pptx
+*.xlsx

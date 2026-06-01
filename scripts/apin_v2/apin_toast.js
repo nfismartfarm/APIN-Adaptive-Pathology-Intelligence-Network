@@ -403,6 +403,23 @@
 
   // ── Polling ──────────────────────────────────────────────────────────
   async function bootCursor() {
+    // 9.S.4 · cross-navigation handoff. When a mutation on a *previous* page
+    // (e.g. deleting a key on the detail page, which then redirects here)
+    // produces an alert, the normal bootstrap below would set the cursor to
+    // the now-latest id and silently swallow that very alert. The producing
+    // page stashes the pre-mutation cursor in sessionStorage; if present we
+    // honour it as the low-watermark so the first poll delivers the alert as
+    // a real toast (real id, reconciles with read/dismiss).
+    var pending = null;
+    try { pending = sessionStorage.getItem("apin_pending_since"); } catch (_) {}
+    if (pending !== null && pending !== undefined && pending !== "") {
+      try { sessionStorage.removeItem("apin_pending_since"); } catch (_) {}
+      var since = parseInt(pending, 10);
+      if (!isNaN(since) && since >= 0) {
+        state.cursor = since;
+        return;   // skip the "assume history seen" reset below
+      }
+    }
     try {
       const r = await fetch("/api/account/alerts/unread-count?since=0", {
         credentials: "same-origin"
@@ -433,12 +450,13 @@
         if (state.bc) {
           state.bc.postMessage({ type: "cursor_advance", latest_id: latest });
         }
-        // Active tab only shows toasts. Background tabs just update cursor.
-        if (document.hasFocus()) {
-          newAlerts
-            .filter(function (a) { return !a.read_at && !a.dismissed_at; })
-            .forEach(showToast);
-        }
+        // We already returned early on document.hidden, so the tab is VISIBLE
+        // here — deliver the toasts. (Previously gated on document.hasFocus(),
+        // which dropped alerts whenever a poll fired while the tab was visible
+        // but not focused: the cursor advanced past them and they never popped.)
+        newAlerts
+          .filter(function (a) { return !a.read_at && !a.dismissed_at; })
+          .forEach(showToast);
       }
     } catch (_) { /* swallow */ }
   }
@@ -503,7 +521,21 @@
     showLocal: showLocal,
     markRead: markRead,
     cursor: function () { return state.cursor; },
+    // Producers can call this right after a mutation so the resulting alert
+    // pops immediately instead of waiting for the next 20s poll tick.
+    refresh: function () { try { poll(); } catch (e) {} },
+    // 9.S.4 · call right before navigating away after a mutation that emits
+    // an alert (e.g. delete-key → redirect to the list). Stashes the current
+    // cursor so the destination page's bootCursor delivers the alert instead
+    // of swallowing it. Safe no-op if sessionStorage is unavailable.
+    markPending: function (since) {
+      var v = (since === undefined || since === null) ? state.cursor : since;
+      try { sessionStorage.setItem("apin_pending_since", String(v)); }
+      catch (e) {}
+    },
   };
+  // Same, via a global event for modules that don't hold a reference.
+  window.addEventListener("apin:alerts:refresh", function () { try { poll(); } catch (e) {} });
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
