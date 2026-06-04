@@ -168,3 +168,7 @@ UsersxplodVideos*
 *.doc
 *.pptx
 *.xlsx
+
+# Internal — not shipped to the Space, not needed to clone-and-run
+deploy/migrate_localhost_data.py
+scripts/apin_v2/DEPLOYMENT.md

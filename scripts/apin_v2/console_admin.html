@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="admin-dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>APIN — Admin Console</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="csrf-token" content="__APIN_CSRF_TOKEN__">
+
+<!-- CRITICAL dark-first-byte paint (before console_admin.css loads). -->
+<style>
+  html,body{background:#08080a;color:#f3f3f5;margin:0}
+  body{font-family:'Geist','Inter',system-ui,sans-serif}
+  .adm-boot{position:fixed;inset:0;background:#08080a;z-index:9999;
+            animation:admBootFailsafe 0s 3.5s forwards}
+  @keyframes admBootFailsafe{to{opacity:0;visibility:hidden;pointer-events:none}}
+</style>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Geist (sans) + Geist Mono + Anton (display) — the developer-dashboard system. -->
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/console_admin.css?v=adm50">
+</head>
+<body>
+
+<!-- Icon sprite (server-injected · powers the reused request drawer's <use href="#i-…">) -->
+<!-- @ICON_SPRITE@ -->
+
+<!-- ── Boot / cinematic arrival overlay (R2) ─────────────────────────────── -->
+<!-- Continues the cream→black leaf-morph from the login page: lands on black,
+     reveals the ADMIN CONSOLE title + a personal welcome, then dissolves to let
+     the console assemble. Pure-CSS sequence driven by the .run class. -->
+<div class="adm-boot" id="adm-boot" role="status" aria-live="polite">
+  <div class="adm-boot-stage">
+    <div class="adm-boot-grid" aria-hidden="true"></div>
+    <div class="adm-boot-inner">
+      <div class="bk-kicker">
+        <span class="bk-leaf" aria-hidden="true">
+          <svg viewBox="0 0 120 120" width="18" height="18">
+            <path d="M60 8C30 35 28 80 60 112C92 80 90 35 60 8Z" fill="#0e1a12" stroke="#4ade80" stroke-width="3" stroke-linejoin="round"/>
+            <path d="M60 14V106" stroke="#4ade80" stroke-width="2.4" fill="none"/>
+          </svg>
+        </span>
+        <span>APIN · SECURE SESSION ELEVATED</span>
+      </div>
+      <h1 class="bk-title" aria-label="Admin Console">
+        <span class="bk-w" style="--i:0">ADMIN</span>
+        <span class="bk-w" style="--i:1">CONSOLE</span>
+      </h1>
+      <div class="bk-welcome">welcome back, <span id="adm-boot-name">administrator</span><span class="bk-caret"></span></div>
+      <div class="bk-bar" aria-hidden="true"><i></i></div>
+    </div>
+  </div>
+</div>
+
+<div class="adm-app" id="adm-app">
+
+  <!-- ── Top bar ──────────────────────────────────────────────────────────── -->
+  <header class="adm-topbar">
+    <div class="adm-brand">
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 120 120" width="15" height="15">
+          <path d="M60 8C30 35 28 80 60 112C92 80 90 35 60 8Z" fill="none" stroke="#4ade80" stroke-width="7" stroke-linejoin="round"/>
+          <path d="M60 16V104" stroke="#4ade80" stroke-width="5" fill="none"/>
+        </svg>
+      </div>
+      <div class="wordmark">APIN<small>/ADMIN</small></div>
+    </div>
+    <span class="title" id="adm-title">Overview</span>
+    <span class="spacer"></span>
+    <span class="adm-pulse" title="System status (live)"><span class="dot"></span> systems nominal</span>
+    <span class="adm-clock" id="adm-clock">—</span>
+    <button class="adm-cmd" id="adm-cmd" type="button" aria-label="Command palette">search <kbd>⌘K</kbd></button>
+    <div class="adm-id" title="Signed-in administrator">
+      <span class="who" id="adm-who">—<small>ADMIN</small></span>
+      <span class="av" id="adm-av">A</span>
+    </div>
+  </header>
+
+  <!-- ── Main canvas ──────────────────────────────────────────────────────── -->
+  <main class="adm-main" id="adm-main">
+
+    <!-- ░░ OVERVIEW ░░ -->
+    <section class="adm-section active" data-sec="pulse">
+      <div class="adm-section-head pl-head">
+        <div>
+          <h1>Overview</h1>
+          <p>Organisation-wide vital signs — live. Every metric follows the selected window; click any tile for the detailed breakdown.</p>
+        </div>
+        <div class="pl-winwrap">
+          <span class="pl-winlabel">window</span>
+          <div class="pl-seg" id="pl-window" role="tablist" aria-label="metric window">
+            <button type="button" data-w="24h" role="tab" aria-selected="false">24h</button>
+            <button type="button" data-w="7d" role="tab" aria-selected="false">7d</button>
+            <button type="button" data-w="30d" role="tab" aria-selected="false">30d</button>
+            <button type="button" data-w="all" role="tab" class="on" aria-selected="true">Lifetime</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="adm-bento adm-stagger">
+
+        <!-- terminal hero -->
+        <div class="adm-card col-4 pl-term-card">
+          <div class="k-label">// console</div>
+          <pre class="adm-term ascii" aria-hidden="true">  ▄▀█ █▀█ █ █▄░█
+  █▀█ █▀▀ █ █░▀█</pre>
+          <div class="adm-term" style="margin-top:14px">
+            <span class="pfx">admin@apin</span> ~ % whoami<br>
+            <span class="pfx">»</span> <span id="adm-hello">administrator</span> · the console is open<span class="cursor"></span>
+          </div>
+        </div>
+
+        <!-- requests hero (window-aware, clickable) -->
+        <div class="adm-card col-4 pl-tile" data-metric="requests" role="button" tabindex="0">
+          <div class="k-label">⏱ requests <span class="pl-winchip" id="pl-req-win">lifetime</span> <span class="pl-live">live</span><span class="pl-x" aria-hidden="true">↗</span></div>
+          <div class="k-hero" id="pl-requests" data-num="0">0</div>
+          <div class="k-sub" id="pl-requests-sub">org-wide · all keys</div>
+        </div>
+
+        <!-- error rate — window-aware gauge (clickable) -->
+        <div class="adm-card col-4 pl-error-card pl-tile" data-metric="error_rate" role="button" tabindex="0">
+          <div class="k-label">⊙ error rate <span class="pl-winchip" id="pl-error-win">lifetime</span><span class="pl-x" aria-hidden="true">↗</span></div>
+          <div class="pl-gauge-row">
+            <div class="adm-gauge"><div class="ring" id="pl-gauge"><div class="hole"><span class="g-val" id="pl-error">—</span></div></div></div>
+            <div class="pl-gauge-meta">
+              <div><b id="pl-error-errs">—</b><span>errors</span></div>
+              <div><b id="pl-error-reqs">—</b><span>requests</span></div>
+            </div>
+          </div>
+          <div class="k-sub" id="pl-error-sub">of requests in window</div>
+        </div>
+
+        <!-- KPI strip (all clickable + window-aware) -->
+        <div class="adm-card col-3 pl-tile" data-metric="users" role="button" tabindex="0">
+          <div class="k-label">▣ total users<span class="pl-x" aria-hidden="true">↗</span></div>
+          <div class="k-num" id="pl-users" data-num="0">0</div>
+          <div class="k-sub" id="pl-users-sub">—</div></div>
+        <div class="adm-card col-3 pl-tile" data-metric="keys" role="button" tabindex="0">
+          <div class="k-label">⚷ active keys <span class="pl-winchip" id="pl-keys-win">lifetime</span><span class="pl-x" aria-hidden="true">↗</span></div>
+          <div class="k-num" id="pl-keys" data-num="0">0</div>
+          <div class="k-sub" id="pl-keys-sub">of total minted</div></div>
+        <div class="adm-card col-3 pl-tile" data-metric="inferences" role="button" tabindex="0">
+          <div class="k-label">🜂 inferences <span class="pl-winchip" id="pl-inf-win">lifetime</span><span class="pl-x" aria-hidden="true">↗</span></div>
+          <div class="k-num" id="pl-inferences" data-num="0">0</div>
+          <div class="k-sub" id="pl-inf-sub">predictions served</div></div>
+        <div class="adm-card col-3 pl-active-card pl-tile" data-metric="active_users" role="button" tabindex="0">
+          <div class="k-label">◉ active users <span class="pl-winchip" id="pl-active-win">lifetime</span><span class="pl-x" aria-hidden="true">↗</span></div>
+          <div class="k-num" id="pl-active" data-num="0">0</div>
+          <div class="k-sub" id="pl-active-sub">unique callers in window</div></div>
+
+        <!-- signups area chart (window-aware, hoverable) -->
+        <div class="adm-card col-12 pl-tile pl-spark-card" data-metric="users" role="button" tabindex="0">
+          <div class="k-label">▤ signups <span class="pl-winchip" id="pl-signups-win">last 30 days</span>
+            <span class="pl-spark-tot" id="pl-signups-sub">—</span><span class="pl-x" aria-hidden="true">↗</span></div>
+          <div class="pl-spark-wrap">
+            <svg id="pl-signups" viewBox="0 0 600 80" preserveAspectRatio="none" style="width:100%;height:74px;margin-top:12px"></svg>
+            <div class="pl-spark-tip" id="pl-spark-tip" hidden></div>
+          </div>
+        </div>
+
+        <!-- ░░ LIVE ACTIVITY FEED (R5) ░░ -->
+        <div class="adm-card col-12 pl-feed-card">
+          <div class="pl-feed-head">
+            <div class="k-label">⊚ live activity <span class="pl-live" id="pl-feed-live">live</span></div>
+            <div class="pl-feed-filters" id="pl-feed-filters" role="tablist" aria-label="event category">
+              <button type="button" class="on" data-cat="all" aria-selected="true">all</button>
+              <button type="button" data-cat="identity" aria-selected="false"><i class="dot id"></i>identity &amp; access</button>
+              <button type="button" data-cat="keys" aria-selected="false"><i class="dot ky"></i>API keys</button>
+              <button type="button" data-cat="inference" aria-selected="false"><i class="dot inf"></i>inference</button>
+              <button type="button" data-cat="anomaly" aria-selected="false"><i class="dot an"></i>anomalies &amp; ops</button>
+            </div>
+          </div>
+          <div class="pl-feed" id="pl-feed" aria-live="polite"><div class="pl-feed-empty">listening for activity…</div></div>
+        </div>
+      </div>
+
+      <!-- hover-insight popover (shared, JS-positioned) -->
+      <div class="pl-pop" id="pl-pop" hidden></div>
+    </section>
+
+    <!-- Metric detail lightbox (clickable tiles) -->
+    <div class="pl-lb-back" id="pl-lb-back" hidden></div>
+    <div class="pl-lb" id="pl-lb" role="dialog" aria-modal="true" aria-label="Metric detail" hidden></div>
+
+    <!-- scaffold sections -->
+    <section class="adm-section" data-sec="users">
+      <div class="adm-section-head"><h1>Users</h1><p>Every account — search, sort, drill into a profile, and manage roles &amp; sessions. Promotions are sudo-gated and audited.</p></div>
+      <div class="adm-usummary" id="u-summary" hidden></div>
+      <div class="adm-utools">
+        <input class="adm-input" id="u-search" type="search" placeholder="search email, username, or name…" autocomplete="off" maxlength="80">
+        <select class="adm-select" id="u-sort" aria-label="sort users">
+          <option value="created|desc">newest first</option>
+          <option value="created|asc">oldest first</option>
+          <option value="last_seen|desc">recently seen</option>
+          <option value="requests|desc">most requests</option>
+          <option value="keys|desc">most keys</option>
+          <option value="email|asc">email A–Z</option>
+          <option value="role|asc">role</option>
+        </select>
+        <span class="count" id="u-count">—</span>
+      </div>
+      <div class="adm-utable" id="u-table">
+        <div class="thead">
+          <div>User</div><div>Role</div><div>Keys</div><div>Requests</div><div>Inferences</div><div>Guests</div><div>14-day</div><div title="live session in the last 45s">Active</div><div></div>
+        </div>
+        <div id="u-rows"></div>
+      </div>
+      <div class="adm-pager" id="u-pager"></div>
+    </section>
+    <section class="adm-section" data-sec="traffic">
+      <div class="adm-section-head pl-head">
+        <div><h1>Traffic</h1><p>Org-wide request &amp; website telemetry — API endpoints and the public site, live.</p></div>
+        <div class="pl-winwrap">
+          <span class="pl-winlabel">window</span>
+          <div class="pl-seg" id="trf-window" role="tablist" aria-label="traffic window">
+            <button type="button" data-w="24h" role="tab" aria-selected="false">24h</button>
+            <button type="button" data-w="7d" role="tab" aria-selected="false">7d</button>
+            <button type="button" data-w="30d" role="tab" aria-selected="false">30d</button>
+            <button type="button" data-w="all" role="tab" class="on" aria-selected="true">Lifetime</button>
+          </div>
+        </div>
+      </div>
+      <div class="trf-subnav" id="trf-subnav" role="tablist" aria-label="traffic sub-section">
+        <button type="button" class="trf-tab on" data-sub="api" role="tab" aria-selected="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg> API
+        </button>
+        <button type="button" class="trf-tab" data-sub="web" role="tab" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18"/></svg> Website
+        </button>
+        <span class="trf-tab-ink" id="trf-tab-ink"></span>
+        <span class="trf-live"><i id="trf-live-dot"></i>live</span>
+      </div>
+      <div class="trf-pane" id="trf-api" data-sub="api"></div>
+      <div class="trf-pane" id="trf-web" data-sub="web" hidden></div>
+    </section>
+    <section class="adm-section" data-sec="geo">
+      <div class="adm-section-head"><h1>Geography</h1><p>Where the product is actually used — real scan GPS coordinates, world → India district. API request IPs are private/local (see Traffic), so only genuine scan origins are plotted here.</p></div>
+      <div id="geo-body"></div>
+    </section>
+    <section class="adm-section" data-sec="inference">
+      <div class="adm-section-head"><h1>Inference Intelligence</h1><p>Disease / crop / severity / confidence distributions and a composite model-trust score. Phase C.</p></div>
+      <div class="adm-bento adm-stagger"><div class="adm-card col-6 adm-scaffold"><span class="adm-phase-pill">PHASE C</span><div class="k-label">disease distribution</div><div class="adm-skel block"></div></div><div class="adm-card col-6 adm-scaffold"><span class="adm-phase-pill">PHASE C</span><div class="k-label">confidence ladder</div><div class="adm-skel block"></div></div></div>
+    </section>
+    <section class="adm-section" data-sec="clients">
+      <div class="adm-section-head"><h1>Clients</h1><p>Runtime / user-agent breakdown and live arrivals. Reuses the clients engine org-wide. Phase C.</p></div>
+      <div class="adm-bento adm-stagger"><div class="adm-card col-12 adm-scaffold"><span class="adm-phase-pill">PHASE C</span><div class="k-label">client lanes</div><div class="adm-skel block"></div></div></div>
+    </section>
+    <section class="adm-section" data-sec="engagement">
+      <div class="adm-section-head"><h1>Engagement</h1><p>Console product analytics — clicks/page, seconds/page, scroll depth, the signup→first-call funnel. Phase E.</p></div>
+      <div class="adm-bento adm-stagger"><div class="adm-card col-12 adm-scaffold"><span class="adm-phase-pill">PHASE E</span><div class="k-label">per-page engagement</div><div class="adm-skel block"></div></div></div>
+    </section>
+    <section class="adm-section" data-sec="health">
+      <div class="adm-section-head"><h1>Health &amp; Uptime</h1><p>Uptime gauge, live heartbeat components, external-probe waterfall, the Four Golden Signals. Phase E.</p></div>
+      <div class="adm-bento adm-stagger"><div class="adm-card col-12 adm-scaffold"><span class="adm-phase-pill">PHASE E</span><div class="k-label">system health</div><div class="adm-skel block"></div></div></div>
+    </section>
+    <section class="adm-section" data-sec="audit">
+      <div class="adm-section-head"><h1>Audit &amp; Security</h1><p>Hash-chained key audit (chain-verify), account audit log, auth failures, and the admin action ledger. Phase E.</p></div>
+      <div class="adm-bento adm-stagger"><div class="adm-card col-12 adm-scaffold"><span class="adm-phase-pill">PHASE E</span><div class="k-label">audit ledger</div><div class="adm-skel block"></div></div></div>
+    </section>
+    <section class="adm-section" data-sec="database">
+      <div class="adm-section-head"><h1>Database</h1><p>A live mirror of the production schema — browse, search, sort, and inspect every table. Credentials are masked; values are read-only in this view.</p></div>
+      <div class="db-wrap">
+        <aside class="db-rail">
+          <div class="db-rail-head"><span class="k-label">tables</span><span class="db-rail-meta" id="db-rail-meta">—</span></div>
+          <div class="db-tablelist" id="db-tablelist"><div class="db-empty sm">loading…</div></div>
+        </aside>
+        <div class="db-main">
+          <div class="db-main-head">
+            <div class="db-tt">
+              <span class="db-tname" id="db-tname">database</span>
+              <span class="db-trows" id="db-trows">select a table to browse</span>
+            </div>
+            <input class="adm-input db-search" id="db-search" type="search" placeholder="search rows…" autocomplete="off" maxlength="120" disabled>
+          </div>
+          <div class="db-schema" id="db-schema"></div>
+          <div class="db-grid-wrap" id="db-grid-wrap"><div class="db-empty">Pick a table on the left to browse its rows.</div></div>
+          <div class="db-pager" id="db-pager"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── Floating DOCK nav ─────────────────────────────────────────────────── -->
+  <div class="adm-dock-wrap">
+    <nav class="adm-dock" aria-label="Admin sections">
+      <div class="adm-nav" role="button" tabindex="0" data-sec="pulse" aria-current="true"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg></span><span class="tip">Overview</span></div>
+      <div class="adm-nav" role="button" tabindex="0" data-sec="users"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 6.5a3 3 0 0 1 0 5.8M17 19a5 5 0 0 0-3-4.6"/></svg></span><span class="tip">Users</span></div>
+      <div class="sep"></div>
+      <div class="adm-nav" role="button" tabindex="0" data-sec="traffic"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></span><span class="tip">Traffic</span></div>
+      <div class="adm-nav" role="button" tabindex="0" data-sec="geo"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 2.5 15 0 18M12 3c-2.5 2.5-2.5 15 0 18"/></svg></span><span class="tip">Geography</span></div>
+      <div class="adm-nav" role="button" tabindex="0" data-sec="inference"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 21a6 6 0 0 0 6-6c0-4-6-9-6-9s-6 5-6 9a6 6 0 0 0 6 6Z"/></svg></span><span class="tip">Inference Intel</span></div>
+      <div class="adm-nav" role="button" tabindex="0" data-sec="clients"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6 3 12l5 6M16 6l5 6-5 6"/></svg></span><span class="tip">Clients</span></div>
+      <div class="sep"></div>
+      <div class="adm-nav" role="button" tabindex="0" data-sec="engagement"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 5-7"/></svg></span><span class="tip">Engagement</span></div>
+      <div class="adm-nav" role="button" tabindex="0" data-sec="health"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-5 3 11 2-6h7"/></svg></span><span class="tip">Health</span></div>
+      <div class="adm-nav" role="button" tabindex="0" data-sec="audit"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9.5 12l2 2 3.5-4"/></svg></span><span class="tip">Audit</span></div>
+      <div class="adm-nav" role="button" tabindex="0" data-sec="database"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span><span class="tip">Database</span></div>
+      <div class="sep"></div>
+      <a class="adm-nav" href="/account/api/dashboard"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 19l-7-7 7-7M3 12h13a5 5 0 0 1 5 5v2"/></svg></span><span class="tip">Exit to console</span></a>
+    </nav>
+  </div>
+
+</div>
+
+<!-- User drawer (Users section) -->
+<div class="adm-drawer-back" id="u-drawer-back"></div>
+<aside class="adm-drawer" id="u-drawer" aria-hidden="true" aria-label="User detail"></aside>
+
+<!-- Database row inspector -->
+<div class="adm-drawer-back" id="db-drawer-back"></div>
+<aside class="adm-drawer" id="db-drawer" aria-hidden="true" aria-label="Row detail"></aside>
+
+<!-- ══ DRILL: list container · detail drawer · dossier panel ══════════════ -->
+<!-- list container (right slide-over) — filtered items from a bar/breakdown click -->
+<div class="dl-back" id="dl-list-back" hidden></div>
+<aside class="dl-list" id="dl-list" role="dialog" aria-modal="true" aria-label="Items" hidden></aside>
+<!-- detail drawer (right slide-over) — request / key -->
+<div class="dl-back" id="dl-dw-back" hidden></div>
+<aside class="dl-dw" id="dl-dw" role="dialog" aria-modal="true" aria-label="Detail" hidden></aside>
+<!-- dossier panel (wide centered) — scan / user -->
+<div class="dl-back" id="dl-dossier-back" hidden></div>
+<div class="dl-dossier" id="dl-dossier" role="dialog" aria-modal="true" aria-label="Dossier" hidden></div>
+
+<!-- ══ Request drawer (P3) — the IDENTICAL console request drawer, dark-reskinned. ══
+     Shell + #reqd* DOM contract for the shared apin_request_drawer.js module. The
+     admin points the module at its own gated endpoint via setDetailUrl(); the dark
+     theme is a token remap scoped to #reqd in console_admin.css. -->
+<div class="drawer-mask" id="reqd-mask"></div>
+<aside class="drawer" id="reqd" aria-hidden="true" aria-label="Request detail">
+  <div class="drawer-head">
+    <div style="min-width:0">
+      <h3 id="reqd-title">Request detail</h3>
+      <div id="reqd-sub" style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--text-dim);margin-top:3px">·</div>
+    </div>
+    <button class="drawer-x" id="reqd-close" aria-label="close">×</button>
+  </div>
+  <div class="drawer-body" id="reqd-body"><div class="placeholder">loading…</div></div>
+</aside>
+
+<link rel="stylesheet" href="/static/apin_request_drawer.css?v=adm50">
+<script src="/static/apin_syntax.js?v=adm50"></script>
+<script src="/static/apin_lightbox.js?v=adm50"></script>
+<script src="/static/apin_request_drawer.js?v=adm50"></script>
+<script src="/static/pressed_leaf.js?v=adm50"></script>
+<script src="/static/console_modal.js?v=adm50"></script>
+<script src="/static/console_admin.js?v=adm50"></script>
+<script src="/static/three.min.js"></script>
+<script src="/static/console_admin_terrain.js?v=adm50"></script>
+<script src="/static/console_endpoint_galaxy.js?v=adm50"></script>
+<script src="/static/console_admin_globe.js?v=adm50"></script>
+<script src="/static/console_admin_geo.js?v=adm50"></script>
+<script src="/static/console_admin_deck.js?v=adm50"></script>
+<script src="/static/console_admin_traffic.js?v=adm50"></script>
+</body>
+</html>

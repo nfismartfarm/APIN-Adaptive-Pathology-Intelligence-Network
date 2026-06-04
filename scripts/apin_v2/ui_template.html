@@ -4034,6 +4034,37 @@
   .acct-menu button.amenu-signout{ color:var(--accent-terracotta); }
   .acct-menu button.amenu-signout svg{ color:var(--accent-terracotta); }
 
+  /* ── ADM-X · Phase F — admin-console entry (admins only) ── */
+  /* A privileged item: leaf-green ink + a hairline tinted backdrop so it reads
+     as distinct from the routine links, with a soft slide-in on reveal. */
+  .acct-menu a.amenu-admin{
+    color:var(--accent-leaf, #2d6a4f);
+    background:linear-gradient(90deg, color-mix(in srgb, var(--accent-leaf, #2d6a4f) 8%, transparent), transparent);
+    font-weight:600;
+    opacity:0; transform:translateY(-4px);
+    transition:opacity 240ms ease, transform 240ms ease, background 130ms;
+  }
+  .acct-menu a.amenu-admin.amenu-admin-in{ opacity:1; transform:none; }
+  .acct-menu a.amenu-admin svg{ color:var(--accent-leaf, #2d6a4f); }
+  .acct-menu a.amenu-admin:hover{ background:color-mix(in srgb, var(--accent-leaf, #2d6a4f) 14%, transparent); }
+  @media (prefers-reduced-motion: reduce){
+    .acct-menu a.amenu-admin{ transition:none; opacity:1; transform:none; }
+  }
+
+  /* Leaf-tinted bridge overlay: cream site → black admin console. */
+  #admin-morph{
+    position:fixed; inset:0; z-index:9998; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:14px;
+    background:#08080a; color:#cfe9d6; font-family:var(--mono, monospace);
+    letter-spacing:.12em; text-transform:uppercase; font-size:.72rem;
+    opacity:0; transition:opacity 520ms ease; pointer-events:none;
+  }
+  #admin-morph.on{ opacity:1; pointer-events:auto; }
+  #admin-morph .amx-leaf{ display:block; filter:drop-shadow(0 0 14px rgba(74,222,128,.45)); }
+  #admin-morph .amx-leaf path{ stroke-dasharray:240; stroke-dashoffset:240; animation:amxDraw 620ms ease forwards; }
+  @keyframes amxDraw{ to{ stroke-dashoffset:0; } }
+  @media (prefers-reduced-motion: reduce){ #admin-morph{ display:none; } }
+
   /* ── Auth modal backdrop ── */
   .auth-backdrop{
     position:fixed; inset:0; z-index:200;
@@ -4096,6 +4127,54 @@
     content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px;
     background:var(--accent-green); border-radius:2px 2px 0 0;
   }
+
+  /* ── Admin OTP (second factor) ── */
+  /* When OTP is showing we hide the tabs + guest zone so the card reads as a
+     single focused security step. .auth-card.otp-mode is toggled by JS. */
+  .auth-card.otp-mode #auth-tabs,
+  .auth-card.otp-mode #auth-guest-zone,
+  .auth-card.otp-mode #auth-exhausted{ display:none !important; }
+  .otp-lead{ display:flex; gap:11px; align-items:flex-start; margin-bottom:15px; }
+  .otp-shield{
+    flex:0 0 auto; width:40px; height:40px; border-radius:11px;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--accent-green); background:var(--accent-green-wash);
+    border:1px solid var(--rule);
+  }
+  .otp-msg{ font-size:0.82rem; line-height:1.5; color:var(--ink-body); margin:2px 0 0; }
+  .otp-msg strong{ color:var(--ink); font-weight:600; }
+  .otp-input{
+    font-family:'Geist Mono','SF Mono',ui-monospace,monospace !important;
+    font-size:1.5rem !important; letter-spacing:0.5em !important;
+    text-align:center; font-weight:600; padding:11px 0 11px 0.5em !important;
+    caret-color:var(--accent-green);
+  }
+  .otp-input::placeholder{ letter-spacing:0.5em; color:var(--ink-faint); opacity:0.5; }
+  .otp-remember{
+    display:flex; align-items:flex-start; gap:10px; cursor:pointer; user-select:none;
+    color:var(--ink-body); margin:0 0 16px; padding:11px 13px;
+    background:var(--paper-soft, #f4efe6); border:1px solid var(--rule);
+    border-radius:9px; transition:border-color 150ms, background 150ms;
+  }
+  .otp-remember:hover{ border-color:var(--accent-green); }
+  .otp-remember input{ width:16px; height:16px; margin-top:1px; accent-color:var(--accent-green); cursor:pointer; flex:none; }
+  .otp-rem-txt{ display:flex; flex-direction:column; gap:1px; }
+  .otp-rem-txt b{ font-size:0.8rem; font-weight:600; }
+  .otp-rem-txt small{ font-size:0.68rem; color:var(--ink-faint); }
+  .otp-foot{
+    display:flex; align-items:center; justify-content:center; gap:9px;
+    margin-top:13px; font-size:0.76rem;
+  }
+  .otp-foot-sep{ color:var(--ink-faint); }
+  .otp-link{
+    background:none; border:none; padding:0; cursor:pointer;
+    color:var(--accent-green); font-size:0.76rem; font-weight:500;
+    font-family:'Inter',sans-serif;
+  }
+  .otp-link:hover{ text-decoration:underline; }
+  .otp-link:disabled{ color:var(--ink-faint); cursor:default; text-decoration:none; }
+  #otp-hint.ok{ color:var(--accent-green); }
+  #otp-hint.warn{ color:var(--accent-terracotta); }
 
   /* ── Forms ── */
   .auth-form{ display:none; }
@@ -11319,6 +11398,42 @@ document.addEventListener('DOMContentLoaded', () => {
       <button type="submit" class="auth-submit" id="signup-submit">Create account</button>
     </form>
 
+    <!-- ── ADMIN OTP (second factor) ── -->
+    <form class="auth-form" id="auth-form-otp" novalidate>
+      <div class="auth-error" id="otp-error" hidden></div>
+      <div class="otp-lead">
+        <div class="otp-shield" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none"
+               stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3l7 3v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6l7-3z"></path>
+            <path d="M9 12l2 2 4-4"></path>
+          </svg>
+        </div>
+        <p class="otp-msg">For your security, enter the 6-digit code we emailed to
+          <strong id="otp-email">your email</strong>.</p>
+      </div>
+      <!-- Remember sits ABOVE the code field so it's decided before the
+           6-digit auto-submit fires (otherwise it always sent remember=false). -->
+      <label class="otp-remember" for="otp-remember">
+        <input type="checkbox" id="otp-remember">
+        <span class="otp-rem-txt"><b>Remember this device for 7 days</b>
+          <small>skip the email code next time on this browser</small></span>
+      </label>
+      <div class="auth-field">
+        <label for="otp-code">Verification code</label>
+        <input id="otp-code" class="otp-input" type="text" inputmode="numeric"
+               autocomplete="one-time-code" maxlength="6" pattern="[0-9]*"
+               placeholder="••••••" spellcheck="false" required>
+        <div class="auth-hint" id="otp-hint"></div>
+      </div>
+      <button type="submit" class="auth-submit" id="otp-submit">Verify &amp; enter console</button>
+      <div class="otp-foot">
+        <button type="button" class="otp-link" id="otp-resend">Resend code</button>
+        <span class="otp-foot-sep">·</span>
+        <button type="button" class="otp-link" id="otp-cancel">Use a different account</button>
+      </div>
+    </form>
+
     <!-- ── GUEST ── -->
     <div class="auth-guest-zone" id="auth-guest-zone">
       <div class="auth-divider"><span>or</span></div>
@@ -11365,6 +11480,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // align with the GRID/GEAR/OUT icons in this menu (rather than the 1.5
   // sprite version). Same shape as the canonical i-key in the sprite.
   const ICON_KEY='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m10.85 12.15 7.65-7.65"/><path d="m18 5 2 2"/><path d="m15 8 2 2"/></svg>';
+  // ADM-X · Phase F — admin-console shield, only revealed for administrators.
+  // Matches the stroke-width=2 family of the other menu icons.
+  const ICON_SHIELD='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>';
 
   /* ── Account chip ─────────────────────────────────────────────────── */
   function renderAccount(){
@@ -11384,6 +11502,11 @@ document.addEventListener('DOMContentLoaded', () => {
         + '<div class="amh-sub">@'+esc(u.username)+'</div></div>'
         + '<a href="/dashboard" role="menuitem">'+ICON_GRID+' My Dashboard</a>'
         + '<a href="/account/api/dashboard" role="menuitem">'+ICON_KEY+' API keys</a>'
+        // ADM-X · Phase F — admin-console entry, sits directly ABOVE Settings.
+        // Hidden by default; revealed only after /whoami confirms admin-ness so
+        // a non-admin never even sees the link (defence-in-depth: the route is
+        // independently gated server-side too).
+        + '<a href="/account/api/admin" class="amenu-item amenu-admin" id="acct-admin" role="menuitem" hidden>'+ICON_SHIELD+' Admin console</a>'
         + '<a href="/dashboard/settings" role="menuitem">'+ICON_GEAR+' Settings</a>'
         + '<div class="amenu-sep"></div>'
         + '<button class="amenu-item amenu-signout" id="acct-signout" role="menuitem">'+ICON_OUT+' Sign out</button>'
@@ -11399,6 +11522,9 @@ document.addEventListener('DOMContentLoaded', () => {
         chip.setAttribute('aria-expanded','false');
       });
       $a('acct-signout').addEventListener('click', doSignout);
+      // Admin-gate the console link (only the admin sees it). One light call;
+      // the result is cached on AUTH so re-renders within the session skip it.
+      revealAdminEntry();
     } else if (AUTH.mode === 'guest' && AUTH.guest){
       const rem = AUTH.guest.remaining;
       area.innerHTML =
@@ -11412,6 +11538,55 @@ document.addEventListener('DOMContentLoaded', () => {
       area.innerHTML = '<button class="acct-signin" id="acct-signin-btn" type="button">Sign in / Create account &rarr;</button>';
       $a('acct-signin-btn').addEventListener('click', () => openModal('login', false));
     }
+  }
+
+  // ADM-X · Phase F — reveal the admin-console menu item only for admins.
+  // Caches the verdict on AUTH._isAdmin so repeated renders make at most ONE
+  // network call per page-load. On click, bridges the cream inference site into
+  // the black admin console with a brief leaf-tinted fade (reduced-motion safe).
+  let _adminProbe = null;
+  async function revealAdminEntry(){
+    const link = $a('acct-admin');
+    if (!link) return;
+    function wire(){
+      link.hidden = false;
+      requestAnimationFrame(() => link.classList.add('amenu-admin-in'));
+      if (!link._wired){
+        link._wired = true;
+        link.addEventListener('click', adminMorphNav);
+      }
+    }
+    if (AUTH._isAdmin === true){ wire(); return; }
+    if (AUTH._isAdmin === false) return;
+    try {
+      if (!_adminProbe){
+        _adminProbe = fetch('/api/account/admin/whoami', {credentials:'same-origin'})
+          .then(r => r.ok ? r.json() : null).catch(() => null);
+      }
+      const env = await _adminProbe;
+      const d = env && (env.data || env);
+      AUTH._isAdmin = !!(d && d.is_admin);
+      if (AUTH._isAdmin) wire();
+    } catch(_){ /* never block the chip on this */ }
+  }
+
+  function adminMorphNav(e){
+    const href = '/account/api/admin';
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) return;                       // let the plain <a> navigate
+    e.preventDefault();
+    let ov = document.getElementById('admin-morph');
+    if (!ov){
+      ov = document.createElement('div');
+      ov.id = 'admin-morph';
+      ov.innerHTML = '<span class="amx-leaf"><svg viewBox="0 0 120 120" width="40" height="40">'
+        + '<path d="M60 8C30 35 28 80 60 112C92 80 90 35 60 8Z" fill="none" stroke="#4ade80" stroke-width="6" stroke-linejoin="round"/>'
+        + '<path d="M60 16V104" stroke="#4ade80" stroke-width="4" fill="none"/></svg></span>'
+        + '<span class="amx-label">opening admin console…</span>';
+      document.body.appendChild(ov);
+    }
+    requestAnimationFrame(() => ov.classList.add('on'));
+    setTimeout(() => { window.location.href = href; }, 560);
   }
 
   async function refreshAuth(){
@@ -11463,6 +11638,8 @@ document.addEventListener('DOMContentLoaded', () => {
     clearErrors();
   }
   function switchTab(tab){
+    // Leaving the OTP step (e.g. user clicked a tab) clears the focused mode.
+    exitOtpMode();
     document.querySelectorAll('.auth-tab').forEach(t => {
       const on = t.dataset.tab === tab;
       t.classList.toggle('active', on);
@@ -11472,8 +11649,13 @@ document.addEventListener('DOMContentLoaded', () => {
     $a('auth-form-signup').classList.toggle('active', tab === 'signup');
     clearErrors();
   }
+  function exitOtpMode(){
+    const card = document.querySelector('.auth-card');
+    if (card) card.classList.remove('otp-mode');
+    const f = $a('auth-form-otp'); if (f) f.classList.remove('active');
+  }
   function clearErrors(){
-    ['login-error','signup-error'].forEach(id => {
+    ['login-error','signup-error','otp-error'].forEach(id => {
       const e = $a(id); if (e){ e.hidden = true; e.textContent = ''; }
     });
   }
@@ -11499,6 +11681,59 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* ── After successful auth: close, refresh, resume held upload ─────── */
+  /* ── Admin leaf-flip morph ─────────────────────────────────────────────
+     When an admin signs in, the cream field-journal aesthetic flips — a
+     pressed leaf rotates upside-down to reveal its dark, neon-veined
+     underside while the page progressively darkens — then we navigate to the
+     dark admin console. Reduced-motion → quick fade. Failsafe-navigates if
+     anything errors so an admin can never get stuck on the overlay. */
+  function playAdminLeafMorph(done){
+    var reduced = false;
+    try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e){}
+    var finished = false;
+    function finish(){ if (finished) return; finished = true; try { done(); } catch(e){ window.location.href = '/account/api/admin'; } }
+    var hardStop = setTimeout(finish, 2600);
+
+    if (!document.getElementById('apin-morph-style')){
+      var st = document.createElement('style'); st.id = 'apin-morph-style';
+      st.textContent =
+        '@keyframes apinMorphBg{0%{background:#fbf9f3}50%{background:#2c2a22}100%{background:#08080a}}'
+      + '@keyframes apinMorphFade{to{opacity:1}}'
+      + '.apin-morph{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;background:#fbf9f3;overflow:hidden;animation:apinMorphBg 1.45s cubic-bezier(.7,0,.2,1) forwards}'
+      + '.apin-morph .grid{position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.05) 1px,transparent 1.3px);background-size:26px 26px;opacity:0;animation:apinMorphFade 1.4s ease .3s forwards}'
+      + '.apin-morph .lw{perspective:1400px;width:200px;height:200px}'
+      + '.apin-morph .l3{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform 1.35s cubic-bezier(.66,0,.2,1)}'
+      + '.apin-morph .l3.flip{transform:rotateX(180deg)}'
+      + '.apin-morph .lf{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;display:grid;place-items:center}'
+      + '.apin-morph .lb{transform:rotateX(180deg)}'
+      + '.apin-morph .lb svg{filter:drop-shadow(0 0 14px rgba(74,222,128,.45))}'
+      + '.apin-morph .cap{position:absolute;bottom:17%;left:0;right:0;text-align:center;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;letter-spacing:.22em;color:#9b9ba4;opacity:0;animation:apinMorphFade 1.2s ease .55s forwards}'
+      + '@media (prefers-reduced-motion: reduce){.apin-morph{animation-duration:.25s}.apin-morph .l3{transition:none}}';
+      document.head.appendChild(st);
+    }
+    var FRONT =
+      '<svg viewBox="0 0 120 120" width="192" height="192" aria-hidden="true">'
+      + '<path d="M60 8C30 35 28 80 60 112C92 80 90 35 60 8Z" fill="#dbe8d0" stroke="#2f6f3e" stroke-width="2.6" stroke-linejoin="round"/>'
+      + '<path d="M60 14V106" stroke="#2f6f3e" stroke-width="2" fill="none"/>'
+      + '<path d="M60 38 36 30M60 38 84 30M60 60 32 54M60 60 88 54M60 82 40 80M60 82 80 80" stroke="#2f6f3e" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>';
+    var BACK =
+      '<svg viewBox="0 0 120 120" width="192" height="192" aria-hidden="true">'
+      + '<path d="M60 8C30 35 28 80 60 112C92 80 90 35 60 8Z" fill="#0e1a12" stroke="#4ade80" stroke-width="2.6" stroke-linejoin="round"/>'
+      + '<path d="M60 14V106" stroke="#4ade80" stroke-width="2" fill="none"/>'
+      + '<path d="M60 38 36 30M60 38 84 30M60 60 32 54M60 60 88 54M60 82 40 80M60 82 80 80" stroke="#4ade80" stroke-width="1.6" fill="none" stroke-linecap="round" opacity="0.9"/></svg>';
+    var ov = document.createElement('div'); ov.className = 'apin-morph';
+    ov.innerHTML = '<div class="grid"></div><div class="lw"><div class="l3" id="apin-leaf">'
+      + '<div class="lf">' + FRONT + '</div><div class="lf lb">' + BACK + '</div></div></div>'
+      + '<div class="cap">elevating · admin console</div>';
+    ov.addEventListener('click', function(){ clearTimeout(hardStop); finish(); });
+    document.body.appendChild(ov);
+    if (reduced){ setTimeout(function(){ clearTimeout(hardStop); finish(); }, 280); return; }
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){
+      var l = document.getElementById('apin-leaf'); if (l) l.classList.add('flip');
+    }); });
+    setTimeout(function(){ clearTimeout(hardStop); finish(); }, 1720);
+  }
+
   async function onAuthSuccess(){
     await refreshAuth();
     const f = pendingFile;
@@ -11528,12 +11763,123 @@ document.addEventListener('DOMContentLoaded', () => {
         showError('login', typeof d.detail==='string' ? d.detail : 'Sign-in failed. Check your credentials.');
         return;
       }
+      // Admins must clear a SECOND factor (email OTP) before the console, unless
+      // this is a remembered/trusted device. Everyone else continues normally.
+      let __isAdmin = false, __email = '';
+      try {
+        const wr = await fetch('/api/account/admin/whoami', { credentials:'same-origin', headers:{'Accept':'application/json'} });
+        if (wr.ok){ const wj = await wr.json(); if (wj && wj.data && wj.data.is_admin === true){ __isAdmin = true; __email = (wj.data.email)||''; } }
+      } catch(_){}
+      if (__isAdmin){
+        await beginAdminOtp(__email);   // requests a code; trusted device skips to console
+        return;
+      }
       await onAuthSuccess();
     } catch(err){
       showError('login','Network error — please try again.');
     } finally {
       btn.classList.remove('loading'); btn.disabled = false;
     }
+  });
+
+  /* ── Admin OTP (second factor) ────────────────────────────────────── */
+  function goAdminConsole(){
+    try { sessionStorage.setItem('apin_admin_arrival','1'); } catch(_){}
+    playAdminLeafMorph(function(){ window.location.href = '/account/api/admin'; });
+  }
+  function otpErr(msg){
+    const e = $a('otp-error'); if (e){ e.textContent = msg; e.hidden = false; }
+  }
+  function showOtpPanel(maskedEmail, d){
+    clearErrors();
+    $a('otp-email').textContent = maskedEmail || 'your email';
+    const hint = $a('otp-hint'); hint.className = 'auth-hint'; hint.textContent = '';
+    if (d && d.status === 'rate_limited'){
+      hint.className = 'auth-hint warn';
+      hint.textContent = 'Too many code requests — please wait a few minutes, then Resend.';
+    } else if (d && (d.status === 'email_failed' || d.status === 'code_ready_no_email')){
+      hint.className = 'auth-hint warn';
+      hint.textContent = "We couldn't send the email just now. Check the server log, or use Resend.";
+    }
+    // Enter the focused single-step OTP view
+    $a('auth-form-login').classList.remove('active');
+    $a('auth-form-signup').classList.remove('active');
+    const card = document.querySelector('.auth-card');
+    if (card) card.classList.add('otp-mode');
+    $a('auth-form-otp').classList.add('active');
+    $a('auth-title').textContent = 'Verify it’s you';
+    $a('auth-sub').textContent = 'Admin access needs a second factor. This keeps the console safe even if a password is ever leaked.';
+    const code = $a('otp-code'); code.value = '';
+    setTimeout(() => code.focus(), 80);
+  }
+  async function beginAdminOtp(adminEmail){
+    try {
+      const r = await fetch('/auth/admin/request-code', {
+        method:'POST', credentials:'same-origin', headers:{'Accept':'application/json'} });
+      const d = await r.json().catch(()=>({}));
+      if (r.ok && d.status === 'verified'){ goAdminConsole(); return; }  // trusted device
+      if (r.status === 429){ showOtpPanel(adminEmail, { status:'rate_limited' }); return; }
+      if (!r.ok){ showOtpPanel(adminEmail, { status:'email_failed' }); return; }
+      showOtpPanel(d.email_masked || adminEmail, d);
+    } catch(e){
+      showOtpPanel(adminEmail, { status:'email_failed' });
+    }
+  }
+  // digits-only + auto-submit when 6 entered
+  $a('otp-code').addEventListener('input', e => {
+    const v = e.target.value.replace(/\D/g, '').slice(0, 6);
+    e.target.value = v;
+    if (v.length === 6) $a('auth-form-otp').requestSubmit();
+  });
+  $a('auth-form-otp').addEventListener('submit', async e => {
+    e.preventDefault();
+    $a('otp-error').hidden = true;
+    const code = ($a('otp-code').value || '').replace(/\D/g, '').slice(0, 6);
+    const remember = $a('otp-remember').checked;
+    if (code.length !== 6){ otpErr('Enter the 6-digit code.'); return; }
+    const btn = $a('otp-submit'); btn.classList.add('loading'); btn.disabled = true;
+    try {
+      const r = await fetch('/auth/admin/verify', {
+        method:'POST', credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ code, remember }) });
+      const d = await r.json().catch(()=>({}));
+      if (!r.ok){
+        otpErr(typeof d.detail === 'string' ? d.detail : 'Verification failed.');
+        const c = $a('otp-code'); c.value = ''; c.focus();
+        return;
+      }
+      goAdminConsole();
+    } catch(err){ otpErr('Network error — please try again.'); }
+    finally { btn.classList.remove('loading'); btn.disabled = false; }
+  });
+  $a('otp-resend').addEventListener('click', async () => {
+    const link = $a('otp-resend'); link.disabled = true;
+    const hint = $a('otp-hint');
+    try {
+      const r = await fetch('/auth/admin/request-code', {
+        method:'POST', credentials:'same-origin', headers:{'Accept':'application/json'} });
+      const d = await r.json().catch(()=>({}));
+      if (r.ok && d.status === 'verified'){ goAdminConsole(); return; }
+      hint.className = 'auth-hint ok';
+      hint.textContent = (d.status === 'code_sent')
+        ? 'A fresh code is on its way.'
+        : "Code regenerated (email unavailable — check the server log).";
+    } catch(e){
+      hint.className = 'auth-hint warn'; hint.textContent = 'Could not resend — try again.';
+    } finally {
+      // brief cooldown so it can't be hammered
+      setTimeout(() => { link.disabled = false; }, 4000);
+    }
+  });
+  $a('otp-cancel').addEventListener('click', async () => {
+    // "Use a different account" — drop the half-authenticated session and reset.
+    try { await fetch('/auth/logout', { method:'POST', credentials:'same-origin' }); } catch(_){}
+    exitOtpMode();
+    $a('auth-title').textContent = 'Open your field notebook';
+    switchTab('login');
+    $a('login-handle').value = ''; $a('login-password').value = '';
+    $a('login-handle').focus();
   });
 
   /* ── Signup — live password checklist ─────────────────────────────── */
@@ -11697,7 +12043,26 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   /* ── Boot ─────────────────────────────────────────────────────────── */
-  refreshAuth();
+  refreshAuth().then(async () => {
+    // Un-elevated admin bounced back from the console (/?admin_verify=1):
+    // re-open the modal straight into the email-OTP second factor.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('admin_verify') !== '1') return;
+      // strip the flag so a refresh doesn't re-trigger the prompt
+      params.delete('admin_verify');
+      const qs = params.toString();
+      history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+      if (!AUTH || AUTH.mode !== 'user') return;
+      // confirm admin before showing the second factor
+      const wr = await fetch('/api/account/admin/whoami', { credentials:'same-origin', headers:{'Accept':'application/json'} });
+      if (!wr.ok) return;
+      const wj = await wr.json();
+      if (!(wj && wj.data && wj.data.is_admin === true)) return;
+      openModal('login', false);
+      beginAdminOtp((AUTH.user && AUTH.user.email) || '');
+    } catch(_){}
+  });
 })();
 </script>
 

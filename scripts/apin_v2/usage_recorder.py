@@ -363,7 +363,14 @@ import threading as _threading
 class _AccountStreamBus:
     """Per-user pub-sub for usage events. Subscribers receive every new
     request_log row published for keys belonging to their user_id.
+
+    A reserved BROADCAST channel (uid 0 — real user_ids start at 1) receives
+    EVERY published event regardless of owner. The admin Traffic SSE subscribes
+    here to get an org-wide live feed with no extra DB work: publish() already
+    fires once per recorded request, so it just fans each one out to uid 0 too.
     """
+    BROADCAST = 0
+
     def __init__(self):
         # Map: user_id (int) -> set of asyncio.Queue
         self._subs: dict[int, set] = {}
@@ -385,9 +392,16 @@ class _AccountStreamBus:
 
     def publish(self, user_id: int, event: dict) -> None:
         """Synchronous publish — callable from any thread / from the
-        usage_recorder buffer flush. Best-effort: never raises."""
+        usage_recorder buffer flush. Best-effort: never raises.
+
+        Fans the event to the owner's subscribers AND to the BROADCAST channel
+        (admin org-wide feed). The publisher's uid is never the sentinel, so no
+        double-delivery."""
+        uid = int(user_id)
         with self._lock:
-            subs = list(self._subs.get(int(user_id), ()))
+            subs = list(self._subs.get(uid, ()))
+            if uid != self.BROADCAST:
+                subs += list(self._subs.get(self.BROADCAST, ()))
         for q in subs:
             try:
                 q.put_nowait(event)

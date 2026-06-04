@@ -13,6 +13,15 @@
 (function () {
   'use strict';
 
+  // ── detail endpoint (configurable) ──────────────────────────────────────
+  // Default: the per-user Usage endpoint. The admin console points this at its
+  // own gated org-wide endpoint via APIN.requestDrawer.setDetailUrl(fn) so the
+  // SAME drawer renders for any request, with IDENTICAL content. Backward
+  // compatible — every existing console page keeps the default with no change.
+  var _detailUrl = function (rid) {
+    return '/api/account/usage/request/' + encodeURIComponent(rid);
+  };
+
   // ── utilities (verbatim from console_usage.js) ──────────────────────────
   function $(id) { return document.getElementById(id); }
   function escHtml(s) {
@@ -57,7 +66,14 @@
     return '';
   }
   async function api(url) {
-    const r = await fetch(url, { credentials: 'include' });
+    // Attach the console CSRF header when a token meta is present. Harmless on
+    // pages whose GET endpoints don't require it (the value is simply ignored);
+    // REQUIRED by the admin drill endpoints, which gate every route with
+    // require_csrf (X-Console-Csrf). Lets the SAME drawer call either backend.
+    const headers = {};
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta && meta.content) headers['X-Console-Csrf'] = meta.content;
+    const r = await fetch(url, { credentials: 'include', headers });
     if (r.status === 401) { window.location.href = '/dashboard'; throw new Error('401'); }
     const body = await r.json().catch(() => ({}));
     return { status: r.status, body };
@@ -120,7 +136,7 @@
       // No cache hit — fall through to server lookup (may still 404)
     }
 
-    const { body } = await api('/api/account/usage/request/' + encodeURIComponent(rid));
+    const { body } = await api(_detailUrl(rid));
     if (!body || !body.ok) {
       $('reqd-body').innerHTML = '<div class="placeholder">failed to load request detail</div>';
       $('reqd-sub').textContent = '';
@@ -1208,5 +1224,14 @@
 
   // ── public surface ──────────────────────────────────────────────────────
   window.APIN = window.APIN || {};
-  window.APIN.requestDrawer = { open: openRequestDetail, close: closeReqd, openReqd: openReqd };
+  window.APIN.requestDrawer = {
+    open: openRequestDetail, close: closeReqd, openReqd: openReqd,
+    // Admin override: point the drawer at a different detail endpoint.
+    // fn(rid) -> url string. Pass nothing/null to restore the default.
+    setDetailUrl: function (fn) {
+      _detailUrl = (typeof fn === 'function')
+        ? fn
+        : function (rid) { return '/api/account/usage/request/' + encodeURIComponent(rid); };
+    },
+  };
 })();

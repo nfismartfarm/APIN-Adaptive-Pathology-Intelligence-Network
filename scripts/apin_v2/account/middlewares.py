@@ -521,6 +521,20 @@ _SUDO_EXEMPT_ALERT_ROUTES = (
     ("DELETE", re.compile(r"^/api/account/alerts/[^/]+/?$")),         # dismiss
 )
 
+# Admin *maintenance* jobs that are idempotent and non-destructive — they only
+# FILL IN attribution on telemetry rows (NULL→user), never grant access, delete
+# data, or change a user-facing state. They remain gated by require_admin_verified
+# (OTP-elevated admin) + CSRF; sudo step-up is overkill for an attribution sweep.
+# Same fail-SAFE explicit (method, exact-regex) shape as the alert allowlist —
+# nothing under /maintenance is exempt unless deliberately listed here.
+_SUDO_EXEMPT_ADMIN_ROUTES = (
+    ("POST", re.compile(r"^/api/account/admin/maintenance/backfill-telemetry/?$")),
+    # [STATS DECK F2] Deck card order + pins are a cosmetic per-admin UI preference —
+    # no access grant, no data change. Still gated by require_admin_verified + CSRF;
+    # a password step-up just to reorder cards is hostile UX.
+    ("POST", re.compile(r"^/api/account/admin/traffic/deck-layout/?$")),
+)
+
 
 def _is_sudo_exempt(path: str, method: str) -> bool:
     """Return True if this request bypasses sudo enforcement.
@@ -535,6 +549,9 @@ def _is_sudo_exempt(path: str, method: str) -> bool:
         if path == prefix or path.startswith(prefix + "/"):
             return True
     for m, rx in _SUDO_EXEMPT_ALERT_ROUTES:
+        if method == m and rx.match(path):
+            return True
+    for m, rx in _SUDO_EXEMPT_ADMIN_ROUTES:
         if method == m and rx.match(path):
             return True
     return False

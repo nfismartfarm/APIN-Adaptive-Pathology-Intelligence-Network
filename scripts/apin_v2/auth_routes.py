@@ -329,6 +329,132 @@ async def login(payload: LoginPayload, request: Request, response: Response):
     }
 
 
+# ─── Admin email-OTP MFA (R1) ─────────────────────────────────────────────────
+# These live under /auth/* (NOT /api/account/*) so they sit OUTSIDE the
+# sudo/CSRF console middleware — an admin must be able to reach them BEFORE
+# being elevated (chicken-and-egg). Auth is the session cookie + an is_admin
+# check; the OTP code itself is the second factor.
+
+class AdminVerifyPayload(BaseModel):
+    code: str = Field(..., min_length=4, max_length=8)
+    remember: bool = False
+
+
+def _mask_email(e: str) -> str:
+    if not e or "@" not in e:
+        return "your email"
+    name, dom = e.split("@", 1)
+    masked = (name[0] + "•••") if len(name) > 1 else "•"
+    return masked + "@" + dom
+
+
+def _set_device_cookie(response: Response, token: str, *, request: Request):
+    """7-day HttpOnly trusted-device cookie. Same SameSite/Secure logic as the
+    session cookie so it works locally AND inside the HF Space iframe."""
+    from scripts.apin_v2.account import admin_auth as _aa
+    host = request.url.hostname or ""
+    is_local = host in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+    response.set_cookie(
+        key=_aa.DEVICE_COOKIE_NAME, value=token,
+        max_age=_aa.TRUSTED_DEVICE_TTL_S,
+        httponly=True, samesite=("lax" if is_local else "none"),
+        secure=(not is_local), path="/",
+    )
+
+
+def _resolve_admin_session(request: Request):
+    """(user, session_id) if the cookie is a valid session for an admin, else
+    raises HTTPException. Used only by the OTP endpoints."""
+    from scripts.apin_v2.account.admin_guard import is_admin as _isadm
+    raw = request.cookies.get(COOKIE_NAME)
+    sess = auth_db.lookup_session_by_token(raw) if raw else None
+    if not sess:
+        raise HTTPException(status_code=401, detail="Please sign in first.")
+    user = auth_db.get_user_by_id(int(sess["user_id"]))
+    if not user or not _isadm(user):
+        raise HTTPException(status_code=403, detail="Not authorized.")
+    return user, sess["session_id"]
+
+
+@router.post("/admin/request-code")
+async def admin_request_code(request: Request):
+    """Step 1 of admin MFA. If this is a trusted device → auto-elevate. Else
+    mint + email a 6-digit code (rate-limited)."""
+    from scripts.apin_v2.account import admin_auth as _aa, admin_email as _ae
+    user, session_id = _resolve_admin_session(request)
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent", "")
+
+    dev = request.cookies.get(_aa.DEVICE_COOKIE_NAME)
+    if dev and _aa.check_trusted_device(user_id=user["id"], raw_token=dev):
+        _aa.mark_session_admin_verified(session_id)
+        auth_db.audit("admin.elevation_via_device", user_id=user["id"], ip_addr=ip)
+        return {"status": "verified"}
+
+    if _aa.request_rate_limited(user["id"]):
+        raise HTTPException(status_code=429,
+                            detail="Too many code requests — wait a few minutes.")
+    code, exp = _aa.create_admin_otp(user_id=user["id"], session_id=session_id, ip=ip, ua=ua)
+    import os as _os
+    # Delivery recipient: defaults to the admin's own account email, but can be
+    # overridden with APIN_ADMIN_OTP_TO (gitignored .env) while a Resend sending
+    # domain isn't yet verified — Resend test mode only delivers to the account
+    # owner's address. The code still gates THIS admin's session; routing it to a
+    # deliverable inbox the same operator controls is a delivery detail, not a
+    # change to who can elevate.
+    recipient = (_os.environ.get("APIN_ADMIN_OTP_TO") or "").strip() or user["email"]
+    # Local-dev bridge: when APIN_ADMIN_OTP_DEV_ECHO=1 (set ONLY in the gitignored
+    # local .env — never in prod), echo the code to the server log. NEVER returned
+    # in the HTTP body in any environment that doesn't set the flag (i.e. prod).
+    _dev_echo = _os.environ.get("APIN_ADMIN_OTP_DEV_ECHO") == "1"
+    if _dev_echo:
+        logger.warning("[DEV OTP] admin code for %s (sent to %s) = %s (expires %s)",
+                       user["email"], recipient, code, exp)
+    import secrets as _secrets
+    _ref = _secrets.token_hex(2).upper()   # unique per-send → no Gmail threading
+    ok, _reason = _ae.send_admin_otp(
+        to_email=recipient, code=code, expires_minutes=10,
+        ip=ip, device=(ua[:60] if ua else None), when="just now", ref=_ref)
+    resp = {"email_masked": _mask_email(recipient)}
+    # Dev bridge (gitignored local flag only): expose the code so the flow is
+    # usable / testable before a Resend sending-domain is verified. Stripped
+    # entirely in any environment that doesn't set the flag (i.e. production).
+    if _dev_echo:
+        resp["dev_code"] = code
+    if not ok:
+        # Email failed, but the code is valid. In dev we can still proceed via
+        # the echoed code; in prod this surfaces as a delivery problem.
+        resp["status"] = "code_ready_no_email" if _dev_echo else "email_failed"
+        return resp
+    resp["status"] = "code_sent"
+    resp["expires_at"] = exp
+    return resp
+
+
+@router.post("/admin/verify")
+async def admin_verify(payload: AdminVerifyPayload, request: Request, response: Response):
+    """Step 2 of admin MFA. Verify the code; on success elevate the session and
+    (if remember) trust this device for 7 days."""
+    from scripts.apin_v2.account import admin_auth as _aa
+    user, session_id = _resolve_admin_session(request)
+    ip = request.client.host if request.client else None
+    ok, reason = _aa.verify_admin_otp(
+        user_id=user["id"], session_id=session_id, code=payload.code, ip=ip)
+    if not ok:
+        msg = {
+            "bad_code": "That code is incorrect.",
+            "expired": "That code expired — request a new one.",
+            "too_many_attempts": "Too many attempts — request a new code.",
+            "no_code": "No active code — request a new one.",
+        }.get(reason, "Verification failed.")
+        raise HTTPException(status_code=400, detail=msg)
+    if payload.remember:
+        token = _aa.create_trusted_device(
+            user_id=user["id"], ip=ip, ua=request.headers.get("user-agent", ""))
+        _set_device_cookie(response, token, request=request)
+    return {"ok": True}
+
+
 @router.post("/logout")
 async def logout(request: Request, response: Response):
     token = request.cookies.get(COOKIE_NAME)

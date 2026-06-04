@@ -2486,9 +2486,16 @@ def _migrate_stage7_alter_api_keys(c) -> None:
 
 
 def _migrate_stage7_alter_sessions(c) -> None:
-    """§6.11 — ADD csrf_token to sessions, backfill existing rows."""
+    """§6.11 — ADD csrf_token to sessions, backfill existing rows.
+
+    Admin-MFA (R1): `admin_verified_at` marks when this session last passed the
+    email-OTP elevation. NULL = not elevated. The admin gate requires a value
+    within the elevation window (or a valid trusted device). Additive + nullable
+    so existing sessions are simply 'not yet elevated' — no lockout, no backfill.
+    """
     _add_columns(c, "sessions", [
         ("csrf_token", "TEXT"),
+        ("admin_verified_at", "TEXT"),
     ])
     # Backfill: every session without a csrf_token gets a fresh 64-hex.
     # randomblob(32)|hex() = 64 lowercase hex chars = 256 bits entropy.
@@ -2675,6 +2682,58 @@ def _enforce_fk_or_fail(fk_works: bool) -> None:
     )
 
 
+def _migrate_admin_otp(c) -> None:
+    """Admin-MFA (R1) tables — email-OTP codes + trusted devices.
+
+    admin_otp:     one row per emailed code. The raw code is NEVER stored —
+                   only its salted hash. Single-use (consumed_at), short TTL
+                   (expires_at), attempt-capped (attempts). Bound to the
+                   originating session + ip for replay resistance.
+    admin_trusted_devices:
+                   a device the admin chose to 'remember for 7 days'. We store
+                   only the hash of a random device token (the raw token lives
+                   in an HttpOnly cookie). A valid, non-expired row lets that
+                   device skip the OTP. Revocable (revoked_at) + auditable.
+    Both FK to users with ON DELETE CASCADE so account deletion cleans them up.
+    """
+    c.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS admin_otp (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            session_id   TEXT,
+            code_hash    TEXT NOT NULL,
+            purpose      TEXT NOT NULL DEFAULT 'admin_login',
+            created_at   TEXT NOT NULL,
+            expires_at   TEXT NOT NULL,
+            consumed_at  TEXT,
+            attempts     INTEGER NOT NULL DEFAULT 0,
+            ip           TEXT,
+            user_agent   TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS ix_admin_otp_user
+            ON admin_otp(user_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS admin_trusted_devices (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            token_hash   TEXT NOT NULL UNIQUE,
+            label        TEXT,
+            created_at   TEXT NOT NULL,
+            expires_at   TEXT NOT NULL,
+            last_used_at TEXT,
+            revoked_at   TEXT,
+            ip           TEXT,
+            user_agent   TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS ix_admin_trusted_user
+            ON admin_trusted_devices(user_id, expires_at);
+        """
+    )
+
+
 def _migrate_stage7_extensions(c) -> None:
     """Phase-1 schema landing — call after _migrate_v2_extensions.
 
@@ -2690,6 +2749,9 @@ def _migrate_stage7_extensions(c) -> None:
     _migrate_stage7_alter_sessions(c)
     # 3. CREATE the 8 new tables / 11 indexes / 2 triggers.
     c.executescript(STAGE7_SCHEMA_SQL)
+    # 3.5 Admin-MFA (R1): email-OTP + trusted-device tables. Additive +
+    #     idempotent (CREATE TABLE IF NOT EXISTS) — safe on every boot.
+    _migrate_admin_otp(c)
     # 4. Backfill account_settings for any pre-existing users that predate
     #    the trigger. INSERT OR IGNORE keeps it idempotent.
     c.execute(
@@ -4616,7 +4678,7 @@ def lookup_session_by_token(raw_token: str) -> Optional[dict]:
     now = _now_iso()
     with get_conn() as c:
         row = c.execute(
-            """SELECT id, user_id, csrf_token, expires_at
+            """SELECT id, user_id, csrf_token, expires_at, admin_verified_at
                FROM sessions
                WHERE token_hash = ?
                  AND revoked_at IS NULL
@@ -4632,6 +4694,7 @@ def lookup_session_by_token(raw_token: str) -> Optional[dict]:
             "user_id":    d["user_id"],
             "csrf_token": d.get("csrf_token"),
             "expires_at": d.get("expires_at"),
+            "admin_verified_at": d.get("admin_verified_at"),
         }
 
 
@@ -12167,6 +12230,14 @@ def upsert_browser_session(session_id: str, fields: dict) -> bool:
                     "error_count", "api_call_count", "exit_url",
                     "user_id", "user_pseudoid",
                     "current_route",   # Stage 6 · live-now per-route
+                    # [ADM-T W0.1] backfill server-parsed UA onto existing
+                    # sessions on their next heartbeat (the raw UA + parse are
+                    # re-injected server-side on every ingest, so this is an
+                    # idempotent fill of the previously-NULL browser/os columns).
+                    "user_agent_raw", "user_agent_family", "device_type",
+                    "device_os", "device_os_version",
+                    "device_browser", "device_browser_version", "device_model",
+                    "connection_type", "network_effective_type",
                 )
                 for k in dyn_fields:
                     if k in fields:
@@ -12359,6 +12430,101 @@ def ingest_telemetry_batch(batch: dict) -> dict:
         import logging as _l
         _l.getLogger("apin_v2.auth").exception("ingest_telemetry_batch failed")
     return counts
+
+
+# ─── One-time backfill · attribute historical anonymous telemetry ────────────
+
+_BACKFILL_CHILD_TABLES = (
+    "page_views", "clicks", "impressions", "events",
+    "api_calls", "inference_telemetry", "errors",
+)
+
+
+def backfill_telemetry_attribution(reset: bool = False) -> dict:
+    """Attribute historical anonymous telemetry to users — **conservatively**.
+
+    The ONLY signal used is **guest→user conversion**, which is definite: a
+    ``browser_session`` whose ``guest_session_id`` converted to a user
+    (``guest_sessions.converted_to_user_id``) provably belongs to that user.
+    The session's attribution propagates to its child rows.
+
+    An earlier draft also tried an *IP-hash bridge* (attribute a NULL session
+    to the lone user seen on its ``client_ip_hash``). That is **unsafe** and
+    was removed: shared egress IPs are the norm (localhost dev, offices,
+    schools, mobile carriers, a single dev machine running two test accounts),
+    so one hash routinely covers many distinct people and the bridge
+    cross-attributes their sessions to whoever was seeded first. Conversion is
+    the only sound retro-active link; everything else is handled going-forward
+    by the ingest endpoint stamping the authenticated user_id at write time.
+
+    Idempotent: only writes rows whose ``user_id IS NULL`` (unless ``reset``).
+
+    ``reset=True`` first NULLs user_id across browser_sessions + child rows,
+    then re-attributes via conversion only — used once to scrub a bad earlier
+    attribution back to a clean, defensible state. (Going-forward attribution
+    re-accrues naturally as users browse.)
+
+    Returns per-table counts newly attributed + ``sessions_attributed``.
+    """
+    out = {"sessions_attributed": 0, "reset": bool(reset)}
+    for t in _BACKFILL_CHILD_TABLES:
+        out[t] = 0
+
+    def _nulls(c, table):
+        try:
+            r = c.execute("SELECT COUNT(*) n FROM %s WHERE user_id IS NULL" % table).fetchone()
+            return int(dict(r)["n"]) if r else 0
+        except Exception:
+            return 0
+
+    try:
+        with _write_lock, get_conn() as c:
+            if reset:
+                for t in ("browser_sessions",) + _BACKFILL_CHILD_TABLES:
+                    try:
+                        c.execute("UPDATE %s SET user_id = NULL WHERE user_id IS NOT NULL" % t)
+                    except Exception:
+                        pass
+
+            sess_nulls_before = _nulls(c, "browser_sessions")
+            child_before = {t: _nulls(c, t) for t in _BACKFILL_CHILD_TABLES}
+
+            # guest conversion → browser_sessions.user_id (definite, only signal)
+            c.execute(
+                "UPDATE browser_sessions SET user_id = ("
+                "  SELECT g.converted_to_user_id FROM guest_sessions g "
+                "  WHERE g.id = browser_sessions.guest_session_id) "
+                "WHERE user_id IS NULL AND guest_session_id IS NOT NULL "
+                "AND guest_session_id IN ("
+                "  SELECT id FROM guest_sessions WHERE converted_to_user_id IS NOT NULL)")
+            out["sessions_attributed"] = max(0, sess_nulls_before - _nulls(c, "browser_sessions"))
+
+            # propagate attributed sessions → child rows, + direct conversion
+            # path for child rows whose guest_session converted.
+            for t in _BACKFILL_CHILD_TABLES:
+                c.execute(
+                    "UPDATE %s SET user_id = ("
+                    "  SELECT bs.user_id FROM browser_sessions bs "
+                    "  WHERE bs.id = %s.browser_session_id) "
+                    "WHERE user_id IS NULL AND browser_session_id IN ("
+                    "  SELECT id FROM browser_sessions WHERE user_id IS NOT NULL)"
+                    % (t, t))
+                try:
+                    c.execute(
+                        "UPDATE %s SET user_id = ("
+                        "  SELECT g.converted_to_user_id FROM guest_sessions g "
+                        "  WHERE g.id = %s.guest_session_id) "
+                        "WHERE user_id IS NULL AND guest_session_id IS NOT NULL "
+                        "AND guest_session_id IN ("
+                        "  SELECT id FROM guest_sessions WHERE converted_to_user_id IS NOT NULL)"
+                        % (t, t))
+                except Exception:
+                    pass
+                out[t] = max(0, child_before[t] - _nulls(c, t))
+    except Exception:
+        import logging as _l
+        _l.getLogger("apin_v2.auth").exception("backfill_telemetry_attribution failed")
+    return out
 
 
 # ─── Conversion tracking · guest → registered user ───────────────────────────

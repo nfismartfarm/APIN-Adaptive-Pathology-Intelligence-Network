@@ -458,6 +458,77 @@ def _client_geo_from_headers(headers) -> dict:
     return out
 
 
+def _parse_user_agent(ua: str) -> dict:
+    """Dependency-free User-Agent → device fields. [ADM-T W0.1]
+
+    device_browser / device_os were NULL across every browser_sessions row
+    because the raw UA was never persisted and never parsed. The UA header is
+    present on every request — this turns it into browser / OS / device-type /
+    model without pulling in a parsing dependency. Covers the mainstream
+    engines; unknowns degrade to None (callers only write truthy fields).
+    """
+    import re as _re
+    u = ua or ""
+    ul = u.lower()
+    out: dict = {}
+    # ── device type ──
+    is_tablet = any(t in ul for t in ("ipad", "tablet", "playbook", "kindle", "silk"))
+    is_mobile = (not is_tablet) and any(t in ul for t in (
+        "mobi", "iphone", "ipod", "windows phone", "blackberry")) \
+        or ("android" in ul and "mobile" in ul)
+    out["device_type"] = "tablet" if is_tablet else ("mobile" if is_mobile else "desktop")
+    # ── OS ──
+    os_name = os_ver = None
+    if "windows nt 10" in ul:   os_name, os_ver = "Windows", "10/11"
+    elif "windows nt 6.3" in ul: os_name, os_ver = "Windows", "8.1"
+    elif "windows nt 6.1" in ul: os_name, os_ver = "Windows", "7"
+    elif "windows" in ul:        os_name = "Windows"
+    elif "iphone" in ul or "ipad" in ul or "ipod" in ul:
+        os_name = "iOS"
+        m = _re.search(r"os (\d+[_.]\d+)", ul); os_ver = (m.group(1).replace("_", ".") if m else None)
+    elif "mac os x" in ul:
+        os_name = "macOS"
+        m = _re.search(r"mac os x (\d+[_.]\d+)", ul); os_ver = (m.group(1).replace("_", ".") if m else None)
+    elif "android" in ul:
+        os_name = "Android"
+        m = _re.search(r"android (\d+(?:\.\d+)?)", ul); os_ver = (m.group(1) if m else None)
+    elif "cros" in ul:  os_name = "ChromeOS"
+    elif "linux" in ul: os_name = "Linux"
+    if os_name: out["device_os"] = os_name
+    if os_ver:  out["device_os_version"] = os_ver
+
+    def _v(pat):
+        m = _re.search(pat, u); return m.group(1) if m else None
+
+    # ── browser (order matters: derivatives before their base engine) ──
+    br = bver = None
+    if "edg/" in ul or "edga/" in ul or "edgios/" in ul:
+        br, bver = "Edge", _v(r"Edg(?:A|iOS)?/(\d[\d.]*)")
+    elif "opr/" in ul or "opera" in ul:
+        br, bver = "Opera", _v(r"OPR/(\d[\d.]*)")
+    elif "samsungbrowser" in ul:
+        br, bver = "Samsung Internet", _v(r"SamsungBrowser/(\d[\d.]*)")
+    elif "firefox/" in ul or "fxios" in ul:
+        br, bver = "Firefox", _v(r"(?:Firefox|FxiOS)/(\d[\d.]*)")
+    elif "chrome/" in ul or "crios" in ul:
+        br, bver = "Chrome", _v(r"(?:Chrome|CriOS)/(\d[\d.]*)")
+    elif "safari/" in ul and "version/" in ul:
+        br, bver = "Safari", _v(r"Version/(\d[\d.]*)")
+    elif "curl" in ul or "wget" in ul or "python" in ul or "httpie" in ul or "postman" in ul:
+        br = "API client"
+    if br:   out["device_browser"] = br
+    if bver: out["device_browser_version"] = bver
+    out["user_agent_family"] = br or "Other"
+
+    # ── model (best-effort) ──
+    if "iphone" in ul:   out["device_model"] = "iPhone"
+    elif "ipad" in ul:   out["device_model"] = "iPad"
+    else:
+        m = _re.search(r";\s*([A-Za-z0-9 _\-]+?)\s+build/", u, _re.I)
+        if m: out["device_model"] = m.group(1).strip()[:40]
+    return {k: v for k, v in out.items() if v}
+
+
 # 9.N.T33b · Image persistence for the Living Agricultural Observatory.
 # The user asked us to persist uploaded leaf photos for future scans so the
 # Prediction Inspector can show the real image (relaxing the older
@@ -6159,6 +6230,18 @@ def _add_account_console_routes(app):
         len(_ra.router.routes),
     )
 
+    # Admin console (Phase A) — admin-only surface under /api/account/admin/*.
+    # Inherits the full console middleware stack (session + sudo + CSRF) like
+    # every other /api/account router; individual handlers add require_admin.
+    # whoami is the one un-gated route (any signed-in user may read their own
+    # admin status). Metrics / users / DB-mirror routes arrive in later phases.
+    from scripts.apin_v2.account import routes_admin as _radm
+    app.include_router(_radm.router)
+    logger.info(
+        "API Console admin router mounted (Phase A): %d admin routes.",
+        len(_radm.router.routes),
+    )
+
     # Phase 6.B.1 + B.2: Console settings + quickstart HTML pages.
     # Settings page needs CSRF substitution (same pattern as keys.html);
     # quickstart is read-only static content, no CSRF token needed.
@@ -6380,6 +6463,81 @@ def _add_account_console_routes(app):
         "Content-Security-Policy": _ACCOUNT_PAGE_CSP,
     }
 
+    # ── Admin console page (Phase A) ──────────────────────────────────────
+    # DARK, self-chromed page. Deliberately NOT run through _inject_console_chrome
+    # (it injects the light paper-ink nav) — the admin console ships its own
+    # nav rail + top bar. Read raw (no splash injection) so it paints dark on
+    # the first byte. CSRF placeholder is substituted per-request by
+    # _serve_csrf_page; the page gets the same hardened _ACCOUNT_PAGE_HEADERS.
+    #
+    # ACCESS: the REAL boundary is this server-side check. Non-admins are
+    # redirected (NOT shown a 404 body) so the admin surface never discloses
+    # its existence or capabilities:
+    #   • no/invalid session  → 302 "/"                         (go sign in)
+    #   • signed-in non-admin → 302 "/account/api/dashboard"    (normal home)
+    #   • signed-in admin     → the dark console
+    # The page's own JS re-confirms via /api/account/admin/whoami as
+    # defense-in-depth, but never relaxes this gate.
+    import os as _os_admin
+    _admin_html_path = _os_admin.path.join(
+        _os_admin.path.dirname(_os_admin.path.abspath(__file__)),
+        "console_admin.html",
+    )
+    try:
+        with open(_admin_html_path, "rb") as _afh:
+            _console_admin_body_bytes = _afh.read()
+        # P3 · the admin page reuses the shared request drawer, whose section
+        # headers reference the icon sprite via <use href="#i-…">. Inject the
+        # same 62-symbol sprite the other Console pages get (nav is NOT injected
+        # — the admin page has its own bespoke rail).
+        _console_admin_body_bytes = _inject_icon_sprite(_console_admin_body_bytes)
+    except OSError as _admin_html_err:
+        # Boot-safety: a missing/unreadable admin template must NOT crash the
+        # whole server (a partial deploy shouldn't take down inference). Degrade
+        # the admin route to a benign placeholder instead.
+        logger.error("console_admin.html unreadable (%s); admin page degraded.",
+                     _admin_html_err)
+        _console_admin_body_bytes = (
+            b"<!doctype html><meta charset=utf-8>"
+            b"<title>APIN Admin</title>"
+            b"<body style='background:#0a0a0b;color:#ececee;font-family:monospace;"
+            b"padding:40px'>Admin console asset missing on this deploy.</body>"
+        )
+
+    @app.get("/account/api/admin", response_class=HTMLResponse)
+    async def account_admin_page(request: Request):
+        from fastapi.responses import RedirectResponse as _RR
+        from scripts.apin_v2.account._session_helpers import (
+            get_session_user as _gsu, SESSION_COOKIE_NAME as _SCN,
+        )
+        from scripts.apin_v2.account.admin_guard import is_admin as _isadm
+        from scripts.apin_v2.account import admin_auth as _aa
+        from scripts.apin_v2 import auth_db as _adb2
+        from scripts.apin_v2.api_envelope import ApiError as _AE
+        try:
+            _user = _gsu(request)
+        except _AE:
+            return _RR("/", status_code=302)          # not signed in
+        except Exception:                              # noqa: BLE001
+            return _RR("/", status_code=302)
+        if not _isadm(_user):
+            return _RR("/account/api/dashboard", status_code=302)  # not admin
+        # Elevation gate (R1): must have passed email-OTP (or be a trusted
+        # device). A logged-in but un-elevated admin is bounced to the app to
+        # run the email-OTP flow, which returns here on success.
+        _raw = request.cookies.get(_SCN)
+        _sess = _adb2.lookup_session_by_token(_raw) if _raw else None
+        _ok = bool(_sess and _aa.elevation_ok(_sess.get("admin_verified_at")))
+        if not _ok:
+            _dev = request.cookies.get(_aa.DEVICE_COOKIE_NAME)
+            if _dev and _aa.check_trusted_device(user_id=_user["id"], raw_token=_dev):
+                if _sess:
+                    _aa.mark_session_admin_verified(_sess["session_id"])
+                _ok = True
+        if not _ok:
+            return _RR("/?admin_verify=1", status_code=302)
+        return _serve_csrf_page(request, _console_admin_body_bytes)
+
     # FX-H: cache keys.html bytes at startup. Same pattern the inference
     # site uses for reports.html / loupe.html / etc. Reads disk once per
     # process boot rather than per request.
@@ -6481,6 +6639,14 @@ def _add_account_console_routes(app):
         "console_modal.js",                 # 9.O.2 · in-page modal (key actions)
         "apin_console_base.css",            # 9.P.2 · shared scrollbar/checkbox/input/button
         "console_key_groups.js",            # 9.Q.4 · API key groups UI (keys page)
+        "console_admin.css",                # Phase A · admin console dark design system
+        "console_admin.js",                 # Phase A · admin console shell controller
+        "console_admin_traffic.js",         # ADM-T · Traffic section (API + Website)
+        "console_admin_terrain.js",         # ADM-T · Traffic Terrain WebGL 3D hero
+        "console_endpoint_galaxy.js",       # ADM-T · Endpoint Galaxy (reused on admin)
+        "console_admin_globe.js",           # ADM-T · Living Globe (Geography)
+        "console_admin_geo.js",             # ADM-T · Geography section controller
+        "console_admin_deck.js",            # ADM-T · Stats Deck (3D carousel of 18 artifacts)
         "geo_world_countries.json",   # Natural Earth admin-0 (public domain)
         "geo_world_states.json",      # Natural Earth admin-1 (public domain)
         "geo_district_IN.json",       # geoBoundaries IND ADM2 (CC-BY)
@@ -7778,8 +7944,56 @@ def _add_stats_and_telemetry_routes(app):
                     if k in geo and not sess.get(k.replace("client_", "ip_")):
                         # browser_sessions column is `ip_country` etc.
                         sess[k.replace("client_", "ip_")] = geo[k]
+                # ── [ADM-T W0.1] capture + parse the User-Agent server-side ──
+                # device_browser / device_os were NULL because the UA was never
+                # stored. The header is right here on every ingest — persist the
+                # raw UA and the parsed browser/os/device-type/model, only
+                # filling fields the client didn't already supply.
+                try:
+                    _ua = (request.headers.get("user-agent") or "").strip()
+                    if _ua:
+                        if not sess.get("user_agent_raw"):
+                            sess["user_agent_raw"] = _ua[:512]
+                        for _col, _val in _parse_user_agent(_ua).items():
+                            if not sess.get(_col):
+                                sess[_col] = _val
+                except Exception:
+                    logger.debug("UA parse skipped", exc_info=True)
         except Exception:
             pass
+
+        # ── Server-authoritative user attribution ─────────────────────────
+        # The client beacon only knows page_route, so every telemetry row
+        # arrives with user_id=null and lands as anonymous. Resolve the
+        # AUTHENTICATED user from the session cookie here (read-only, expiry +
+        # revocation validated by get_session_user) and stamp it onto the
+        # session + every child row. This is authoritative: we never trust a
+        # client-supplied user_id (stamping the resolved value — None when
+        # anonymous — also strips any spoofed id on child rows). We only
+        # POSITIVELY attribute the session row, never erase an existing
+        # attribution if a later logged-out flush arrives on the same browser
+        # session. Wrapped so a malformed/expired cookie can never 500 ingest.
+        try:
+            _raw_tok = request.cookies.get("apin_v2_session")
+            _auth_uid = None
+            if _raw_tok:
+                _u = _auth_db.get_session_user(_raw_tok)
+                if _u:
+                    _auth_uid = _u.get("id")
+            if _auth_uid is not None:
+                _so = body.get("session")
+                if isinstance(_so, dict):
+                    _so["user_id"] = _auth_uid
+            for _k in ("page_views", "clicks", "impressions", "events",
+                       "api_calls", "inference_telemetry", "errors",
+                       "goals", "experiments_exposures"):
+                _rows = body.get(_k)
+                if isinstance(_rows, list):
+                    for _r in _rows:
+                        if isinstance(_r, dict):
+                            _r["user_id"] = _auth_uid
+        except Exception:
+            logger.debug("telemetry user attribution skipped", exc_info=True)
 
         try:
             counts = _auth_db.ingest_telemetry_batch(body)

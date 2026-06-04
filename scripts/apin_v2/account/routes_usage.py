@@ -422,7 +422,15 @@ async def usage_request_detail(request: Request, request_id: int):
     if row is None:
         raise ApiError("not_found",
                         f"Request log entry {request_id} not found.")
+    return build_request_detail_payload(user_id, row)
 
+
+def build_request_detail_payload(user_id: int, row: dict) -> dict:
+    """Assemble the FULL request-detail payload (UA inference, redacted curl +
+    snippets, endpoint baselines, burst context, endpoint health, decoded
+    payload + stage timings) from an already-fetched, owner-scoped request-log
+    row. Extracted from ``usage_request_detail`` so the admin console can render
+    the IDENTICAL drawer for ANY request (it resolves the owner first)."""
     # Infer client origin from UA + Referer
     ua = (row.get("ua") or "").lower()
     inferred = {"category": "unknown", "label": "Unknown client",

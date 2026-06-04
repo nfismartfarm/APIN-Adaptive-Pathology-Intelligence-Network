@@ -1430,9 +1430,32 @@
         return;
       }
       showBanner(signinBanner, 'Welcome back, ' + (j.user.display_name || 'collector') + '. Redirecting…', 'success');
-      setTimeout(() => {
-        window.location.href = window.__APIN_NEXT_URL__ || j.redirect || '/';
-      }, 600);
+      // Phase A — admin routing. If an explicit ?next= override is present we
+      // always honour it. Otherwise we ask whoami whether this account is an
+      // administrator: admins go to the dark admin console (with a one-time
+      // arrival flag so it plays its handshake morph); everyone else follows
+      // the normal redirect exactly as before. Any error falls back to normal.
+      const explicitNext = window.__APIN_NEXT_URL__;
+      if (explicitNext) {
+        setTimeout(() => { window.location.href = explicitNext; }, 600);
+      } else {
+        let adminUrl = null;
+        try {
+          const wr = await fetch('/api/account/admin/whoami', {
+            credentials: 'same-origin', headers: { 'Accept': 'application/json' },
+          });
+          if (wr.ok) {
+            const wj = await wr.json();
+            if (wj && wj.data && wj.data.is_admin === true) adminUrl = '/account/api/admin';
+          }
+        } catch (_) { /* fall through to the normal redirect */ }
+        if (adminUrl) {
+          try { sessionStorage.setItem('apin_admin_arrival', '1'); } catch (_) {}
+          setTimeout(() => { window.location.href = adminUrl; }, 500);
+        } else {
+          setTimeout(() => { window.location.href = j.redirect || '/'; }, 600);
+        }
+      }
     } catch(err){
       showBanner(signinBanner, 'Network error — please check your connection and try again.', 'error');
       setLoading(signinSubmitBtn, false);

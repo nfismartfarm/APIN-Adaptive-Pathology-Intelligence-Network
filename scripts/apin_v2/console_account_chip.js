@@ -146,6 +146,91 @@
     if (ext) ext.addEventListener("click", extendSession);
     var so = $("acd-signout");
     if (so) so.addEventListener("click", signOut);
+
+    // Admin-only: surface an "Admin console" entry (gated by whoami).
+    ensureAdminLink(dd);
+  }
+
+  // ── Admin-console menu entry (only for admins) ───────────────────────
+  // whoami is checked once and cached. A non-admin gets is_admin:false and
+  // no link is injected; an admin gets the entry slotted after "API Console".
+  var _adminChecked = false, _isAdmin = false;
+  function injectAdminLink(dd) {
+    if (!_isAdmin || !dd) return;
+    var menu = dd.querySelector(".acd-menu");
+    if (!menu || menu.querySelector(".acd-admin")) return;
+    var consoleLink = menu.querySelector('a[href="/account/api/dashboard"]');
+    var anchorLi = consoleLink ? consoleLink.parentNode : null;
+    var li = document.createElement("li");
+    li.setAttribute("role", "presentation");
+    li.innerHTML =
+      '<a role="menuitem" href="/account/api/admin" class="acd-item acd-admin">'
+      + '<span class="acd-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+      + '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>'
+      + '<path d="M9.5 12l2 2 3.5-4"/></svg></span>'
+      + '<span class="acd-label">Admin console</span></a>';
+    if (anchorLi && anchorLi.nextSibling) menu.insertBefore(li, anchorLi.nextSibling);
+    else menu.appendChild(li);
+    // Intercept the click so we play the cinematic leaf-morph + flag the arrival,
+    // matching the login → admin transition (the morph is otherwise IIFE-scoped
+    // to the home page, so we ship a compact self-contained copy here).
+    var a = li.querySelector("a.acd-admin");
+    if (a) a.addEventListener("click", function (e) {
+      e.preventDefault();
+      try { sessionStorage.setItem("apin_admin_arrival", "1"); } catch (_) {}
+      adminLeafMorph(function () { window.location.href = "/account/api/admin"; });
+    });
+  }
+
+  // Compact cream→black leaf-flip morph (mirrors playAdminLeafMorph on the home
+  // page). Self-contained: injects its own keyframes + overlay, then calls done.
+  function adminLeafMorph(done) {
+    var reduced = false;
+    try { reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+    var finished = false;
+    function finish() { if (finished) return; finished = true; try { done(); } catch (e) { window.location.href = "/account/api/admin"; } }
+    if (!document.getElementById("apin-morph-style")) {
+      var st = document.createElement("style"); st.id = "apin-morph-style";
+      st.textContent =
+        "@keyframes apinMorphBg{0%{background:#fbf9f3}50%{background:#2c2a22}100%{background:#08080a}}"
+        + "@keyframes apinMorphFade{to{opacity:1}}"
+        + ".apin-morph{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;background:#fbf9f3;overflow:hidden;animation:apinMorphBg 1.45s cubic-bezier(.7,0,.2,1) forwards}"
+        + ".apin-morph .lw{perspective:1400px;width:200px;height:200px}"
+        + ".apin-morph .l3{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform 1.35s cubic-bezier(.66,0,.2,1)}"
+        + ".apin-morph .l3.flip{transform:rotateX(180deg)}"
+        + ".apin-morph .lf{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;display:grid;place-items:center}"
+        + ".apin-morph .lb{transform:rotateX(180deg)}"
+        + ".apin-morph .lb svg{filter:drop-shadow(0 0 14px rgba(74,222,128,.45))}"
+        + ".apin-morph .cap{position:absolute;bottom:17%;left:0;right:0;text-align:center;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;letter-spacing:.22em;color:#9b9ba4;opacity:0;animation:apinMorphFade 1.2s ease .55s forwards}"
+        + "@media (prefers-reduced-motion: reduce){.apin-morph{animation-duration:.25s}.apin-morph .l3{transition:none}}";
+      document.head.appendChild(st);
+    }
+    var FRONT = '<svg viewBox="0 0 120 120" width="192" height="192" aria-hidden="true">'
+      + '<path d="M60 8C30 35 28 80 60 112C92 80 90 35 60 8Z" fill="#dbe8d0" stroke="#2f6f3e" stroke-width="2.6" stroke-linejoin="round"/>'
+      + '<path d="M60 14V106" stroke="#2f6f3e" stroke-width="2" fill="none"/></svg>';
+    var BACK = '<svg viewBox="0 0 120 120" width="192" height="192" aria-hidden="true">'
+      + '<path d="M60 8C30 35 28 80 60 112C92 80 90 35 60 8Z" fill="#0e1a12" stroke="#4ade80" stroke-width="2.6" stroke-linejoin="round"/>'
+      + '<path d="M60 14V106" stroke="#4ade80" stroke-width="2" fill="none"/></svg>';
+    var ov = document.createElement("div"); ov.className = "apin-morph";
+    ov.innerHTML = '<div class="lw"><div class="l3" id="apin-leaf"><div class="lf">' + FRONT
+      + '</div><div class="lf lb">' + BACK + '</div></div></div><div class="cap">elevating · admin console</div>';
+    ov.addEventListener("click", finish);
+    document.body.appendChild(ov);
+    if (reduced) { setTimeout(finish, 280); return; }
+    requestAnimationFrame(function () { requestAnimationFrame(function () {
+      var l = document.getElementById("apin-leaf"); if (l) l.classList.add("flip");
+    }); });
+    setTimeout(finish, 1720);
+  }
+  function ensureAdminLink(dd) {
+    if (_adminChecked) { injectAdminLink(dd); return; }
+    _adminChecked = true;
+    fetch("/api/account/admin/whoami",
+          { credentials: "same-origin", headers: { "Accept": "application/json" } })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { _isAdmin = !!(j && j.data && j.data.is_admin); injectAdminLink(dd); })
+      .catch(function () {});
   }
 
   // ── Dropdown open/close ──────────────────────────────────────────────
