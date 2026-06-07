@@ -209,7 +209,7 @@ def _status_for(code: str) -> int:
         return LEGACY_STATUS[code]
     return 500
 
-_DOCS_ERRORS_URL = "https://dxv-404-apin.hf.space/docs#errors"
+_DOCS_ERRORS_URL = "https://nano-farm-apin.hf.space/docs#errors"
 
 
 # ── helpers ────────────────────────────────────────────────────────────────

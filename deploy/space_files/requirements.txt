@@ -12,13 +12,13 @@ python-multipart==0.0.22
 pydantic==2.12.5
 
 # ── ML / computer vision ───────────────────────────────────────────────────
-timm==1.0.25
+timm==1.0.26
 grad-cam==1.5.5
 albumentations==2.0.8
-Pillow==12.0.0
-numpy==2.3.5
+Pillow==12.1.0
+numpy==2.4.2
 opencv-python-headless==4.13.0.92
-scipy==1.17.1
+scipy==1.17.0
 scikit-learn==1.8.0
 scikit-image==0.26.0
 joblib==1.5.3
@@ -26,13 +26,22 @@ pandas==3.0.1
 matplotlib==3.10.8
 
 # ── Tomato specialist (single-pass LoRA) stack ─────────────────────────────
-peft==0.19.0
-transformers==5.5.4
+# CRITICAL — DO NOT bump transformers to 5.x. transformers 5.x renamed the
+# DINOv3-ConvNeXt backbone's internal state-dict keys, so Model 2's trained
+# head silently fails to load under model.load_state_dict(remapped, strict=False)
+# (strict=False hides the key mismatch). The result is a degraded prediction
+# (e.g. okra powdery mildew slips 4A->4B) and a withheld Grad-CAM heatmap.
+# 4.57.6 is the version the model was validated in. tokenizers + huggingface-hub
+# below are pinned to the versions compatible with transformers 4.57.x.
+peft==0.18.1
+transformers==4.57.6
+tokenizers==0.22.2
 accelerate==1.13.0
 safetensors==0.7.0
 
 # ── Hugging Face hub (build-time weight download + timm pretrained) ────────
-huggingface-hub==1.7.2
+# Must be <1.0 for transformers 4.57.x; the app only uses snapshot_download.
+huggingface-hub==0.36.2
 
 # ── Auth, PDF reports, durable storage ─────────────────────────────────────
 argon2-cffi>=23.1.0

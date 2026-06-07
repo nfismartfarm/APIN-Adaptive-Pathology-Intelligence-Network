@@ -236,7 +236,7 @@ APIN_V2_DIR = PROJECT_ROOT / "scripts" / "apin_v2"
 # urls, robots.txt and sitemap.xml. The app is also reachable embedded in
 # an iframe under huggingface.co/spaces/...; canonical points search
 # engines at this direct origin.
-_PUBLIC_BASE_URL = "https://dxv-404-apin.hf.space"
+_PUBLIC_BASE_URL = "https://nano-farm-apin.hf.space"
 
 # Fresh-but-indexable: the public pages must always reflect the newest
 # deploy (no stale browser copy), but unlike the dashboard headers these
@@ -4813,6 +4813,12 @@ def _add_v1_action_routes(app):
                                                 "open a support ticket "
                                                 "with the request_id."}})
                 n_err += 1
+            # Append every processed entry (success OR per-item error) so the
+            # caller actually receives data.items[]. Previously only the
+            # payload_too_large branch appended, so successful batches returned
+            # an empty items[] despite ok_count > 0. That branch appends then
+            # `break`s, so this end-of-loop append never double-counts it.
+            items.append(entry)
 
         # Single-page (no paging) since the batch is hard-capped at 16.
         return paginated(
@@ -4859,12 +4865,12 @@ def _add_v1_action_routes(app):
                 "curl_bearer": (
                     f"curl -H 'Authorization: Bearer {k['token']}' "
                     "-F 'file=@leaf.jpg' "
-                    "https://dxv-404-apin.hf.space/api/predict/quick"
+                    "https://nano-farm-apin.hf.space/api/predict/quick"
                 ),
                 "curl_x_api_key": (
                     f"curl -H 'X-API-Key: {k['token']}' "
                     "-F 'file=@leaf.jpg' "
-                    "https://dxv-404-apin.hf.space/api/predict/quick"
+                    "https://nano-farm-apin.hf.space/api/predict/quick"
                 ),
             },
             "warning": ("Store this `token` now. It is shown ONCE and "
@@ -7485,7 +7491,7 @@ def _add_v1_validation_handler(app):
         new_request_id, API_VERSION, ERROR_STATUS)
     from datetime import datetime as _vh_dt, timezone as _vh_tz
 
-    _DOCS = "https://dxv-404-apin.hf.space/docs#errors"
+    _DOCS = "https://nano-farm-apin.hf.space/docs#errors"
 
     @app.exception_handler(RequestValidationError)
     async def _validation_failed(request: Request,

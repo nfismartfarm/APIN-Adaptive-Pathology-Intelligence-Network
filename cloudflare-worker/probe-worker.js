@@ -18,7 +18,7 @@
 // is less precise than curl's (no DNS/TCP/TLS split) but the total
 // latency from the probe's perspective is what matters for uptime.
 
-const PROBE_TARGET_URL = "https://dxv-404-apin.hf.space/api/probe/external";
+const PROBE_TARGET_URL = "https://nano-farm-apin.hf.space/api/probe/external";
 const PROBE_VERSION    = "probe-worker.v1.0.0";
 const SCHEMA_VERSION   = "probe.v1";
 const SLO_LATENCY_MS   = 5000;

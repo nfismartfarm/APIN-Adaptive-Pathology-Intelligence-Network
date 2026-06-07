@@ -1,6 +1,6 @@
 """Build-time step: pull the APIN runtime weights into the image.
 
-The dxv-404/apin-models repo holds exactly the ~722 MB of artifacts the
+The Nano-farm/apin-models repo holds exactly the ~722 MB of artifacts the
 deployed app loads (the model3/specialist/router/DINOv2 checkpoints, the
 APIN signal caches, the calibration JSONs, the diagnosis lookup). Each
 file is stored under its path relative to the project root, so downloading
@@ -15,7 +15,7 @@ import sys
 
 from huggingface_hub import snapshot_download
 
-REPO = "dxv-404/apin-models"
+REPO = "Nano-farm/apin-models"
 
 print(f"Downloading runtime weights from {REPO} -> /app ...", flush=True)
 path = snapshot_download(

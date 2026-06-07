@@ -155,7 +155,7 @@ async def _send_json_error(send, status: int, code: str, message: str,
         "error": {
             "code": code,
             "message": message,
-            "docs_url": "https://dxv-404-apin.hf.space/docs#errors",
+            "docs_url": "https://nano-farm-apin.hf.space/docs#errors",
         },
         "meta": {},
     }).encode("utf-8")

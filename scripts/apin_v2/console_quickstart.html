@@ -279,14 +279,14 @@ a:hover{text-decoration:underline}
     <div class="code-block" id="ex1">
       <button type="button" class="copy" data-copy="ex1">copy</button>
 <pre class="lang active" data-lang="curl"><span class="filename">terminal</span>
-curl -X POST https://dxv-404-apin.hf.space/api/predict/full \
+curl -X POST https://nano-farm-apin.hf.space/api/predict/full \
   -H "Authorization: Bearer $APIN_KEY" \
   -F "file=@leaf.jpg"</pre>
 <pre class="lang" data-lang="python"><span class="filename">predict.py</span>
 <span class="c-kw">import</span> os, requests
 
 resp = requests.post(
-    <span class="c-str">"https://dxv-404-apin.hf.space/api/predict/full"</span>,
+    <span class="c-str">"https://nano-farm-apin.hf.space/api/predict/full"</span>,
     headers={<span class="c-str">"Authorization"</span>: <span class="c-str">f"Bearer {os.environ[<span class="c-str">'APIN_KEY'</span>]}"</span>},
     files={<span class="c-str">"file"</span>: (<span class="c-str">"leaf.jpg"</span>, <span class="c-fn">open</span>(<span class="c-str">"leaf.jpg"</span>, <span class="c-str">"rb"</span>), <span class="c-str">"image/jpeg"</span>)},
     timeout=30,
@@ -298,7 +298,7 @@ resp.raise_for_status()
 <span class="c-kw">const</span> form = <span class="c-kw">new</span> FormData();
 form.append(<span class="c-str">"file"</span>, fileInput.files[0]);
 
-<span class="c-kw">const</span> r = <span class="c-kw">await</span> <span class="c-fn">fetch</span>(<span class="c-str">"https://dxv-404-apin.hf.space/api/predict/full"</span>, {
+<span class="c-kw">const</span> r = <span class="c-kw">await</span> <span class="c-fn">fetch</span>(<span class="c-str">"https://nano-farm-apin.hf.space/api/predict/full"</span>, {
   method: <span class="c-str">"POST"</span>,
   headers: { <span class="c-str">"Authorization"</span>: <span class="c-str">`Bearer ${APIN_KEY}`</span> },
   body: form,
@@ -314,7 +314,7 @@ console.<span class="c-fn">log</span>(data);</pre>
 <span class="c-kw">const</span> form = <span class="c-kw">new</span> FormData();
 form.append(<span class="c-str">"file"</span>, <span class="c-kw">new</span> Blob([bytes], { type: <span class="c-str">"image/jpeg"</span> }), <span class="c-str">"leaf.jpg"</span>);
 
-<span class="c-kw">const</span> r = <span class="c-kw">await</span> <span class="c-fn">fetch</span>(<span class="c-str">"https://dxv-404-apin.hf.space/api/predict/full"</span>, {
+<span class="c-kw">const</span> r = <span class="c-kw">await</span> <span class="c-fn">fetch</span>(<span class="c-str">"https://nano-farm-apin.hf.space/api/predict/full"</span>, {
   method: <span class="c-str">"POST"</span>,
   headers: { <span class="c-str">"Authorization"</span>: <span class="c-str">`Bearer ${process.env.APIN_KEY}`</span> },
   body: form,
@@ -340,7 +340,7 @@ console.<span class="c-fn">log</span>(<span class="c-kw">await</span> r.json());
     mw.<span class="c-fn">Close</span>()
 
     req, _ := http.<span class="c-fn">NewRequest</span>(<span class="c-str">"POST"</span>,
-        <span class="c-str">"https://dxv-404-apin.hf.space/api/predict/full"</span>, body)
+        <span class="c-str">"https://nano-farm-apin.hf.space/api/predict/full"</span>, body)
     req.Header.<span class="c-fn">Set</span>(<span class="c-str">"Authorization"</span>, <span class="c-str">"Bearer "</span>+os.<span class="c-fn">Getenv</span>(<span class="c-str">"APIN_KEY"</span>))
     req.Header.<span class="c-fn">Set</span>(<span class="c-str">"Content-Type"</span>, mw.<span class="c-fn">FormDataContentType</span>())
 
@@ -440,7 +440,7 @@ console.<span class="c-fn">log</span>(<span class="c-kw">await</span> r.json());
 <span class="c-kw">import</span> os, time, requests
 <span class="c-kw">from</span> requests.exceptions <span class="c-kw">import</span> Timeout, ConnectionError
 
-URL = <span class="c-str">"https://dxv-404-apin.hf.space/api/predict/full"</span>
+URL = <span class="c-str">"https://nano-farm-apin.hf.space/api/predict/full"</span>
 KEY = os.environ[<span class="c-str">"APIN_KEY"</span>]
 
 <span class="c-kw">def</span> <span class="c-fn">predict</span>(image_path, max_attempts=4):
@@ -515,7 +515,7 @@ KEY = os.environ[<span class="c-str">"APIN_KEY"</span>]
 idem = <span class="c-fn">str</span>(uuid.<span class="c-fn">uuid4</span>())   <span class="c-cmt"># keep this stable across retries</span>
 
 r = requests.<span class="c-fn">post</span>(
-    <span class="c-str">"https://dxv-404-apin.hf.space/api/account/keys"</span>,
+    <span class="c-str">"https://nano-farm-apin.hf.space/api/account/keys"</span>,
     headers={
         <span class="c-str">"Authorization"</span>: <span class="c-str">f"Bearer {APIN_KEY}"</span>,
         <span class="c-str">"Idempotency-Key"</span>: idem,

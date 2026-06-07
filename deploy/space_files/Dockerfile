@@ -9,9 +9,12 @@
 # ---------------------------------------------------------------------------
 FROM python:3.11-slim
 
-# ── System libraries OpenCV links against at runtime ───────────────────────
+# ── System libraries OpenCV links against at runtime + build toolchain ─────
+# build-essential (gcc/g++/make) is required because some transitive deps
+# (e.g. stringzilla, pulled in by albumentations→albucore) publish only an
+# sdist for newer releases and must be compiled from C source at install time.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libglib2.0-0 libgl1 \
+        libglib2.0-0 libgl1 build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Non-root user (Hugging Face Spaces convention: uid 1000) ───────────────
@@ -28,8 +31,12 @@ WORKDIR /app
 # CPU-only torch FIRST: the +cpu wheel is ~190 MB, not the ~2.5 GB CUDA build.
 # Everything else then resolves against it (pip sees torch already satisfied).
 COPY --chown=user requirements.txt .
+# torch/torchvision pinned to the dev environment (2.11.0 / 0.26.0) for a
+# reproducible build. NOTE: the determinant of CORRECT Model-2 output is the
+# transformers version (see requirements.txt — must stay on 4.57.x, NOT 5.x);
+# torch version does not change the tier/heatmap. Kept pinned to match dev.
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir torch torchvision \
+    pip install --no-cache-dir torch==2.11.0 torchvision==0.26.0 \
         --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 

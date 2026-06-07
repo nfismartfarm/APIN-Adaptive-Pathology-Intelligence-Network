@@ -1251,6 +1251,253 @@ footer.ribbon kbd{font-size:10.5px;padding:0 5px;}
   .field{grid-template-columns:1fr;}
   .field label{font-size:11.5px;}
 }
+/* ══════════════ BATCH & BULK (At-scale) section ══════════════ */
+.sc-lead{font-size:14px;color:var(--ink-body);line-height:1.65;margin:2px 0 14px}
+.sc-modebar{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 6px}
+.sc-mode{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--paper-light);padding:9px 13px;cursor:pointer;font-size:13px;color:var(--ink-body);transition:.15s}
+.sc-mode:hover{border-color:var(--green-soft);background:var(--green-pale)}
+.sc-mode.on{border-color:var(--green);background:var(--green-pale);color:var(--ink);box-shadow:inset 0 0 0 1px var(--green)}
+.sc-mode b{font-weight:600;color:var(--ink)}
+.sc-mode .r{width:13px;height:13px;border-radius:50%;border:2px solid var(--line);flex:none}
+.sc-mode.on .r{border-color:var(--green);background:radial-gradient(var(--green) 40%,transparent 46%)}
+
+/* the lab: 3-pane mini-IDE */
+.sc-lab{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--paper-light);
+  box-shadow:var(--shadow-mid);margin:14px 0 6px}
+.sc-lab-head{display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--paper-deep);
+  border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-meta)}
+.sc-lab-head .dots{display:flex;gap:5px}.sc-lab-head .dots i{width:9px;height:9px;border-radius:50%;background:var(--line)}
+.sc-lab-head .dots i:nth-child(1){background:#d98b6a}.sc-lab-head .dots i:nth-child(2){background:#d9c06a}.sc-lab-head .dots i:nth-child(3){background:var(--green-soft)}
+.sc-lab-head .t{font-family:'JetBrains Mono',monospace;color:var(--ink-body)}
+.sc-lab-grid{display:grid;grid-template-columns:168px 1fr;grid-template-areas:"tree mid" "run run";min-height:360px}
+.sc-lab-grid>.sc-files{grid-area:tree}
+.sc-lab-grid>.sc-mid{grid-area:mid}
+.sc-lab-grid>.sc-run{grid-area:run}
+@media(max-width:980px){.sc-lab-grid{grid-template-columns:1fr;grid-template-areas:"tree" "mid" "run"}}
+
+/* file bar (VS Code tree) */
+.sc-files{border-right:1px solid var(--line);background:var(--paper);padding:8px 0;overflow:auto;max-height:560px}
+.sc-files .ttl{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);padding:4px 12px 7px;font-weight:600}
+.sc-tree-grp{margin-bottom:2px}
+.sc-tree-grp>.gh{display:flex;align-items:center;gap:6px;padding:4px 10px;font-size:12px;color:var(--ink-body);cursor:pointer;border-radius:5px}
+.sc-tree-grp>.gh:hover{background:var(--paper-deep)}
+.sc-tree-grp>.gh .caret{font-size:9px;color:var(--ink-faint);width:9px;transition:.15s}
+.sc-tree-grp.closed>.gh .caret{transform:rotate(-90deg)}
+.sc-tree-grp.closed>.kids{display:none}
+.sc-tree-grp .ct{margin-left:auto;font-size:10px;color:var(--ink-faint);font-family:'JetBrains Mono',monospace}
+.sc-node{display:flex;align-items:center;gap:7px;padding:3px 10px 3px 26px;font-size:12px;color:var(--ink-body);cursor:pointer;border-radius:5px}
+.sc-node:hover{background:var(--paper-deep)}.sc-node.sel{background:var(--green-pale)}
+.sc-node .ic{width:14px;text-align:center;flex:none;font-size:12px}
+.sc-node .nm{font-family:'JetBrains Mono',monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sc-node .sz{margin-left:auto;font-size:9.5px;color:var(--ink-faint);font-family:'JetBrains Mono',monospace}
+.sc-node .x{margin-left:6px;color:var(--ink-faint);opacity:0;font-size:13px}.sc-node:hover .x{opacity:1}.sc-node .x:hover{color:var(--crimson)}
+
+/* ── composer (center top) ───────────────────────────────────── */
+.sc-mid{display:flex;flex-direction:column;min-width:0}
+.sc-comp{padding:14px 16px;border-bottom:1px solid var(--line-soft);background:var(--paper-light)}
+.sc-comp-ttl{font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;margin-bottom:11px}
+.sc-step{display:flex;align-items:center;gap:10px;padding:9px 10px 9px 11px;border:1px solid var(--line-soft);border-radius:9px;
+  background:var(--paper);margin-bottom:8px;transition:border-color .15s}
+.sc-step:hover{border-color:var(--line)}
+.sc-step .n{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-faint);width:17px;height:17px;line-height:15px;
+  text-align:center;border:1px solid var(--line-soft);border-radius:50%;flex:none}
+
+/* endpoint picker (custom dropdown — wide, full path + description) */
+.sc-ep{position:relative;flex:1;min-width:0}
+.sc-ep-cur{display:flex;align-items:center;gap:9px;width:100%;text-align:left;cursor:pointer;
+  border:1px solid var(--line);border-radius:7px;background:var(--paper-light);padding:7px 10px;transition:.15s}
+.sc-ep-cur:hover,.sc-ep.open .sc-ep-cur{border-color:var(--green-soft);box-shadow:inset 0 0 0 1px var(--green-soft)}
+.sc-ep-cur .mp,.sc-ep-opt .mp{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:9px;letter-spacing:.03em;
+  padding:2px 6px;border-radius:5px;background:var(--green-pale);color:var(--green-deep);flex:none}
+.sc-ep-cur .pth{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--ink);flex:none}
+.sc-ep-cur .dsc{font-size:11.5px;color:var(--ink-meta);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.sc-ep-cur .cv{margin-left:auto;color:var(--ink-faint);font-size:9px;flex:none;transition:.18s}
+.sc-ep.open .sc-ep-cur .cv{transform:rotate(180deg)}
+.sc-ep-menu{position:absolute;z-index:40;top:calc(100% + 5px);left:0;right:0;background:var(--paper);border:1px solid var(--line);
+  border-radius:9px;box-shadow:var(--shadow-mid);padding:5px;max-height:266px;overflow:auto}
+.sc-ep-opt{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:6px;cursor:pointer}
+.sc-ep-opt:hover{background:var(--paper-deep)}.sc-ep-opt.sel{background:var(--green-pale)}
+.sc-ep-opt .pth{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink)}
+.sc-ep-opt .dsc{font-size:11px;color:var(--ink-meta);margin-left:auto;text-align:right;white-space:nowrap}
+
+/* count stepper */
+.sc-count{display:flex;align-items:center;border:1px solid var(--line);border-radius:7px;background:var(--paper-light);overflow:hidden;flex:none}
+.sc-count button{width:25px;height:30px;border:none;background:none;color:var(--ink-meta);font-size:16px;line-height:1;cursor:pointer;transition:.12s}
+.sc-count button:hover{background:var(--green-pale);color:var(--green-deep)}
+.sc-count input{width:40px;height:30px;text-align:center;border:none;border-left:1px solid var(--line-soft);border-right:1px solid var(--line-soft);
+  background:transparent;font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--ink);-moz-appearance:textfield}
+.sc-count input::-webkit-outer-spin-button,.sc-count input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.sc-step .need{font-size:10.5px;color:var(--ink-meta);white-space:nowrap;font-family:'JetBrains Mono',monospace;flex:none;min-width:52px;text-align:right}
+.sc-step .rm{color:var(--ink-faint);cursor:pointer;font-size:16px;line-height:1;flex:none;width:20px;height:20px;text-align:center;border-radius:5px;transition:.12s}
+.sc-step .rm:hover{color:var(--crimson);background:#f8d7da}
+
+.sc-addstep{display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;color:var(--green-deep);background:none;
+  border:1px dashed var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;width:100%;transition:.15s}
+.sc-addstep:hover{background:var(--green-pale);border-color:var(--green-soft)}
+.sc-addstep svg{width:13px;height:13px}
+
+.sc-tally{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;margin-top:12px;padding-top:11px;border-top:1px dashed var(--line-soft);
+  font-size:12px;color:var(--ink-body)}
+.sc-tally b{font-family:'JetBrains Mono',monospace;color:var(--ink)}
+.sc-tally .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;background:var(--paper-deep);border:1px solid var(--line-soft)}
+.sc-tally .pill svg{width:12px;height:12px;color:var(--ink-meta);flex:none}
+.sc-status{display:flex;align-items:center;gap:7px;font-size:12px;margin-top:9px}
+.sc-status.ok{color:var(--green-deep)}.sc-status.warn{color:#9a6a1a}
+.sc-status svg{width:14px;height:14px;flex:none}
+
+/* custom checkbox (site hand-drawn style) */
+.sc-check{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:11.5px;color:var(--ink-body);margin-left:auto;user-select:none}
+.sc-check input{position:absolute;opacity:0;width:0;height:0}
+.sc-check .bx{width:17px;height:17px;border:1.5px solid var(--line);border-radius:5px;background:var(--paper);flex:none;
+  display:flex;align-items:center;justify-content:center;transition:.15s}
+.sc-check .bx svg{width:11px;height:11px;color:#fff;opacity:0;transform:scale(.5);transition:.15s}
+.sc-check input:checked + .bx{background:var(--green);border-color:var(--green)}
+.sc-check input:checked + .bx svg{opacity:1;transform:scale(1)}
+.sc-check input:focus-visible + .bx{box-shadow:0 0 0 3px var(--green-pale)}
+.sc-check:hover .bx{border-color:var(--green-soft)}
+
+/* ── code surface (matches the site's LIGHT code blocks) ─────── */
+.sc-codewrap{flex:1;display:flex;flex-direction:column;min-height:180px;background:var(--paper)}
+.sc-codebar{display:flex;align-items:center;gap:7px;background:var(--paper-deep);border-bottom:1px solid var(--line);padding:6px 10px}
+.sc-fname{display:flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-meta)}
+.sc-fname svg{width:12px;height:12px;opacity:.7;flex:none}
+.sc-codetabs{display:flex;align-items:center;gap:2px;margin-left:6px}
+.sc-codetabs button{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--ink-meta);background:none;border:none;padding:4px 9px;border-radius:6px;cursor:pointer;transition:.12s}
+.sc-codetabs button:hover{color:var(--ink);background:var(--paper-light)}
+.sc-codetabs button.on{background:var(--paper-light);color:var(--ink);box-shadow:var(--shadow-soft)}
+.sc-codeacts{margin-left:auto;display:flex;gap:5px}
+.sc-codeacts button{display:flex;align-items:center;gap:4px;font-size:10.5px;font-family:'JetBrains Mono',monospace;color:var(--ink-meta);
+  background:var(--paper-light);border:1px solid var(--line-soft);padding:4px 8px;border-radius:6px;cursor:pointer;transition:.12s}
+.sc-codeacts button:hover{color:var(--ink);border-color:var(--line);background:var(--paper)}
+.sc-codeacts button svg{width:12px;height:12px}
+.sc-codebody{flex:1;display:flex;overflow:auto;min-height:0;background:var(--paper)}
+.sc-gutter{flex:none;padding:13px 0;text-align:right;color:var(--ink-faint);font:12px/1.6 'JetBrains Mono',monospace;user-select:none;
+  background:var(--paper-light);border-right:1px solid var(--line-soft)}
+.sc-gutter span{display:block;padding:0 9px 0 13px}
+.sc-codebody pre{margin:0;flex:1;padding:13px 16px;color:var(--ink);font:12px/1.6 'JetBrains Mono',monospace;tab-size:2;white-space:pre;background:var(--paper)}
+.sc-codebody pre code{background:transparent;padding:0;border-radius:0;font-size:inherit}   /* kill the global inline-code pill (those grey boxes) */
+.sc-codebody pre .c-cm{color:var(--ink-faint);font-style:italic}
+.sc-codebody pre .c-st{color:var(--green)}
+.sc-codebody pre .c-kw{color:var(--blue)}
+.sc-codebody pre .c-fn{color:var(--crimson)}
+.sc-codebody pre .c-nm{color:var(--ochre)}
+/* night mode only: dark code surface, same as the rest of the site's .code-block */
+[data-theme="night-field"] .sc-codewrap,[data-theme="night-field"] .sc-codebody,[data-theme="night-field"] .sc-codebody pre{background:#0a0c0f}
+[data-theme="night-field"] .sc-codebar{background:#0e1115}
+[data-theme="night-field"] .sc-gutter{background:#0c0e10}
+
+/* ── run row (full-width bottom: controls left · terminal right) ── */
+.sc-run{display:grid;grid-template-columns:240px 1fr;gap:13px;background:var(--paper);padding:13px;border-top:1px solid var(--line)}
+.sc-run-ctl{display:flex;flex-direction:column;gap:9px}
+.sc-run-out{display:flex;flex-direction:column;gap:8px;min-width:0}
+@media(max-width:980px){.sc-run{grid-template-columns:1fr}}
+.sc-keyrow{display:flex;align-items:center;border:1px solid var(--line);border-radius:8px;background:var(--paper-light);overflow:hidden}
+.sc-keyrow .kk{flex:none;display:flex;align-items:center;padding:0 4px 0 9px;color:var(--ink-faint)}
+.sc-keyrow .kk svg{width:13px;height:13px}
+.sc-keyrow input{flex:1;min-width:0;font-family:'JetBrains Mono',monospace;font-size:11.5px;border:none;background:transparent;color:var(--ink);padding:9px 6px}
+.sc-keyrow input.mask{-webkit-text-security:disc}
+.sc-keyrow .eye{flex:none;border:none;background:none;color:var(--ink-faint);cursor:pointer;padding:0 10px;align-self:stretch;display:flex;align-items:center}
+.sc-keyrow .eye:hover{color:var(--ink-meta)}.sc-keyrow .eye svg{width:14px;height:14px}
+.sc-keyhint{font-size:10px;color:var(--ink-faint);display:flex;align-items:center;gap:5px;line-height:1.4}
+.sc-keyhint svg{width:11px;height:11px;flex:none}
+.sc-runbtn{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--green);color:#fff;border:none;border-radius:8px;
+  padding:11px;font-size:13.5px;font-weight:600;cursor:pointer;box-shadow:var(--shadow-soft);transition:.15s}
+.sc-runbtn:hover{background:var(--green-soft)}.sc-runbtn:disabled{opacity:.6;cursor:default}
+.sc-runbtn svg{width:14px;height:14px}
+.sc-term{flex:1;min-height:160px;max-height:320px;overflow:auto;background:#161d19;border-radius:8px;
+  padding:11px 13px;font:11.5px/1.6 'JetBrains Mono',monospace;color:#cfd8cd;border:1px solid #20302a}
+[data-theme="night-field"] .sc-term{background:#0a0c0f}
+.sc-term .ln{white-space:pre-wrap;animation:scLine .25s ease}
+@keyframes scLine{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.sc-term .dim{color:#7e8c76}.sc-term .ok{color:#8fce9e}.sc-term .err{color:#e08a7a}.sc-term .acc{color:#e0b86a}.sc-term .hd{color:#9cc4e0}
+.sc-summary{font-size:11.5px;color:var(--ink-meta);text-align:center}
+.sc-summary b.ok{color:var(--green)}.sc-summary b.err{color:var(--crimson)}
+
+/* slide-in request toast */
+.sc-toasts{position:fixed;right:18px;bottom:18px;z-index:9500;display:flex;flex-direction:column;gap:8px;width:280px;pointer-events:none}
+.sc-toast{pointer-events:auto;background:var(--paper-light);border:1px solid var(--line);border-left:3px solid var(--green);border-radius:9px;
+  box-shadow:var(--shadow-stamp);padding:9px 12px;cursor:pointer;animation:scToast .4s cubic-bezier(.2,.9,.25,1);transition:.2s}
+.sc-toast.err{border-left-color:var(--crimson)}
+.sc-toast:hover{transform:translateX(-3px)}
+@keyframes scToast{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:none}}
+.sc-toast .r1{display:flex;align-items:center;gap:7px;font-size:11.5px}
+.sc-toast .m{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:10px;padding:1px 5px;border-radius:4px;background:var(--green-pale);color:var(--green)}
+.sc-toast .p{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sc-toast .r2{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--ink-meta);margin-top:3px}
+.sc-toast .st{font-family:'JetBrains Mono',monospace}.sc-toast .st.ok{color:var(--green)}.sc-toast .st.err{color:var(--crimson)}
+.sc-toast .go{margin-left:auto;color:var(--green)}
+
+/* light request drawer */
+.sc-drawer-back{position:fixed;inset:0;z-index:9600;background:rgba(26,22,18,.4);opacity:0;pointer-events:none;transition:.22s}
+.sc-drawer-back.on{opacity:1;pointer-events:auto}
+.sc-drawer{position:fixed;top:0;right:0;bottom:0;z-index:9601;width:min(560px,94vw);background:var(--paper);border-left:1px solid var(--line);
+  box-shadow:-16px 0 50px rgba(26,22,18,.3);transform:translateX(102%);transition:transform .28s cubic-bezier(.2,.8,.2,1);overflow:auto}
+.sc-drawer.on{transform:none}
+.sc-drawer-h{position:sticky;top:0;background:var(--paper-deep);border-bottom:1px solid var(--line);padding:13px 16px;display:flex;align-items:center;gap:10px}
+.sc-drawer-h .m{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:11px;padding:2px 7px;border-radius:5px;background:var(--green-pale);color:var(--green)}
+.sc-drawer-h .p{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--ink)}
+.sc-drawer-h .st{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:12px}
+.sc-drawer-h .st.ok{color:var(--green)}.sc-drawer-h .st.err{color:var(--crimson)}
+.sc-drawer-h .cl{cursor:pointer;color:var(--ink-meta);font-size:18px;line-height:1}.sc-drawer-h .cl:hover{color:var(--ink)}
+.sc-drawer-b{padding:14px 16px}
+.sc-dsec{margin-bottom:16px}
+.sc-dsec h5{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-meta);margin:0 0 7px;font-weight:600}
+.sc-kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12px}
+.sc-kv .k{font-family:'JetBrains Mono',monospace;color:var(--ink-meta)}.sc-kv .v{font-family:'JetBrains Mono',monospace;color:var(--ink-body);word-break:break-all}
+.sc-dcode{background:#1c2420;color:#e7e2d4;border-radius:7px;padding:11px 13px;font:11.5px/1.55 'JetBrains Mono',monospace;white-space:pre-wrap;word-break:break-word;overflow:auto;max-height:280px}
+.sc-dcopy{font-size:11px;color:var(--green);background:none;border:1px solid var(--line);border-radius:5px;padding:4px 9px;cursor:pointer;margin-top:6px}
+.sc-dcopy:hover{background:var(--green-pale)}
+
+/* ── animated figures (real visuals, pipeline-page vocabulary) ── */
+.sc-fig{border:1px solid var(--line);border-radius:12px;background:var(--paper-light);box-shadow:var(--shadow-soft);padding:16px 18px 14px;margin:14px 0}
+.sc-fig-cap{display:flex;align-items:center;gap:8px;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;margin-bottom:12px}
+.sc-fig-cap svg{width:13px;height:13px}
+.sc-fig svg.scene{display:block;width:100%;height:auto;overflow:visible}
+.sc-fig .flow{fill:none;stroke:var(--green-soft);stroke-width:1.7;stroke-dasharray:6 9;stroke-linecap:round;animation:scFigMarch 1.5s linear infinite}
+.sc-fig .flow.warn{stroke:var(--ochre)}
+@keyframes scFigMarch{to{stroke-dashoffset:-30}}
+.sc-fig .wire{fill:none;stroke:var(--line);stroke-width:1.2}
+.sc-fig .leaf{fill:var(--green-pale);stroke:var(--green-soft);stroke-width:1.3}
+.sc-fig .leaf.amber{fill:#fbeccf;stroke:var(--ochre)}
+.sc-fig .box{fill:var(--paper);stroke:var(--line);stroke-width:1.3}
+.sc-fig .box.srv{fill:var(--paper-deep)}
+.sc-fig .lbl{font:600 11px Inter,system-ui,sans-serif;fill:var(--ink-body)}
+.sc-fig .sub{font:10px 'JetBrains Mono',monospace;fill:var(--ink-faint)}
+.sc-fig .chip{font:700 10px 'JetBrains Mono',monospace;fill:var(--green-deep)}
+.sc-fig .chip.amber{fill:#9a6a1a}
+.sc-fig .pulse{animation:scFigPulse 1.9s ease-in-out infinite}
+@keyframes scFigPulse{0%,100%{opacity:.4}50%{opacity:1}}
+.sc-fig .worker{transform-box:fill-box;transform-origin:center;animation:scFigWork 1.6s ease-in-out infinite}
+.sc-fig .worker.w2{animation-delay:.2s}.sc-fig .worker.w3{animation-delay:.4s}.sc-fig .worker.w4{animation-delay:.6s}
+@keyframes scFigWork{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}
+.sc-fig-bar{height:10px;border-radius:6px;background:var(--paper-deep);border:1px solid var(--line-soft);overflow:hidden;margin:11px 0 5px}
+.sc-fig-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--green-soft),var(--green));width:4%;animation:scFigFill 5s ease-out infinite}
+@keyframes scFigFill{0%{width:4%}68%,100%{width:71%}}
+.sc-fig-legend{display:flex;flex-wrap:wrap;gap:7px 18px;margin-top:11px;font-size:11.5px;color:var(--ink-body)}
+.sc-fig-legend i{display:inline-flex;align-items:center;gap:6px;font-style:normal}
+.sc-fig-legend i b{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--ink)}
+.sc-fig-legend .sw{width:11px;height:11px;border-radius:3px;flex:none;border:1px solid var(--line-soft)}
+
+/* BATCH & BULK nav entries — icon + short label */
+#nav a.scale-link{display:flex;align-items:center;gap:9px}
+#nav a.scale-link .nav-ic{width:14px;height:14px;flex:none;color:var(--ink-faint);opacity:.85;transition:.15s}
+#nav a.scale-link:hover .nav-ic,#nav a.scale-link.active .nav-ic{color:var(--green);opacity:1}
+
+.sc-recipes{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:12px;margin:14px 0}
+.sc-recipe{border:1px solid var(--line);border-radius:9px;background:var(--paper-light);padding:13px 14px;transition:.15s}
+.sc-recipe:hover{border-color:var(--green-soft);box-shadow:var(--shadow-mid)}
+.sc-recipe h4{margin:0 0 4px;font-size:14px;color:var(--ink)}
+.sc-recipe .lg{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-faint);margin-bottom:7px}
+.sc-recipe p{font-size:12px;color:var(--ink-body);line-height:1.5;margin:0 0 11px}
+.sc-recipe .acts{display:flex;gap:6px}
+.sc-recipe .acts button{font-size:11px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink-body);padding:4px 9px;cursor:pointer}
+.sc-recipe .acts button:hover{border-color:var(--green-soft);background:var(--green-pale);color:var(--ink)}
+.sc-kit{display:flex;align-items:center;gap:12px;border:1px solid var(--green-soft);background:var(--green-pale);border-radius:9px;padding:13px 16px;margin:8px 0 14px}
+.sc-kit .em{font-size:24px}.sc-kit b{color:var(--ink)}.sc-kit p{margin:2px 0 0;font-size:12px;color:var(--ink-body)}
+.sc-kit button{margin-left:auto;background:var(--green);color:#fff;border:none;border-radius:7px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer}
+.sc-kit button:hover{background:var(--green-soft)}
+@media(prefers-reduced-motion:reduce){.sc-term .ln,.sc-toast,.sc-fig .flow,.sc-fig .pulse,.sc-fig .worker,.sc-fig-bar i{animation:none}.sc-drawer{transition:none}}
 </style>
   <!-- Stage 6 · telemetry library · /api/telemetry/ingest -->
   <script src="/static/telemetry.js?v=stage6c" defer></script>
@@ -2089,7 +2336,28 @@ const APPENDIX = [
 
 /* ───────── shared maps ───────── */
 const ENDPOINTS_BY_ID = Object.fromEntries(ENDPOINTS.map(e => [e.id, e]));
-const GROUP_ORDER = ["REFERENCE","INFERENCE","DRONE PERCEPTION","KEY MANAGEMENT","FEEDBACK","GUIDES","APPENDIX"];
+const GROUP_ORDER = ["REFERENCE","INFERENCE","DRONE PERCEPTION","KEY MANAGEMENT","FEEDBACK","BATCH & BULK","GUIDES","APPENDIX"];
+
+/* ───────── BATCH & BULK (At-scale) sub-entries ─────────
+   A new nav group above GUIDES. Each is a rich custom page (like a
+   guide) rather than a single endpoint: it composes real /api/* calls,
+   shows live code in 4 languages, and runs them in a live terminal. */
+/* Short nav labels (no em-dashes) + an inline icon per entry. The long,
+   descriptive titles live only in the article headers as a subtitle line. */
+const SCALE = [
+  { id:"scale-batch",     group:"BATCH & BULK", nav:"Batch",     title:"Batch", lede:"One call, many leaves",
+    icon:'<svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>',
+    summary:"Send many images in a single request to /api/predict/batch or /api/scan/batch." },
+  { id:"scale-bulk",      group:"BATCH & BULK", nav:"Bulk",      title:"Bulk", lede:"Many calls, big jobs",
+    icon:'<svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+    summary:"Chunk thousands of images into batches and run them with bounded concurrency and retries." },
+  { id:"scale-workbench", group:"BATCH & BULK", nav:"Workbench", title:"The Workbench", lede:"Compose, watch the code rewrite, run it live",
+    icon:'<svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+    summary:"Compose a job from real endpoints, watch the code rewrite itself, and run it live." },
+  { id:"scale-recipes",   group:"BATCH & BULK", nav:"Recipes",   title:"Recipes & downloads", lede:"Ready-to-run scripts and a starter kit",
+    icon:'<svg class="nav-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+    summary:"Ready-to-run scripts in cURL, Python, Node.js and JavaScript, plus a starter kit." }
+];
 
 /* ─────────────────────────────────────────────────────────────────
    UTILITIES
@@ -2099,6 +2367,34 @@ const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 const escape = (s) => String(s ?? "")
   .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
   .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+
+/* Lightweight syntax highlighter for the doc code blocks. A SINGLE
+   left-to-right tokenizer (so there are no nested-span bugs): the
+   alternation is ordered comments → strings → keywords → booleans →
+   numbers, and whatever a token swallows can't be re-tokenised. Plain
+   text between tokens is escaped. Emits .tok-* spans already styled in
+   the stylesheet (lines ~831). Works for the curl/JS/Python/JSON we use. */
+function hlCode(raw){
+  const text = String(raw == null ? "" : raw);
+  const re = /(\/\*[\s\S]*?\*\/|\/\/[^\n]*|#[^\n]*)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|\b(const|let|var|function|return|await|async|new|for|while|of|in|if|else|import|from|export|default|def|class|try|except|raise|with|as|print|lambda|yield|throw|break|continue)\b|\b(true|false|null|None|True|False|undefined)\b|\b(\d+(?:\.\d+)?)\b/g;
+  let out = "", last = 0, m;
+  while((m = re.exec(text)) !== null){
+    if(m.index > last) out += escape(text.slice(last, m.index));
+    const cls = m[1] ? "tok-cmt" : m[2] ? "tok-str" : m[3] ? "tok-key" : m[4] ? "tok-bool" : "tok-num";
+    out += '<span class="' + cls + '">' + escape(m[0]) + '</span>';
+    last = m.index + m[0].length;
+  }
+  if(last < text.length) out += escape(text.slice(last));
+  return out;
+}
+/* Highlight every static doc code block in `root` (default: document).
+   textContent gives the raw source (entities decoded), so copy buttons —
+   which read textContent — still yield the exact source. */
+function highlightAllCode(root){
+  (root || document).querySelectorAll('.code-block pre code[data-code-out]').forEach(el=>{
+    el.innerHTML = hlCode(el.textContent);
+  });
+}
 
 /* Glossary used by the post-render term-wrapping pass. Every key here
    is matched (case-insensitive, whole-word) inside .prose and inside
@@ -2279,6 +2575,7 @@ function renderNav(){
   const groups = {};
   for(const g of GROUP_ORDER) groups[g] = [];
   for(const ep of ENDPOINTS) groups[ep.group].push(ep);
+  for(const s of SCALE) groups["BATCH & BULK"].push({...s, _isScale:true});
   for(const g of GUIDES) groups["GUIDES"].push({...g, _isGuide:true});
   for(const a of APPENDIX) groups["APPENDIX"].push({...a, _isAppendix:true});
 
@@ -2286,6 +2583,9 @@ function renderNav(){
     const items = groups[g] || [];
     if(items.length === 0) return "";
     const links = items.map(it => {
+      if(it._isScale){
+        return `<a class="scale-link" href="#${it.id}" data-target="${it.id}">${it.icon||""}<span>${escape(it.nav||it.title)}</span></a>`;
+      }
       if(it._isGuide || it._isAppendix){
         return `<a href="#${it.id}" data-target="${it.id}">${escape(it.title)}</a>`;
       }
@@ -2743,7 +3043,7 @@ curl ${BASE}/api/info</code></pre>
   "error": {
     "code": "invalid_parameter",
     "message": "Field 'latitude' = 999 is above the maximum (90).",
-    "docs_url": "https://dxv-404-apin.hf.space/docs#errors",
+    "docs_url": "https://nano-farm-apin.hf.space/docs#errors",
     "hint": "Pass a latitude in the WGS84 range -90 to 90.",
     "field": "latitude"
   }
@@ -2806,21 +3106,7 @@ curl ${BASE}/api/info</code></pre>
       </header>
 
       <h3 id="guide-drone--overview"><span class="§">§</span> The end-to-end picture <a class="perma" href="#guide-drone--overview">#</a></h3>
-      <div class="diagram">
-[ drone flight ]    [ ground station ]    [ APIN /api/scan ]    [ your map UI ]
-       │                    │                    │                    │
-       │  captures frame    │                    │                    │
-       │ ─────────────────► │                    │                    │
-       │                    │  POST + GPS + img  │                    │
-       │                    │ ─────────────────► │                    │
-       │                    │                    │  ensemble infer    │
-       │                    │                    │  + persist scan    │
-       │                    │  201 + GeoJSON     │                    │
-       │                    │ ◄───────────────── │                    │
-       │                    │   add Feature      │                    │
-       │                    │ ─────────────────────────────────────►  │
-       │                    │                    │                    │ paint pin
-      </div>
+      ${scDroneSequence()}
 
       <h3 id="guide-drone--checklist"><span class="§">§</span> Pre-flight checklist <a class="perma" href="#guide-drone--checklist">#</a></h3>
       <div class="procedure">
@@ -2940,6 +3226,660 @@ console.log(data.feature_collection.features.length, "features ready");</code></
       <p>The legacy endpoint routes tomato images into a separate pipeline. The new endpoint is okra/brassica only; tomato frames return a ROUTER_REJECTED tier. The cookie-authenticated browser endpoint remains the route into the tomato pipeline.</p>
     </article>
   `;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   BATCH & BULK (At-scale) — composer · file bar · live code · live
+   terminal · request toast → drawer · recipes · downloads.
+   Additive. Reuses BASE, escape, $, $$ from the main script scope.
+   ════════════════════════════════════════════════════════════════ */
+const SC_MAX = 16, SC_BYTES = 32000000;
+/* Requirement model: what ONE call of each endpoint consumes. */
+const SC_EPS = {
+  "predict/quick":{method:"POST",path:"/api/predict/quick",img:1,  auth:true,           label:"predict/quick",desc:"one image → fast diagnosis"},
+  "predict/full": {method:"POST",path:"/api/predict/full", img:1,  auth:true,           label:"predict/full", desc:"one image → full report + heatmap"},
+  "predict/batch":{method:"POST",path:"/api/predict/batch",img:"N",auth:true,batch:true, label:"predict/batch",desc:"up to 16 images in one call"},
+  "scan":         {method:"POST",path:"/api/scan",         img:1,  auth:true,           label:"scan",         desc:"one image + GPS → GeoJSON"},
+  "scan/batch":   {method:"POST",path:"/api/scan/batch",   img:"N",auth:true,batch:true, label:"scan/batch",   desc:"up to 16 images in one call"},
+  "warmup":       {method:"POST",path:"/api/warmup",       img:0,  auth:false,          label:"warmup",       desc:"no inputs — wakes the model"}
+};
+const SC_EP_KEYS = Object.keys(SC_EPS);
+function scPreset(p){
+  if(p==="bulk")      return [{ep:"predict/batch",n:4}];
+  if(p==="workbench") return [{ep:"predict/quick",n:3},{ep:"predict/batch",n:1},{ep:"warmup",n:1}];
+  return [{ep:"predict/batch",n:1}];
+}
+function scFmtBytes(n){ if(n<1024)return n+" B"; if(n<1048576)return (n/1024).toFixed(0)+" KB"; return (n/1048576).toFixed(1)+" MB"; }
+
+/* How many images a whole step consumes (its count × per-call need). */
+function scStepImgs(st){ const e=SC_EPS[st.ep]; if(!e||e.img===0)return 0; if(e.img==="N")return SC_MAX*st.n; return st.n; }
+function scTotalImgs(steps){ return steps.reduce((a,s)=>a+scStepImgs(s),0); }
+function scTotalCalls(steps){ return steps.reduce((a,s)=>{const e=SC_EPS[s.ep]; return a+(e&&e.batch? s.n : (e&&e.img===0? s.n : s.n)); },0); }
+
+/* ── code generators (real, runnable) ─────────────────────────── */
+function scGen(lang, steps, opt){
+  // SECURITY: the generated / copyable script NEVER embeds the live run-key.
+  // We always print an obviously-fake placeholder — exactly how Stripe and AWS
+  // present sample code. The real key is read from the (in-memory) key field
+  // only at Run time by scRun()/scFire(); it is never written into this text.
+  const KEY = "apin_YOUR_KEY_HERE";
+  const reuse = opt.reuse;
+  if(lang==="curl")   return scGenCurl(steps,KEY,reuse);
+  if(lang==="python") return scGenPy(steps,KEY,reuse);
+  if(lang==="node")   return scGenNode(steps,KEY,reuse);
+  return scGenJs(steps,KEY,reuse);
+}
+function scGenCurl(steps,KEY,reuse){
+  let L=['#!/usr/bin/env bash','# Auto-generated by the APIN Workbench. Run from a folder of leaf images.','set -euo pipefail','KEY="'+KEY+'"','BASE="'+BASE+'"',
+    reuse?'IMG="sample-leaf.png"   # reuse one sample image':'IMAGES=( images/*.png )   # your leaf files','' ];
+  steps.forEach((s,i)=>{ const e=SC_EPS[s.ep]; L.push('# step '+(i+1)+': '+e.label+'  ×'+s.n+'   ('+e.desc+')');
+    if(e.img===0){ L.push('for i in $(seq 1 '+s.n+'); do curl -s -X POST "$BASE'+e.path+'"'+(e.auth?' -H "X-API-Key: $KEY"':'')+'; done'); }
+    else if(e.batch){ const per=SC_MAX; L.push('# '+s.n+' batch call(s), up to '+per+' images each:');
+      L.push('curl -s -X POST "$BASE'+e.path+'" -H "X-API-Key: $KEY" \\'); L.push('  '+(reuse?'-F "files=@$IMG" ':'$(printf -- "-F files=@%s " "${IMAGES[@]:0:'+per+'}")') ); }
+    else { L.push((reuse?'for i in $(seq 1 '+s.n+'); do':'for IMG in "${IMAGES[@]:0:'+s.n+'}"; do')); L.push('  curl -s -X POST "$BASE'+e.path+'" -H "X-API-Key: $KEY" -F "file=@'+(reuse?'$IMG':'$IMG')+'"'); L.push('done'); }
+    L.push(''); });
+  return L.join("\n");
+}
+function scGenPy(steps,KEY,reuse){
+  let L=['"""Auto-generated by the APIN Workbench. pip install requests"""','import requests, glob','','KEY  = "'+KEY+'"','BASE = "'+BASE+'"','H    = {"X-API-Key": KEY}',
+    reuse?'images = ["sample-leaf.png"] * 64   # reuse one sample':'images = sorted(glob.glob("images/*.png"))','results = []',''];
+  steps.forEach((s,i)=>{ const e=SC_EPS[s.ep]; L.push('# step '+(i+1)+': '+e.label+'  x'+s.n+'   ('+e.desc+')');
+    if(e.img===0){ L.push('for _ in range('+s.n+'):'); L.push('    results.append(requests.post(BASE+"'+e.path+'"'+(e.auth?', headers=H':'')+').json())'); }
+    else if(e.batch){ L.push('for b in range('+s.n+'):'); L.push('    chunk = images[b*'+SC_MAX+':(b+1)*'+SC_MAX+'][:'+SC_MAX+']'); L.push('    files = [("files", open(p,"rb")) for p in chunk]'); L.push('    r = requests.post(BASE+"'+e.path+'", headers=H, files=files).json()'); L.push('    for item in r["data"]["items"]:        # partial success: per-item results'); L.push('        results.append(item)'); }
+    else { L.push('for p in images[:'+s.n+']:'); L.push('    r = requests.post(BASE+"'+e.path+'", headers=H, files={"file": open(p,"rb")}).json()'); L.push('    results.append(r["data"])'); }
+    L.push(''); });
+  L.push('print(len(results), "results")');
+  return L.join("\n");
+}
+function scGenNode(steps,KEY,reuse){
+  let L=['// Auto-generated by the APIN Workbench.  Node 18+ (global fetch, FormData, Blob).','import { readFileSync, readdirSync } from "node:fs";','','const KEY  = "'+KEY+'";','const BASE = "'+BASE+'";','const H    = { "X-API-Key": KEY };',
+    reuse?'const images = Array(64).fill("sample-leaf.png");':'const images = readdirSync("images").filter(f=>f.endsWith(".png")).map(f=>"images/"+f);','const results = [];',
+    'const part = p => new Blob([readFileSync(p)]);','' ];
+  steps.forEach((s,i)=>{ const e=SC_EPS[s.ep]; L.push('// step '+(i+1)+': '+e.label+'  x'+s.n+'   ('+e.desc+')');
+    if(e.img===0){ L.push('for (let i=0;i<'+s.n+';i++){'); L.push('  const r = await fetch(BASE+"'+e.path+'", { method:"POST"'+(e.auth?', headers:H':'')+' });'); L.push('  results.push(await r.json());'); L.push('}'); }
+    else if(e.batch){ L.push('for (let b=0;b<'+s.n+';b++){'); L.push('  const fd = new FormData();'); L.push('  for (const p of images.slice(b*'+SC_MAX+', b*'+SC_MAX+'+'+SC_MAX+')) fd.append("files", part(p), p);'); L.push('  const r = await (await fetch(BASE+"'+e.path+'", { method:"POST", headers:H, body:fd })).json();'); L.push('  results.push(...r.data.items);   // per-item results'); L.push('}'); }
+    else { L.push('for (const p of images.slice(0,'+s.n+')){'); L.push('  const fd = new FormData(); fd.append("file", part(p), p);'); L.push('  const r = await (await fetch(BASE+"'+e.path+'", { method:"POST", headers:H, body:fd })).json();'); L.push('  results.push(r.data);'); L.push('}'); }
+    L.push(''); });
+  L.push('console.log(results.length, "results");');
+  return L.join("\n");
+}
+function scGenJs(steps,KEY,reuse){
+  let L=['// Auto-generated by the APIN Workbench. Runs in the browser (this page can run it).','const KEY  = "'+KEY+'";','const BASE = "'+BASE+'";','const H    = { "X-API-Key": KEY };',
+    '// `images` is an array of File objects (from <input type=file> or the Workbench).','const results = [];',''];
+  steps.forEach((s,i)=>{ const e=SC_EPS[s.ep]; L.push('// step '+(i+1)+': '+e.label+'  x'+s.n+'   ('+e.desc+')');
+    if(e.img===0){ L.push('for (let i=0;i<'+s.n+';i++){'); L.push('  const r = await fetch(BASE+"'+e.path+'", { method:"POST"'+(e.auth?', headers:H':'')+' });'); L.push('  results.push(await r.json());'); L.push('}'); }
+    else if(e.batch){ L.push('for (let b=0;b<'+s.n+';b++){'); L.push('  const fd = new FormData();'); L.push('  for (const f of images.slice(b*'+SC_MAX+', b*'+SC_MAX+'+'+SC_MAX+')) fd.append("files", f, f.name);'); L.push('  const r = await (await fetch(BASE+"'+e.path+'", { method:"POST", headers:H, body:fd })).json();'); L.push('  results.push(...r.data.items);'); L.push('}'); }
+    else { L.push('for (const f of images.slice(0,'+s.n+')){'); L.push('  const fd = new FormData(); fd.append("file", f, f.name);'); L.push('  const r = await (await fetch(BASE+"'+e.path+'", { method:"POST", headers:H, body:fd })).json();'); L.push('  results.push(r.data);'); L.push('}'); }
+    L.push(''); });
+  return L.join("\n");
+}
+function scHi(code){ /* tiny highlighter for the dark code panel */
+  return escape(code)
+    .replace(/(#[^\n]*|\/\/[^\n]*|&quot;&quot;&quot;[\s\S]*?&quot;&quot;&quot;)/g,'<span class="c-cm">$1</span>')
+    .replace(/(&quot;[^&]*?&quot;|&#39;[^&]*?&#39;)/g,'<span class="c-st">$1</span>')
+    .replace(/\b(for|in|const|let|await|async|import|from|def|print|return|new|of|if|set)\b/g,'<span class="c-kw">$1</span>')
+    .replace(/\b(fetch|requests|curl|append|json|post|open|FormData|Blob)\b/g,'<span class="c-fn">$1</span>');
+}
+
+/* ── synthetic sample leaf image (so Run works with zero uploads) ── */
+let _scSampleBlob=null, _scSampleUrl=null;
+function scSample(cb){
+  if(_scSampleBlob){ cb(_scSampleBlob,_scSampleUrl); return; }
+  const c=document.createElement("canvas"); c.width=c.height=224; const x=c.getContext("2d");
+  const g=x.createLinearGradient(0,0,224,224); g.addColorStop(0,"#3f7a3a"); g.addColorStop(1,"#79a14a"); x.fillStyle=g; x.fillRect(0,0,224,224);
+  x.strokeStyle="rgba(30,60,20,.5)"; x.lineWidth=2; x.beginPath(); x.moveTo(112,12); x.lineTo(112,212); for(let i=1;i<7;i++){x.moveTo(112,30*i);x.lineTo(60+(i%2?40:-40),30*i+18);} x.stroke();
+  for(let i=0;i<900;i++){ x.fillStyle="rgba(0,0,0,"+(Math.random()*.08)+")"; x.fillRect(Math.random()*224,Math.random()*224,2,2); }
+  c.toBlob(b=>{ _scSampleBlob=b; _scSampleUrl=URL.createObjectURL(b); cb(b,_scSampleUrl); },"image/png");
+}
+
+/* ── real animated visuals (replace the old ASCII art) ─────────
+   Hand-drawn SVG in the pipeline-page vocabulary: marching dashed
+   flow lines (stroke-dasharray), paper/green/ochre palette, soft
+   pulse. All motion is disabled under prefers-reduced-motion. */
+function scBatchFigure(){
+  // N leaves fan into ONE request → model → one result per image,
+  // including a partial-success amber item. Shows files[] → data.items[].
+  const tags=['1A','1A','2','OOD','1A'];
+  let leaves='', results='';
+  for(let i=0;i<5;i++){
+    const y=24+i*24, amber=(i===3);
+    leaves += `<path class="leaf" d="M40 ${y} q10 -8 20 0 q-10 8 -20 0Z"/>`;
+    leaves += `<path class="flow" d="M62 ${y} C 112 ${y}, 134 78, 192 78"/>`;
+    results += `<path class="flow${amber?' warn':''}" d="M404 78 C 456 78, 474 ${y}, 524 ${y}"/>`;
+    results += `<rect class="box" x="528" y="${y-9}" width="98" height="18" rx="5"/>`;
+    results += `<text class="chip${amber?' amber':''}" x="536" y="${y+4}">[${String(i).padStart(2,'0')}] ${amber?'⚠ err':tags[i]}</text>`;
+  }
+  return `
+  <div class="sc-fig">
+    <div class="sc-fig-cap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg> one request · many results</div>
+    <svg class="scene" viewBox="0 0 640 162" role="img" aria-label="Many leaf images fan into a single batch request and return one result per image, including one partial-success error.">
+      ${leaves}
+      <text class="sub" x="30" y="152">12 images · files[]</text>
+      <rect class="box" x="192" y="61" width="118" height="34" rx="8"/>
+      <text class="lbl" x="204" y="76">POST</text>
+      <text class="sub" x="204" y="89">/predict/batch</text>
+      <path class="flow" d="M310 78 H 344"/>
+      <rect class="box srv" x="344" y="61" width="60" height="34" rx="8"/>
+      <text class="lbl" x="356" y="82">model</text>
+      <circle class="pulse" cx="374" cy="56" r="4.5" fill="var(--green)"/>
+      ${results}
+      <text class="sub" x="528" y="152">data.items[] · ok_count 4 · error_count 1</text>
+    </svg>
+    <div class="sc-fig-legend">
+      <i><span class="sw" style="background:var(--green-pale);border-color:var(--green-soft)"></span> success → <b>result</b></i>
+      <i><span class="sw" style="background:#fbeccf;border-color:var(--ochre)"></span> bad image → <b>ok:false</b> + <b>error</b></i>
+      <i>one bad image never fails the batch</i>
+    </div>
+  </div>`;
+}
+function scBulkFigure(){
+  // 1,000 leaves → split into ≤16 chunks → bounded pool of 4 concurrent
+  // workers → collect + retry. Animated progress bar + back-off rules.
+  const wy=[12,46,80,114];
+  const workers = wy.map((y,i)=>`<g class="worker${i?' w'+(i+1):''}">`+
+    `<rect class="box" x="262" y="${y}" width="82" height="26" rx="8"/>`+
+    `<text class="lbl" x="274" y="${y+13}">w${i+1}</text>`+
+    `<text class="sub" x="300" y="${y+13}">b${String(i+1).padStart(2,'0')}</text></g>`).join("");
+  const fanIn  = wy.map(y=>`<path class="flow" d="M220 78 C 244 78, 244 ${y+13}, 262 ${y+13}"/>`).join("");
+  const fanOut = wy.map(y=>`<path class="flow" d="M344 ${y+13} C 396 ${y+13}, 396 78, 432 78"/>`).join("");
+  return `
+  <div class="sc-fig">
+    <div class="sc-fig-cap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> bounded concurrency · chunk · retry</div>
+    <svg class="scene" viewBox="0 0 540 156" role="img" aria-label="A thousand leaves split into batches of sixteen, processed by a bounded pool of four concurrent workers, then collected with retries.">
+      <rect class="box" x="14" y="55" width="86" height="46" rx="10"/>
+      <text class="lbl" x="28" y="76">1,000</text><text class="sub" x="28" y="91">leaves</text>
+      <path class="flow" d="M100 78 H 150"/>
+      <rect class="box" x="150" y="58" width="70" height="40" rx="9"/>
+      <text class="lbl" x="162" y="75">split</text><text class="sub" x="162" y="90">≤16 ×63</text>
+      ${fanIn}${workers}${fanOut}
+      <rect class="box srv" x="432" y="58" width="92" height="40" rx="9"/>
+      <text class="lbl" x="446" y="75">collect</text><text class="sub" x="446" y="90">+ retry</text>
+      <circle class="pulse" cx="478" cy="48" r="4.5" fill="var(--green)"/>
+    </svg>
+    <div class="sc-fig-bar"><i></i></div>
+    <div class="sc-fig-legend">
+      <i><b>712 / 1000</b> done · <b>4</b> retried</i>
+      <i>429 / 5xx → back off <b>1s · 2s · 4s</b></i>
+      <i>idempotent → re-run only failures</i>
+    </div>
+  </div>`;
+}
+
+/* Animated sequence diagram for the Drone integration guide (replaces
+   the old ASCII art). Four lifelines, marching dashed message arrows,
+   one self-activation box, an amber return edge. Motion off under
+   prefers-reduced-motion via the shared .sc-fig rules. */
+function scDroneSequence(){
+  const A=[{x:88,t:'drone flight'},{x:280,t:'ground station'},{x:478,t:'APIN /api/scan'},{x:656,t:'your map UI'}];
+  const top=A.map(a=>`<rect class="box" x="${a.x-68}" y="6" width="136" height="30" rx="8"/><text class="lbl" x="${a.x}" y="25" text-anchor="middle">${a.t}</text>`).join("");
+  const lines=A.map(a=>`<line class="wire" x1="${a.x}" y1="38" x2="${a.x}" y2="292" stroke-dasharray="3 4"/>`).join("");
+  const msg=(y,x1,x2,label,ret)=>{const d=x2>x1?1:-1;return `<text class="sub" x="${(x1+x2)/2}" y="${y-7}" text-anchor="middle">${label}</text>`+
+    `<path class="flow${ret?' warn':''}" marker-end="url(#scArr${ret?'R':''})" d="M${x1+9*d} ${y} H ${x2-11*d}"/>`;};
+  return `
+  <div class="sc-fig">
+    <div class="sc-fig-cap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg> flight plan → GeoJSON Feature</div>
+    <svg class="scene" viewBox="0 0 744 308" role="img" aria-label="Sequence: the drone captures a frame, the ground station POSTs it with GPS to APIN /api/scan, APIN runs ensemble inference and persists the scan, returns a 201 with a GeoJSON Feature, the ground station adds the Feature to the map UI, and the map paints a pin.">
+      <defs>
+        <marker id="scArr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 Z" fill="var(--green-soft)"/></marker>
+        <marker id="scArrR" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 Z" fill="var(--ochre)"/></marker>
+      </defs>
+      ${top}${lines}
+      ${msg(78,88,280,'captures frame')}
+      ${msg(122,280,478,'POST + GPS + img')}
+      <rect class="box srv" x="452" y="150" width="52" height="42" rx="7"/>
+      <text class="sub" x="478" y="167" text-anchor="middle">ensemble</text>
+      <text class="sub" x="478" y="181" text-anchor="middle">+ persist</text>
+      ${msg(220,478,280,'201 + GeoJSON',true)}
+      ${msg(258,280,656,'add Feature')}
+      <circle class="pulse" cx="656" cy="286" r="5" fill="var(--green)"/>
+      <text class="sub" x="656" y="302" text-anchor="middle">paint pin</text>
+    </svg>
+  </div>`;
+}
+
+/* ════════ render the section (4 articles) ════════ */
+function renderScale(){
+  const lab = (preset)=>`<div class="sc-lab" data-preset="${preset}"></div>`;
+  return `
+  <h2 class="section serif" id="scale-section">Batch &amp; Bulk <a class="perma" href="#scale-section">#</a></h2>
+
+  <article class="entry section-block" id="scale-batch" data-entry-number="At scale" data-ep="scale-batch">
+    <header class="entry-header"><div class="entry-title-block">
+      <h2 class="serif">Batch <a href="#scale-batch" class="anchor" data-perma="scale-batch">#</a></h2>
+      <p class="summary">${escape(SCALE[0].summary)}</p>
+    </div></header>
+    <div class="prose sc-lead">A <strong>batch</strong> is a single HTTP request that carries many images. Send up to <code>${SC_MAX}</code> images and <code>32 MB</code> total to <a href="#predict-batch">/api/predict/batch</a> (or <a href="#scan-batch">/api/scan/batch</a>). The response is <strong>partial-success</strong>: every image gets its own result, and a single bad image returns an error object beside the others, so the batch still completes.</div>
+    ${scBatchFigure()}
+
+    <h3 id="scale-batch--input"><span class="§">§</span> Sending your images <a class="perma" href="#scale-batch--input">#</a></h3>
+    <div class="prose">Two ways to provide the images. The field on the wire is always <code>files[]</code>; the Workbench will expand a <code>.zip</code> for you.</div>
+    <div class="sc-modebar" data-modebar>
+      <button class="sc-mode on" data-mode="files"><span class="r"></span><span><b>Multiple files</b> — one part per image, count shown live</span></button>
+      <button class="sc-mode" data-mode="zip"><span class="r"></span><span><b>ZIP archive</b> — drop one <code>.zip</code>, we read N inside</span></button>
+    </div>
+    <p style="font-size:12.5px;color:var(--ink-meta)">Limit: <strong>${SC_MAX}</strong> images / call · <strong>32 MB</strong> total. Bigger job? See <a href="#scale-bulk">Bulk ↗</a>.</p>
+
+    <h3 id="scale-batch--lab"><span class="§">§</span> Compose &amp; run a batch <a class="perma" href="#scale-batch--lab">#</a></h3>
+    ${lab("batch")}
+
+    <h3 id="scale-batch--response"><span class="§">§</span> Reading the response <a class="perma" href="#scale-batch--response">#</a></h3>
+    <div class="prose">A batch returns the standard collection envelope: <code>data.items[]</code> holds one entry per image, in order. Each entry is <code>{ index, filename, ok, result | error }</code> — on success <code>ok:true</code> with the diagnosis under <code>result</code>; on failure <code>ok:false</code> with an <code>error</code> object. The counters <code>data.ok_count</code> / <code>data.error_count</code> give you the split without scanning the array.</div>
+    <div class="note note--info"><div class="label">Partial success</div><p>One unreadable image does <strong>not</strong> fail the batch. The bad item carries <code>ok:false</code> and an <code>error.code</code> (e.g. <code>invalid_parameter</code> for a corrupt image, <code>inference_failed</code> for a model error); the rest still return their <code>result</code>. Always iterate <code>items[]</code> and check each <code>ok</code> rather than assuming all-or-nothing.</p></div>
+  </article>
+
+  <article class="entry section-block" id="scale-bulk" data-entry-number="At scale" data-ep="scale-bulk">
+    <header class="entry-header"><div class="entry-title-block">
+      <h2 class="serif">Bulk <a href="#scale-bulk" class="anchor" data-perma="scale-bulk">#</a></h2>
+      <p class="summary">${escape(SCALE[1].summary)}</p>
+    </div></header>
+    <div class="prose sc-lead"><strong>Bulk</strong> is the other axis: a job too big for one batch. Split it into batches of ≤ <code>${SC_MAX}</code>, run several at once with a <strong>bounded concurrency pool</strong>, and retry transient failures. One batch is server-side; bulk is your client orchestrating many batches.</div>
+    <h3 id="scale-bulk--shape"><span class="§">§</span> The shape of a bulk job <a class="perma" href="#scale-bulk--shape">#</a></h3>
+    ${scBulkFigure()}
+    <div class="note note--warn"><div class="label">Three rules that keep bulk healthy</div><ul class="bn-list"><li><strong>Bound the concurrency</strong> (4–8). Unbounded <code>Promise.all</code> over 1,000 calls will trip rate limits and exhaust sockets.</li><li><strong>Back off on 429 / 5xx</strong> — wait 1s, 2s, 4s… The API tells you the real cap in the error envelope.</li><li><strong>Stay idempotent</strong> — collect failed items and re-run only those; re-sending a succeeded image is harmless.</li></ul></div>
+    <h3 id="scale-bulk--lab"><span class="§">§</span> Compose &amp; run a bulk sweep <a class="perma" href="#scale-bulk--lab">#</a></h3>
+    ${lab("bulk")}
+  </article>
+
+  <article class="entry section-block" id="scale-workbench" data-entry-number="At scale" data-ep="scale-workbench">
+    <header class="entry-header"><div class="entry-title-block">
+      <h2 class="serif">The Workbench <a href="#scale-workbench" class="anchor" data-perma="scale-workbench">#</a></h2>
+      <p class="summary">${escape(SCALE[2].summary)}</p>
+    </div></header>
+    <div class="prose sc-lead">Compose a job from real endpoints — pick what you call and how many times. The <strong>requirements update</strong> (10 × <code>predict/quick</code> ⇒ 10 images), the <strong>code rewrites itself</strong> in all four languages, and <strong>Run</strong> fires the real calls into a live terminal. Every request slides in as a notification you can click to inspect.</div>
+    <div class="note note--info"><div class="label">Your key never leaves your browser</div><p>The Workbench calls APIN directly from this page. Your key sits in memory only — it is never logged or sent anywhere but the API. Don't paste a key on a shared machine.</p></div>
+    <h3 id="scale-workbench--lab"><span class="§">§</span> Workbench <a class="perma" href="#scale-workbench--lab">#</a></h3>
+    ${lab("workbench")}
+  </article>
+
+  <article class="entry section-block" id="scale-recipes" data-entry-number="At scale" data-ep="scale-recipes">
+    <header class="entry-header"><div class="entry-title-block">
+      <h2 class="serif">Recipes &amp; downloads <a href="#scale-recipes" class="anchor" data-perma="scale-recipes">#</a></h2>
+      <p class="summary">${escape(SCALE[3].summary)}</p>
+    </div></header>
+    <div class="prose sc-lead">Ready-to-run scripts for the common shapes. Each downloads as a real file; the starter kit bundles all four languages plus a sample leaf and a README.</div>
+    <div class="sc-kit"><span class="em">📦</span><div><b>Starter kit</b><p>cURL · Python · Node.js · JavaScript + <code>samples/</code> + README, zipped in your browser.</p></div><button data-kit>⤓ Download starter kit (.zip)</button></div>
+    <div class="sc-recipes" data-recipes></div>
+  </article>`;
+}
+
+/* ════════ the engine: lab mini-IDE, terminal, toast → drawer ════════ */
+const SC_RECORDS = [];
+
+function wireScale(){
+  if(!document.getElementById("scale-section")) return;
+  if(!document.getElementById("sc-toasts")){
+    const layer=document.createElement("div"); layer.id="sc-toasts"; layer.className="sc-toasts"; document.body.appendChild(layer);
+    const back=document.createElement("div"); back.id="sc-drawer-back"; back.className="sc-drawer-back"; document.body.appendChild(back);
+    const dr=document.createElement("div"); dr.id="sc-drawer"; dr.className="sc-drawer"; document.body.appendChild(dr);
+    back.addEventListener("click", scCloseDrawer);
+    document.addEventListener("keydown", e=>{ if(e.key==="Escape" && document.getElementById("sc-drawer").classList.contains("on")) scCloseDrawer(); });
+    // Close any open endpoint picker when clicking outside it.
+    document.addEventListener("click", e=>{
+      if(e.target.closest(".sc-ep")) return;   // clicks inside a picker are handled by the composer
+      document.querySelectorAll(".sc-lab").forEach(l=>{
+        if(l.__sc && l.__sc.openPicker!=null && l.__sc.openPicker!==-1){ l.__sc.openPicker=-1; if(l.querySelector("[data-comp]")) scRenderComposer(l); }
+      });
+    });
+  }
+  scSample(()=>{});                       // pre-warm the demo image
+  document.querySelectorAll(".sc-lab").forEach(mountLab);
+  document.querySelectorAll("[data-modebar]").forEach(mb=>{
+    mb.addEventListener("click", e=>{ const b=e.target.closest(".sc-mode"); if(!b)return;
+      mb.querySelectorAll(".sc-mode").forEach(x=>x.classList.toggle("on", x===b));
+      const lab=mb.closest("article").querySelector(".sc-lab"); if(lab&&lab.__sc){ lab.__sc.mode=b.dataset.mode; scRenderTree(lab); }
+    });
+  });
+  scRenderRecipes();
+  const kit=document.querySelector("[data-kit]"); if(kit) kit.addEventListener("click", scDownloadKit);
+}
+
+function mountLab(el){
+  const preset=el.dataset.preset||"batch";
+  el.__sc={ preset, steps:scPreset(preset), images:[], key:"", reuse:true, lang:"curl", mode:"files", running:false, openPicker:-1, openGroups:{images:true,inputs:true,generated:true,samples:false} };
+  el.innerHTML =
+    '<div class="sc-lab-head"><span class="dots"><i></i><i></i><i></i></span><span class="t">workbench · '+preset+'</span></div>'+
+    '<div class="sc-lab-grid">'+
+      '<div class="sc-files" data-tree></div>'+
+      '<div class="sc-mid">'+
+        '<div class="sc-comp" data-comp></div>'+
+        '<div class="sc-codewrap">'+
+          '<div class="sc-codebar">'+
+            '<span class="sc-fname" data-fname><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg> <span data-fnametxt>apin_job.sh</span></span>'+
+            '<div class="sc-codetabs" data-tabs>'+
+              '<button data-l="curl" class="on">cURL</button><button data-l="python">Python</button>'+
+              '<button data-l="node">Node.js</button><button data-l="js">JavaScript</button>'+
+            '</div>'+
+            '<div class="sc-codeacts">'+
+              '<button data-copy title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> <span data-copytxt>copy</span></button>'+
+              '<button data-dl title="Download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>'+
+            '</div>'+
+          '</div>'+
+          '<div class="sc-codebody"><div class="sc-gutter" data-gutter></div><pre><code data-code></code></pre></div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="sc-run">'+
+        '<div class="sc-run-ctl">'+
+          '<div class="sc-keyrow">'+
+            '<span class="kk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.5 12.5 20 3l1.5 1.5-2 2 1.5 1.5-2 2-1.5-1.5-2.5 2.5"/></svg></span>'+
+            '<input data-key class="mask" type="text" placeholder="apin_… your API key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="apin-workbench-key" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other">'+
+            '<button class="eye" data-eye title="Show / hide key"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>'+
+          '</div>'+
+          '<div class="sc-keyhint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Used only at run time, in this tab — never written into the code.</div>'+
+          '<button class="sc-runbtn" data-run><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg> Run job</button>'+
+        '</div>'+
+        '<div class="sc-run-out">'+
+          '<div class="sc-term" data-term><div class="ln dim">› ready. Compose a job, add your key, and Run. Uses a synthetic sample leaf if you upload nothing.</div></div>'+
+          '<div class="sc-summary" data-summary></div>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    '<input type="file" data-file multiple accept="image/png,image/jpeg,.zip" style="display:none">';
+
+  // events
+  el.querySelector(".sc-codebar").addEventListener("click",e=>{
+    const b=e.target.closest("button[data-l]");
+    if(b){ el.__sc.lang=b.dataset.l; el.querySelectorAll("[data-tabs] button[data-l]").forEach(x=>x.classList.toggle("on",x===b)); scRegen(el); return; }
+    if(e.target.closest("[data-copy]")){ navigator.clipboard&&navigator.clipboard.writeText(scGen(el.__sc.lang,el.__sc.steps,el.__sc));
+      const t=el.querySelector("[data-copytxt]"); if(t){ t.textContent="copied"; setTimeout(()=>{ const c=el.querySelector("[data-copytxt]"); if(c)c.textContent="copy"; },1200); } return; }
+    if(e.target.closest("[data-dl]")){ const ext={curl:"sh",python:"py",node:"mjs",js:"js"}[el.__sc.lang]; scDownload("apin_job."+ext, scGen(el.__sc.lang,el.__sc.steps,el.__sc)); }
+  });
+  el.querySelector("[data-eye]").addEventListener("click",()=>{ const inp=el.querySelector("[data-key]"); if(inp) inp.classList.toggle("mask"); });
+  el.querySelector("[data-comp]").addEventListener("click",e=>scCompClick(el,e));
+  el.querySelector("[data-comp]").addEventListener("change",e=>scCompChange(el,e));
+  el.querySelector("[data-comp]").addEventListener("input",e=>scCompChange(el,e));
+  el.querySelector("[data-key]").addEventListener("input",e=>{ el.__sc.key=e.target.value; });
+  el.querySelector("[data-run]").addEventListener("click",()=>scRun(el));
+  el.querySelector("[data-file]").addEventListener("change",e=>scAddFiles(el, e.target.files));
+  el.querySelector("[data-tree]").addEventListener("click",e=>scTreeClick(el,e));
+  // drag-drop onto the tree / files
+  const fz=el.querySelector("[data-tree]");
+  fz.addEventListener("dragover",e=>{e.preventDefault();}); fz.addEventListener("drop",e=>{e.preventDefault(); scAddFiles(el, e.dataTransfer.files);});
+
+  scRenderTree(el); scRenderComposer(el); scRegen(el);
+}
+
+/* ── composer ── */
+function scRenderComposer(el){
+  const st=el.__sc;
+  const shortPath = e => (e.path||"").replace(/^\/api/,"");
+  const steps=st.steps.map((s,i)=>{
+    const e=SC_EPS[s.ep];
+    const need = e.img===0 ? "no inputs" : (e.img==="N" ? "≤"+SC_MAX+"/call" : (s.n+" img"+(s.n>1?"s":"")));
+    const open = (st.openPicker===i);
+    const menu = open ? '<div class="sc-ep-menu">'+SC_EP_KEYS.map(k=>{ const o=SC_EPS[k];
+        return '<div class="sc-ep-opt'+(k===s.ep?' sel':'')+'" data-epopt="'+k+'"><span class="mp">'+o.method+'</span><span class="pth">'+escape(shortPath(o))+'</span><span class="dsc">'+escape(o.desc)+'</span></div>'; }).join("")+'</div>' : '';
+    return '<div class="sc-step" data-i="'+i+'">'+
+      '<span class="n">'+(i+1)+'</span>'+
+      '<div class="sc-ep'+(open?' open':'')+'">'+
+        '<button class="sc-ep-cur" data-eptoggle type="button">'+
+          '<span class="mp">'+e.method+'</span>'+
+          '<span class="pth">'+escape(shortPath(e))+'</span>'+
+          '<span class="dsc">'+escape(e.desc)+'</span>'+
+          '<span class="cv">▼</span>'+
+        '</button>'+menu+
+      '</div>'+
+      '<div class="sc-count"><button data-dec type="button" aria-label="decrease">−</button>'+
+        '<input class="cnt" data-cnt type="number" min="1" max="999" value="'+s.n+'" aria-label="count">'+
+        '<button data-inc type="button" aria-label="increase">+</button></div>'+
+      '<span class="need">'+need+'</span>'+
+      '<span class="rm" data-rm title="remove step">×</span>'+
+    '</div>';
+  }).join("");
+  const totImg=scTotalImgs(st.steps), totCall=scTotalCalls(st.steps);
+  const have=st.reuse? totImg : st.images.length;
+  const ok = st.reuse || have>=totImg || totImg===0;
+  const chk='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+  const imgIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5L9 20"/></svg>';
+  const callIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>';
+  const okIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="8.5 12 11 14.5 15.5 9.5"/></svg>';
+  const warnIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  const status = totImg===0
+    ? '<div class="sc-status ok">'+okIcon+'<span>No images needed for this job.</span></div>'
+    : ok ? '<div class="sc-status ok">'+okIcon+'<span>'+(st.reuse?'Reusing the sample leaf ×'+totImg:have+' / '+totImg+' images ready')+'</span></div>'
+         : '<div class="sc-status warn">'+warnIcon+'<span>Have '+have+' of '+totImg+' — add '+(totImg-have)+' more, or enable reuse.</span></div>';
+  el.querySelector("[data-comp]").innerHTML =
+    '<div class="sc-comp-ttl">Compose your job</div>'+steps+
+    '<button class="sc-addstep" data-add type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> add step</button>'+
+    '<div class="sc-tally">'+
+      '<span class="pill">'+imgIcon+' <b>'+totImg+'</b> image'+(totImg===1?'':'s')+'</span>'+
+      '<span class="pill">'+callIcon+' <b>'+totCall+'</b> call'+(totCall===1?'':'s')+'</span>'+
+      '<label class="sc-check"><input type="checkbox" data-reuse'+(st.reuse?' checked':'')+'><span class="bx">'+chk+'</span> reuse one sample ×N</label>'+
+    '</div>'+status;
+}
+function scCompClick(el,e){
+  const st=el.__sc;
+  if(e.target.closest("[data-add]")){ st.openPicker=-1; st.steps.push({ep:"predict/quick",n:1}); scRenderComposer(el); scRenderTree(el); scRegen(el); return; }
+  const rm=e.target.closest("[data-rm]"); if(rm){ const i=+rm.closest(".sc-step").dataset.i; st.steps.splice(i,1); if(!st.steps.length)st.steps.push({ep:"predict/quick",n:1}); st.openPicker=-1; scRenderComposer(el); scRenderTree(el); scRegen(el); return; }
+  const tog=e.target.closest("[data-eptoggle]"); if(tog){ const i=+tog.closest(".sc-step").dataset.i; st.openPicker=(st.openPicker===i? -1 : i); scRenderComposer(el); return; }
+  const opt=e.target.closest("[data-epopt]"); if(opt){ const i=+opt.closest(".sc-step").dataset.i; st.steps[i].ep=opt.dataset.epopt; st.openPicker=-1; scRenderComposer(el); scRenderTree(el); scRegen(el); return; }
+  const inc=e.target.closest("[data-inc]"); if(inc){ const i=+inc.closest(".sc-step").dataset.i; st.steps[i].n=Math.min(999,st.steps[i].n+1); scRenderComposer(el); scRenderTree(el); scRegen(el); return; }
+  const dec=e.target.closest("[data-dec]"); if(dec){ const i=+dec.closest(".sc-step").dataset.i; st.steps[i].n=Math.max(1,st.steps[i].n-1); scRenderComposer(el); scRenderTree(el); scRegen(el); return; }
+}
+function scCompChange(el,e){
+  const st=el.__sc;
+  if(e.target.matches("[data-reuse]")){ st.reuse=e.target.checked; scRenderComposer(el); scRenderTree(el); scRegen(el); return; }
+  const row=e.target.closest(".sc-step"); if(!row) return; const i=+row.dataset.i;
+  if(e.target.matches("[data-cnt]")){
+    st.steps[i].n=Math.max(1,Math.min(999,+e.target.value||1));
+    // On commit (change/blur) re-render the whole composer; while typing (input)
+    // only refresh the code so the number field keeps focus.
+    if(e.type==="change"){ scRenderComposer(el); scRenderTree(el); scRegen(el); }
+    else { scRegen(el); }
+  }
+}
+
+/* ── file tree ── */
+function scRenderTree(el){
+  const st=el.__sc; const og=st.openGroups;
+  const imgNodes = st.reuse
+    ? '<div class="sc-node"><span class="ic">🍃</span><span class="nm">sample-leaf.png</span><span class="sz">synthetic</span></div>'
+    : (st.images.length? st.images.map((im,i)=>'<div class="sc-node" data-img="'+i+'"><span class="ic">🍃</span><span class="nm">'+escape(im.name)+'</span><span class="sz">'+scFmtBytes(im.size)+'</span><span class="x" data-rmimg="'+i+'">×</span></div>').join("")
+        : '<div class="sc-node" style="cursor:default;color:var(--ink-faint)"><span class="ic">＋</span><span class="nm">drop images / browse</span></div>');
+  const gen=['curl→apin_job.sh','python→apin_job.py','node→apin_job.mjs','js→apin_job.js'];
+  const ext={curl:"sh",python:"py",node:"mjs",js:"js"};
+  const genNodes=["curl","python","node","js"].map(l=>{ const nm="apin_job."+ext[l]; return '<div class="sc-node'+(l===st.lang?' sel':'')+'" data-genlang="'+l+'"><span class="ic">📄</span><span class="nm">'+nm+'</span><span class="x" data-gendl="'+l+'">⤓</span></div>'; }).join("");
+  function grp(key,icon,title,count,kids){ return '<div class="sc-tree-grp'+(og[key]?'':' closed')+'" data-grp="'+key+'"><div class="gh"><span class="caret">▾</span><span>'+icon+'</span><span>'+title+'</span>'+(count!=null?'<span class="ct">'+count+'</span>':'')+'</div><div class="kids">'+kids+'</div></div>'; }
+  const zipNode = st.mode==="zip" ? '<div class="sc-node" data-zip><span class="ic">📦</span><span class="nm">drop a .zip →</span></div>' : '';
+  el.querySelector("[data-tree]").innerHTML =
+    '<div class="ttl">Workbench ▾</div>'+
+    grp("images","📁","images/", st.reuse?"1":st.images.length, imgNodes)+
+    grp("inputs","📁","inputs/", null, '<div class="sc-node"><span class="ic">🔑</span><span class="nm">api-key</span><span class="sz">'+(st.key?'••••':'none')+'</span></div>'+zipNode)+
+    grp("generated","📁","generated/", "4", genNodes)+
+    grp("samples","📁","samples/", "1", '<div class="sc-node" data-addsample><span class="ic">🍃</span><span class="nm">sample-leaf.png</span><span class="sz">use</span></div>');
+}
+function scTreeClick(el,e){
+  const st=el.__sc;
+  const gh=e.target.closest(".gh"); if(gh){ const k=gh.parentNode.dataset.grp; st.openGroups[k]=!st.openGroups[k]; scRenderTree(el); return; }
+  const dl=e.target.closest("[data-gendl]"); if(dl){ const l=dl.dataset.gendl; const ext={curl:"sh",python:"py",node:"mjs",js:"js"}[l]; scDownload("apin_job."+ext, scGen(l,st.steps,st)); return; }
+  const gl=e.target.closest("[data-genlang]"); if(gl){ st.lang=gl.dataset.genlang; el.querySelectorAll("[data-tabs] button[data-l]").forEach(x=>x.classList.toggle("on",x.dataset.l===st.lang)); scRegen(el); return; }
+  const rmi=e.target.closest("[data-rmimg]"); if(rmi){ st.images.splice(+rmi.dataset.rmimg,1); scRenderTree(el); scRenderComposer(el); scRegen(el); return; }
+  if(e.target.closest("[data-zip]")||e.target.closest("[data-addsample]")||e.target.closest('.sc-node[style*="cursor:default"]')||e.target.closest('.sc-node .ic')){
+    if(e.target.closest("[data-addsample]")){ st.reuse=true; scRenderComposer(el); scRenderTree(el); scRegen(el); return; }
+    el.querySelector("[data-file]").click();
+  }
+}
+function scAddFiles(el, fileList){
+  const st=el.__sc; const arr=Array.from(fileList||[]);
+  const zips=arr.filter(f=>/\.zip$/i.test(f.name));
+  const imgs=arr.filter(f=>/^image\//.test(f.type)||/\.(png|jpe?g|webp)$/i.test(f.name));
+  imgs.forEach(f=>st.images.push({name:f.name,size:f.size,file:f}));
+  if(imgs.length){ st.reuse=false; }
+  scRenderComposer(el); scRenderTree(el); scRegen(el);
+  zips.forEach(z=>scReadZip(z).then(items=>{ items.forEach(it=>st.images.push({name:it.name,size:it.blob.size,file:new File([it.blob],it.name,{type:"image/png"})})); if(items.length){st.reuse=false;} scRenderComposer(el); scRenderTree(el); scRegen(el); }).catch(()=>{}));
+}
+
+function scRegen(el){
+  const st=el.__sc;
+  const code = scGen(st.lang, st.steps, st);
+  el.querySelector("[data-code]").innerHTML = scHi(code);
+  // line-number gutter
+  const g=el.querySelector("[data-gutter]");
+  if(g){ const n=code.split("\n").length; let s=""; for(let i=1;i<=n;i++) s+="<span>"+i+"</span>"; g.innerHTML=s; }
+  // filename reflects the active language
+  const fn=el.querySelector("[data-fnametxt]");
+  if(fn) fn.textContent="apin_job."+({curl:"sh",python:"py",node:"mjs",js:"js"}[st.lang]||"sh");
+}
+
+/* ── run: real requests narrated in the live terminal ── */
+async function scRun(el){
+  const st=el.__sc; if(st.running) return;
+  const term=el.querySelector("[data-term]"); const summary=el.querySelector("[data-summary]"); const btn=el.querySelector("[data-run]");
+  term.innerHTML=""; summary.textContent=""; st.running=true; btn.disabled=true; const ol=btn.innerHTML; btn.innerHTML='<span class="pl">⟳</span> running…';
+  st.key=el.querySelector("[data-key]").value.trim();
+  const line=(html,cls)=>{ const d=document.createElement("div"); d.className="ln "+(cls||""); d.innerHTML=html; term.appendChild(d); term.scrollTop=term.scrollHeight; };
+  const need=scTotalImgs(st.steps);
+  // build the image pool
+  let pool=[];
+  if(st.reuse || st.images.length===0){
+    const blob=await new Promise(r=>scSample(b=>r(b)));
+    const f=new File([blob],"sample-leaf.png",{type:"image/png"});
+    pool=Array.from({length:Math.max(need,1)},()=>f);
+    if(!st.reuse && st.images.length===0) line('› no images uploaded — using the synthetic sample leaf','dim');
+  } else { pool=st.images.map(i=>i.file); if(pool.length<need) line('⚠ '+pool.length+' images for '+need+' slots — reusing where needed','acc'); }
+  let pi=0; const nextImg=()=> pool.length? pool[(pi++)%pool.length] : null;
+  if(st.key) line('› key set ✓  base '+BASE,'dim'); else line('› no key set — auth calls will return 401 (that is a real, honest response)','acc');
+  let ok=0, err=0;
+  for(let si=0; si<st.steps.length; si++){
+    const s=st.steps[si], e=SC_EPS[s.ep];
+    line('▸ step '+(si+1)+': '+e.label+' ×'+s.n+'   <span class="dim">'+e.desc+'</span>','hd');
+    const calls=[];
+    if(e.img===0){ for(let k=0;k<s.n;k++) calls.push({files:[]}); }
+    else if(e.batch){ for(let b=0;b<s.n;b++){ const fs=[]; for(let j=0;j<SC_MAX;j++) fs.push(nextImg()); calls.push({files:fs.filter(Boolean)}); } }
+    else { for(let k=0;k<s.n;k++){ const f=nextImg(); calls.push({files:f?[f]:[]}); } }
+    for(const c of calls){
+      const rec=await scFire(e, c.files, st.key);
+      if(rec.ok) ok++; else err++;
+      const sc=rec.ok?'ok':'err';
+      line('  ▸ POST '+e.path+'  <span class="'+sc+'">'+rec.status+'</span> · '+rec.ms+'ms'+(c.files.length?' · '+c.files.length+' img':''), '');
+      // batch per-item rows
+      if(e.batch && rec.json && rec.json.data && Array.isArray(rec.json.data.items)){
+        rec.json.data.items.slice(0,SC_MAX).forEach((it,ix)=>{
+          if(it && it.ok===false && it.error) line('    ['+String((it.index!=null?it.index:ix)+1).padStart(2,'0')+'] <span class="err">⚠ '+escape(it.error.code||"error")+'</span>','');
+          else { const res=(it&&it.result)||{}; const ood=res.out_of_distribution; const d=res.diagnosis||res.label||(ood?'abstained · OOD':(res.tier?'tier '+res.tier:'—')); const cf=res.confidence; const cls=res.diagnosis?'ok':'acc'; line('    ['+String((it&&it.index!=null?it.index:ix)+1).padStart(2,'0')+'] <span class="'+cls+'">'+escape(String(d))+'</span>'+(cf!=null?' <span class="dim">'+(typeof cf==="number"?cf.toFixed(2):cf)+'</span>':''),''); }
+        });
+      }
+    }
+  }
+  line('✓ done · <span class="ok">'+ok+' ok</span>'+(err?' · <span class="err">'+err+' error'+(err>1?'s':'')+'</span>':''),'');
+  summary.innerHTML='<b class="ok">'+ok+'</b> ok'+(err?' · <b class="err">'+err+'</b> error'+(err>1?'s':''):'')+' · click a notification to inspect';
+  st.running=false; btn.disabled=false; btn.innerHTML=ol;
+}
+
+/* one real request → record, toast, return parsed */
+async function scFire(e, files, key){
+  const headers={"X-API-Version":"1.0"}; if(e.auth && key) headers["X-API-Key"]=key;
+  let body=null, curlParts=['curl -X POST "'+BASE+e.path+'"'];
+  if(e.auth) curlParts.push('-H "X-API-Key: apin_YOUR_KEY_HERE"');   // never echo the live key into reproducible cURL
+  if(files && files.length){ const fd=new FormData(); const field=e.batch?"files":"file"; files.forEach(f=>{ fd.append(field, f, f.name); curlParts.push('-F "'+field+'=@'+f.name+'"'); }); body=fd; }
+  const t0=performance.now(); let status=0, ok=false, text="", json=null;
+  try{ const r=await fetch(BASE+e.path,{method:"POST",headers,body}); status=r.status; ok=r.ok; text=await r.text(); try{json=JSON.parse(text);}catch(_){}}
+  catch(ex){ text=String(ex); }
+  const ms=Math.round(performance.now()-t0);
+  const rec={method:"POST",path:e.path,status,ms,ok,reqHeaders:headers,reqNote:(files&&files.length?files.length+(e.batch?" images (files[])":" image (file)"):"no body"),respText:text,json,curl:curlParts.join(" \\\n  ")};
+  SC_RECORDS.unshift(rec); if(SC_RECORDS.length>50) SC_RECORDS.pop();
+  scToast(rec);
+  return rec;
+}
+
+/* ── slide-in request toast ── */
+function scToast(rec){
+  const layer=document.getElementById("sc-toasts"); if(!layer) return;
+  const t=document.createElement("div"); t.className="sc-toast"+(rec.ok?"":" err");
+  t.innerHTML='<div class="r1"><span class="m">'+rec.method+'</span><span class="p">'+escape(rec.path)+'</span></div>'+
+    '<div class="r2"><span class="st '+(rec.ok?'ok':'err')+'">'+rec.status+'</span><span>'+rec.ms+'ms</span><span>'+escape(rec.reqNote)+'</span><span class="go">inspect →</span></div>';
+  t.addEventListener("click",()=>scOpenDrawer(rec));
+  layer.appendChild(t);
+  setTimeout(()=>{ t.style.transition="opacity .4s,transform .4s"; t.style.opacity="0"; t.style.transform="translateX(40px)"; setTimeout(()=>t.remove(),420); }, 6000);
+  while(layer.children.length>4) layer.firstChild.remove();
+}
+
+/* ── light request drawer ── */
+function scOpenDrawer(rec){
+  const dr=document.getElementById("sc-drawer"), back=document.getElementById("sc-drawer-back");
+  let pretty=rec.respText; try{ pretty=JSON.stringify(JSON.parse(rec.respText),null,2); }catch(_){}
+  const hdrs=Object.entries(rec.reqHeaders).map(([k,v])=>'<span class="k">'+escape(k)+'</span><span class="v">'+escape(k==="X-API-Key"?String(v).slice(0,6)+"••••":v)+'</span>').join("");
+  dr.innerHTML=
+    '<div class="sc-drawer-h"><span class="m">'+rec.method+'</span><span class="p">'+escape(rec.path)+'</span>'+
+      '<span class="st '+(rec.ok?'ok':'err')+'">'+rec.status+' · '+rec.ms+'ms</span><span class="cl" data-x>×</span></div>'+
+    '<div class="sc-drawer-b">'+
+      '<div class="sc-dsec"><h5>Request</h5><div class="sc-kv">'+hdrs+'<span class="k">body</span><span class="v">'+escape(rec.reqNote)+'</span></div></div>'+
+      '<div class="sc-dsec"><h5>Response</h5><div class="sc-dcode">'+escape(pretty)+'</div></div>'+
+      '<div class="sc-dsec"><h5>Reproduce (cURL)</h5><div class="sc-dcode">'+escape(rec.curl)+'</div><button class="sc-dcopy" data-curlcopy>⎘ copy curl</button></div>'+
+    '</div>';
+  dr.querySelector("[data-x]").addEventListener("click",scCloseDrawer);
+  dr.querySelector("[data-curlcopy]").addEventListener("click",function(){ navigator.clipboard&&navigator.clipboard.writeText(rec.curl); this.textContent="✓ copied"; });
+  back.classList.add("on"); requestAnimationFrame(()=>dr.classList.add("on"));
+}
+function scCloseDrawer(){ const dr=document.getElementById("sc-drawer"), back=document.getElementById("sc-drawer-back"); if(dr)dr.classList.remove("on"); if(back)back.classList.remove("on"); }
+
+/* ── downloads + zip ── */
+function scDownload(name, text){ const b=new Blob([text],{type:"text/plain"}); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(u),2000); }
+
+const SC_RECIPES=[
+  {id:"folder", title:"Process a folder", lang:"Python · 16 lines", desc:"Walk images/, batch them ≤16, write a CSV of diagnoses.", file:"process_folder.py", langs:["python"]},
+  {id:"sweep",  title:"Nightly sweep", lang:"Node.js · 24 lines", desc:"Cron-friendly: bounded concurrency 4, retries on 429/5xx.", file:"nightly_sweep.mjs", langs:["node"]},
+  {id:"retry",  title:"Retry failures", lang:"cURL + jq · 14 lines", desc:"Re-send only the items that returned an error object.", file:"retry_failures.sh", langs:["curl"]}
+];
+function scRecipeCode(id,lang){
+  const steps=[{ep:"predict/batch",n:8}];
+  if(id==="sweep") return scGen("node",[{ep:"predict/batch",n:63}],{key:"",reuse:false});
+  if(id==="retry") return scGen("curl",[{ep:"predict/batch",n:1}],{key:"",reuse:false});
+  return scGen(lang,steps,{key:"",reuse:false});
+}
+function scRenderRecipes(){
+  const host=document.querySelector("[data-recipes]"); if(!host) return;
+  host.innerHTML=SC_RECIPES.map(r=>'<div class="sc-recipe"><h4>'+escape(r.title)+'</h4><div class="lg">'+escape(r.lang)+'</div><p>'+escape(r.desc)+'</p>'+
+    '<div class="acts"><button data-rcopy="'+r.id+'">⎘ Copy</button><button data-rdl="'+r.id+'">⤓ '+escape(r.file)+'</button></div></div>').join("");
+  host.addEventListener("click",e=>{ const c=e.target.closest("[data-rcopy]"), d=e.target.closest("[data-rdl]");
+    if(c){ const r=SC_RECIPES.find(x=>x.id===c.dataset.rcopy); navigator.clipboard&&navigator.clipboard.writeText(scRecipeCode(r.id,r.langs[0])); c.textContent="✓ copied"; setTimeout(()=>c.textContent="⎘ Copy",1200); }
+    if(d){ const r=SC_RECIPES.find(x=>x.id===d.dataset.rdl); scDownload(r.file, scRecipeCode(r.id,r.langs[0])); }
+  });
+}
+async function scDownloadKit(){
+  const README="APIN Starter Kit\n================\nRun a batch of leaf diagnoses against "+BASE+".\n\n1. Put your leaf images in images/ (or use samples/sample-leaf.png).\n2. Set your API key (apin_…) in the script.\n3. Run the language you like:\n   bash    apin_job.sh\n   python  apin_job.py\n   node    apin_job.mjs\nThe API field is files[] (up to "+SC_MAX+" per call). See "+BASE+"/docs#scale-batch.\n";
+  const files=[
+    {name:"README.txt", data:README},
+    {name:"apin_job.sh",  data:scGen("curl",[{ep:"predict/batch",n:1}],{key:"",reuse:false})},
+    {name:"apin_job.py",  data:scGen("python",[{ep:"predict/batch",n:1}],{key:"",reuse:false})},
+    {name:"apin_job.mjs", data:scGen("node",[{ep:"predict/batch",n:1}],{key:"",reuse:false})},
+    {name:"apin_job.js",  data:scGen("js",[{ep:"predict/batch",n:1}],{key:"",reuse:false})}
+  ];
+  const sample=await new Promise(r=>scSample(b=>r(b)));
+  files.push({name:"samples/sample-leaf.png", data:new Uint8Array(await sample.arrayBuffer())});
+  const blob=scMakeZip(files);
+  const u=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=u; a.download="apin-starter-kit.zip"; a.click(); setTimeout(()=>URL.revokeObjectURL(u),3000);
+}
+
+/* minimal store-only ZIP writer (valid .zip, no compression) */
+const SC_CRC=(()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
+function scCrc32(u8){ let c=0xFFFFFFFF; for(let i=0;i<u8.length;i++) c=SC_CRC[(c^u8[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+function scMakeZip(entries){
+  const enc=new TextEncoder(); const parts=[]; const central=[]; let offset=0;
+  const u16=v=>[v&255,(v>>8)&255]; const u32=v=>[v&255,(v>>8)&255,(v>>16)&255,(v>>>24)&255];
+  for(const e of entries){
+    const nameU8=enc.encode(e.name); const data=typeof e.data==="string"?enc.encode(e.data):e.data; const crc=scCrc32(data);
+    const local=[].concat(u32(0x04034b50),u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(data.length),u32(data.length),u16(nameU8.length),u16(0));
+    parts.push(new Uint8Array(local), nameU8, data);
+    const cen=[].concat(u32(0x02014b50),u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(data.length),u32(data.length),u16(nameU8.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset));
+    central.push(new Uint8Array(cen), nameU8);
+    offset += local.length + nameU8.length + data.length;
+  }
+  const cStart=offset; let cSize=0; central.forEach(p=>cSize+=p.length);
+  const end=new Uint8Array([].concat(u32(0x06054b50),u16(0),u16(0),u16(entries.length),u16(entries.length),u32(cSize),u32(cStart),u16(0)));
+  return new Blob([...parts,...central,end],{type:"application/zip"});
+}
+/* read a .zip (store + deflate via DecompressionStream) → [{name,blob}] */
+async function scReadZip(file){
+  const buf=new Uint8Array(await file.arrayBuffer()); const dv=new DataView(buf.buffer); const out=[]; let i=0;
+  while(i+4<=buf.length && dv.getUint32(i,true)===0x04034b50){
+    const method=dv.getUint16(i+8,true), comp=dv.getUint32(i+18,true), uncomp=dv.getUint32(i+22,true), nlen=dv.getUint16(i+26,true), elen=dv.getUint16(i+28,true);
+    const name=new TextDecoder().decode(buf.slice(i+30,i+30+nlen)); const dStart=i+30+nlen+elen; const cData=buf.slice(dStart,dStart+comp);
+    let data=cData;
+    if(method===8 && typeof DecompressionStream!=="undefined"){ try{ const ds=new Response(new Blob([cData]).stream().pipeThrough(new DecompressionStream("deflate-raw"))); data=new Uint8Array(await ds.arrayBuffer()); }catch(_){ data=cData; } }
+    if(/\.(png|jpe?g|webp)$/i.test(name) && !name.startsWith("__MACOSX")) out.push({name:name.split("/").pop(), blob:new Blob([data])});
+    i = dStart + comp;
+  }
+  return out;
 }
 
 function renderAppendix(){
@@ -3274,7 +4214,7 @@ function updateCodeBlock(ep, scopeRoot, snap){
   const active = cb.querySelector('.lang-tabs button.active');
   const lang = active ? active.dataset.lang : "curl";
   const out = cb.querySelector('[data-code-out]');
-  if(out) out.textContent = generateSample(ep, lang, snap);
+  if(out) out.innerHTML = hlCode(generateSample(ep, lang, snap));
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -3285,6 +4225,11 @@ const SEARCH_INDEX = [
     id:e.id, method:e.method, path:e.path,
     title:`${e.method} ${e.path}`, summary:e.summary, group:e.group, kind:"endpoint"
   })),
+  ...SCALE.map(s => ({ id:s.id, title:s.title, summary:s.summary, group:"BATCH & BULK", kind:"guide" })),
+  { id:"scale-batch", title:"ZIP archive vs multiple files", summary:"How to send a batch: one zip or many files, and the per-call image count.", group:"BATCH & BULK", kind:"guide" },
+  { id:"scale-bulk", title:"Concurrency, retries and backoff", summary:"Run thousands of images: chunk into batches, bounded parallelism, retry on 429/5xx.", group:"BATCH & BULK", kind:"guide" },
+  { id:"scale-workbench", title:"Live terminal & request inspector", summary:"Run composed jobs in the browser and inspect every request.", group:"BATCH & BULK", kind:"guide" },
+  { id:"scale-recipes", title:"Starter kit download", summary:"Process-a-folder, nightly sweep, retry-failures — runnable files + a zip.", group:"BATCH & BULK", kind:"guide" },
   ...GUIDES.map(g => ({ id:g.id, title:g.title, summary:g.summary, group:"GUIDES", kind:"guide" })),
   ...APPENDIX.map(a => ({ id:a.id, title:a.title, summary:"", group:"APPENDIX", kind:"appendix" }))
 ];
@@ -3433,7 +4378,7 @@ function wireLangTabs(){
       const out = cb.querySelector('[data-code-out]');
       const playground = cb.closest("article.entry").querySelector('[data-playground]');
       const snap = playground ? readForm(ep, playground) : {};
-      out.textContent = generateSample(ep, btn.dataset.lang, snap);
+      out.innerHTML = hlCode(generateSample(ep, btn.dataset.lang, snap));
     });
   });
 }
@@ -3779,6 +4724,7 @@ function start(){
       i++;
     }
   }
+  html += renderScale();
   html += renderGuides();
   html += renderAppendix();
   content.innerHTML = html;
@@ -3792,6 +4738,7 @@ function start(){
 
   // Wire all dynamic behavior
   wireSchemaTrees();
+  highlightAllCode();     // syntax-tint every static code block (guides + endpoint samples)
   wireCopyButtons();
   wireLangTabs();
   wireFileDrops();
@@ -3799,6 +4746,7 @@ function start(){
   wirePermalinks();
   setupEntryObserver();   // dynamic "On this page" scoped to current entry
   renderRecentCalls();
+  wireScale();            // [BATCH & BULK] composer · file bar · live code · terminal · drawer
 
   // Wikipedia-style tooltips: post-render pass over every entry +
   // guide that wraps known jargon in <span class="term"> with a
