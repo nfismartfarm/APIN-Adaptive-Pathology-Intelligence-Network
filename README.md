@@ -7,7 +7,7 @@
 > from a single smartphone photo, and keeps every diagnosis in a personal
 > field notebook.
 
-**Live demo:** https://dxv-404-apin.hf.space
+**Live demo:** https://nano-farm-apin.hf.space
 
 ```
               .                       APIN
@@ -309,6 +309,6 @@ Deploy      Docker on a free Hugging Face Space
 
 ## Status
 
-APIN is deployed and live at https://dxv-404-apin.hf.space. The okra and
+APIN is deployed and live at https://nano-farm-apin.hf.space. The okra and
 brassica ensemble and the tomato specialist are both validated. The locked
 test sets stay locked: no model changes are made after final evaluation.
